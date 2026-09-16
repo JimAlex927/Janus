@@ -253,7 +253,8 @@ The route buffer middleware bypasses both modes.
    Test `ResponseController`; do not advertise unsupported optional interfaces.
    The observer preserves `Unwrap`, supported Flusher/Hijacker/Pusher
    capabilities, informational/final status handling, controller flushing,
-   trailers, partial writes and response-copy abort accounting. The current
+   trailers, partial writes, response-copy abort accounting and authoritative
+   gateway response IDs. The current
    wrapper intentionally does not expose `ReaderFrom`; normal `Write` paths
    remain counted.
 3. Extend typed named middleware definitions and ordered route/service references.

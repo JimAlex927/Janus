@@ -130,6 +130,7 @@ func newRequestID() string {
 type observingResponseWriter struct {
 	http.ResponseWriter
 	observation *telemetry.Observation
+	requestID   string
 	webSocket   bool
 	mu          atomic.Bool
 }
@@ -143,6 +144,12 @@ func (w *observingResponseWriter) WriteHeader(status int) {
 	}
 	if !w.mu.CompareAndSwap(false, true) {
 		return
+	}
+	if w.requestID != "" {
+		// The gateway-generated ID must be the same value in the access log and
+		// in the final client response. Restore it immediately before commit so
+		// a backend or nested middleware cannot replace it.
+		w.ResponseWriter.Header().Set("X-Request-ID", w.requestID)
 	}
 	w.observation.RecordResponse(status, 0)
 	w.ResponseWriter.WriteHeader(status)
@@ -191,7 +198,11 @@ func (w *observingResponseWriter) push(target string, opts *http.PushOptions) er
 }
 
 func wrapResponseWriter(w http.ResponseWriter, observation *telemetry.Observation, webSocket bool) http.ResponseWriter {
-	base := &observingResponseWriter{ResponseWriter: w, observation: observation, webSocket: webSocket}
+	requestID := ""
+	if observation != nil {
+		requestID = observation.Outcome().RequestID
+	}
+	base := &observingResponseWriter{ResponseWriter: w, observation: observation, requestID: requestID, webSocket: webSocket}
 	_, flush := w.(http.Flusher)
 	_, hijack := w.(http.Hijacker)
 	_, push := w.(http.Pusher)

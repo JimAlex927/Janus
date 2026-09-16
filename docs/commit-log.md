@@ -5,6 +5,27 @@ repository commit. Add a new dated section before every future commit.
 
 ## 2026-09-16
 
+### Preserve gateway request IDs at response commit
+
+Commit message: `fix(observability): preserve authoritative response IDs`
+
+Scope:
+
+- Restored the observer-generated `X-Request-ID` immediately before final
+  response commitment, preventing backend or nested middleware values from
+  diverging from the access log identity.
+- Added direct and buffered response regression tests.
+- Updated the observability contract and Phase 2F response-capability notes.
+
+Verification:
+
+- `gofmt -w internal/middleware/observer.go internal/middleware/observer_test.go`
+- `go test ./internal/middleware`
+- `git diff --check`
+
+Scope note: this protects the request correlation header only; it is not a
+general response-header transformation or authentication policy.
+
 ### Retry transient routing publication failures
 
 Commit message: `fix(reload): retry transient candidate failures`

@@ -76,6 +76,31 @@ func TestObserveClassifiesEarlyRouteNotFound(t *testing.T) {
 	}
 }
 
+func TestObserveKeepsResponseRequestIDAuthoritative(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		wrap func(http.Handler) http.Handler
+	}{
+		{name: "direct", wrap: func(next http.Handler) http.Handler { return next }},
+		{name: "buffered", wrap: Buffer(64)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := Observe(zap.NewNop())(tc.wrap(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("X-Request-ID", "backend-supplied")
+				_, _ = io.WriteString(w, "ok")
+			})))
+			w := httptest.NewRecorder()
+			h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "http://gateway/", nil))
+			if w.Header().Get("X-Request-ID") == "" || w.Header().Get("X-Request-ID") == "backend-supplied" {
+				t.Fatalf("response request ID = %q", w.Header().Get("X-Request-ID"))
+			}
+			if w.Body.String() != "ok" {
+				t.Fatalf("response body = %q", w.Body.String())
+			}
+		})
+	}
+}
+
 func TestObserveLogsResponseCopyAbort(t *testing.T) {
 	core, logs := observer.New(zap.InfoLevel)
 	h := Observe(zap.New(core))(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
