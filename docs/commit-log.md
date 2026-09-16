@@ -3,7 +3,29 @@
 This document records the purpose, scope, and verification for each Janus
 repository commit. Add a new dated section before every future commit.
 
-## 2026-09-17
+## 2026-09-16
+
+### Reject duplicate JSON configuration keys
+
+Commit message: `fix(config): reject duplicate JSON keys`
+
+Scope:
+
+- Added a bounded JSON token scan before typed decoding so duplicate object
+  members are rejected instead of silently using the last value.
+- Applied the 1 MiB configuration bound to the public `Load` path as well as
+  file loading, keeping direct and watched configuration parsing consistent.
+- Added top-level and nested duplicate-key regression cases and updated the
+  configuration security documentation.
+
+Verification:
+
+- `gofmt` on touched Go files
+- `go test -count=5 ./internal/config`
+
+Scope note: this closes one configuration ambiguity; duplicate-key rejection
+does not replace the remaining security review, dependency audit or production
+qualification gates.
 
 ### Verify HTTP/3 generation reload
 

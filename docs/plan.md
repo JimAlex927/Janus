@@ -27,7 +27,7 @@ qualification rather than speculative unused settings.
 
 ## Current baseline and the original item1
 
-As of 2026-09-17, the baseline has host/path routing, round-robin services,
+As of 2026-09-16, the baseline has host/path routing, round-robin services,
 streaming reverse proxying, HTTPS certificate verification, typed server and
 transport settings, a startup-built middleware chain, request-context
 cancellation, the `internal/limen` HTTP/1 lifecycle, and native TLS/HTTP/2/HTTP/3

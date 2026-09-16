@@ -14,6 +14,8 @@ func TestLoad(t *testing.T) {
 	}{
 		{"valid", valid, true},
 		{"unknown field", strings.Replace(valid, `"listen"`, `"lissten"`, 1), false},
+		{"duplicate top-level key", `{"listen":"127.0.0.1:8080","services":{"s":{"upstreams":["http://localhost:9000"]}},"services":{"s":{"upstreams":["http://localhost:9001"]}},"routes":[{"name":"r","path_prefix":"/api","service":"s"}]}`, false},
+		{"duplicate nested key", `{"listen":"127.0.0.1:8080","services":{"s":{"upstreams":["http://localhost:9000"],"upstreams":["http://localhost:9001"]}},"routes":[{"name":"r","path_prefix":"/api","service":"s"}]}`, false},
 		{"extra document", valid + ` {}`, false},
 		{"missing service", strings.Replace(valid, `"service":"s"`, `"service":"missing"`, 1), false},
 		{"empty pool", strings.Replace(valid, `["http://localhost:9000"]`, `[]`, 1), false},
@@ -29,6 +31,12 @@ func TestLoad(t *testing.T) {
 				t.Fatalf("valid=%v, error=%v", tc.ok, err)
 			}
 		})
+	}
+}
+
+func TestLoadRejectsOversizeInput(t *testing.T) {
+	if _, err := Load(strings.NewReader(strings.Repeat("x", MaxConfigBytes+1))); err == nil {
+		t.Fatal("expected oversized configuration rejection")
 	}
 }
 

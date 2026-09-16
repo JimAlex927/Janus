@@ -158,8 +158,18 @@ type Route struct {
 }
 
 func Load(r io.Reader) (Config, error) {
+	data, err := io.ReadAll(io.LimitReader(r, MaxConfigBytes+1))
+	if err != nil {
+		return Config{}, fmt.Errorf("read config: %w", err)
+	}
+	if len(data) > MaxConfigBytes {
+		return Config{}, fmt.Errorf("config exceeds %d bytes", MaxConfigBytes)
+	}
+	if err := rejectDuplicateJSONKeys(data); err != nil {
+		return Config{}, fmt.Errorf("decode config: %w", err)
+	}
 	var c Config
-	d := json.NewDecoder(r)
+	d := json.NewDecoder(bytes.NewReader(data))
 	d.DisallowUnknownFields()
 	if err := d.Decode(&c); err != nil {
 		return c, fmt.Errorf("decode config: %w", err)
@@ -169,6 +179,74 @@ func Load(r io.Reader) (Config, error) {
 	}
 	c = c.WithDefaults()
 	return c, c.Validate()
+}
+
+// rejectDuplicateJSONKeys makes configuration interpretation deterministic.
+// encoding/json otherwise accepts duplicate object members and keeps the last
+// value, which can make a reviewed configuration differ from the effective
+// configuration. This scanner only checks object keys; normal decoding below
+// remains responsible for types, unknown fields and validation.
+func rejectDuplicateJSONKeys(data []byte) error {
+	d := json.NewDecoder(bytes.NewReader(data))
+	if err := scanJSONValue(d, "$"); err != nil {
+		return err
+	}
+	return nil
+}
+
+func scanJSONValue(d *json.Decoder, path string) error {
+	token, err := d.Token()
+	if err != nil {
+		return err
+	}
+	delim, ok := token.(json.Delim)
+	if !ok {
+		return nil
+	}
+	switch delim {
+	case '{':
+		seen := make(map[string]struct{})
+		for d.More() {
+			keyToken, err := d.Token()
+			if err != nil {
+				return err
+			}
+			key, ok := keyToken.(string)
+			if !ok {
+				return fmt.Errorf("object key at %s is not a string", path)
+			}
+			if _, ok := seen[key]; ok {
+				return fmt.Errorf("duplicate object key %q at %s", key, path)
+			}
+			seen[key] = struct{}{}
+			if err := scanJSONValue(d, path+"."+key); err != nil {
+				return err
+			}
+		}
+		end, err := d.Token()
+		if err != nil {
+			return err
+		}
+		if end != json.Delim('}') {
+			return fmt.Errorf("object at %s did not terminate", path)
+		}
+	case '[':
+		index := 0
+		for d.More() {
+			if err := scanJSONValue(d, fmt.Sprintf("%s[%d]", path, index)); err != nil {
+				return err
+			}
+			index++
+		}
+		end, err := d.Token()
+		if err != nil {
+			return err
+		}
+		if end != json.Delim(']') {
+			return fmt.Errorf("array at %s did not terminate", path)
+		}
+	}
+	return nil
 }
 
 // LoadFile loads a configuration and resolves relative TLS asset paths against

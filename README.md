@@ -129,9 +129,8 @@ still require restart. Legacy configurations remain startup-only.
   deployment qualification remain outstanding. A forced drain closes the H3
   network lifecycle within its context budget; arbitrary handlers still need
   to observe request cancellation to terminate their own work.
-- Unknown JSON fields and duplicate route matches fail validation. Go's JSON
-  decoder still accepts duplicate object keys using its normal semantics; a
-  stricter duplicate-key policy is a production configuration task.
+- Unknown JSON fields, duplicate JSON object keys and duplicate route matches
+  fail validation. Configuration input is bounded to 1 MiB before parsing.
 - This repository contains no performance claim or completed security audit.
 
 The development sequence and concrete release gates are in the plan. A smaller
