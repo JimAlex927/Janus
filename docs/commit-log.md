@@ -5,6 +5,34 @@ repository commit. Add a new dated section before every future commit.
 
 ## 2026-09-16
 
+### Stop admission before bounded shutdown removal delay
+
+Commit message: `feat(lifecycle): add admission-aware removal delay`
+
+Scope:
+
+- Added `shutdown.load_balancer_removal_delay`, bounded to five minutes and to
+  the total `shutdown.drain_timeout` budget.
+- Stops the Runtime global admission gate before readiness removal propagation,
+  so new requests on existing keep-alive/HTTP2 connections receive 503 while
+  already-acquired requests continue draining.
+- Runs removal delay and Limen/admin shutdown under one shared grace context,
+  preserving a total shutdown bound; added stop/admission and configuration
+  regression coverage.
+- Updated Phase 3 status and lifecycle documentation.
+
+Verification:
+
+- `gofmt` on touched Go files
+- `go test ./...`
+- `go vet ./...`
+- `go build -o bin/janus.exe ./cmd/janus`
+- `go run ./cmd/janus -check` for the runnable configuration examples
+- `git diff --check`
+
+Scope note: active backend health probes, metrics and overall production
+qualification remain future work.
+
 ### Make graceful-drain budget configurable
 
 Commit message: `feat(lifecycle): configure graceful drain budget`

@@ -294,6 +294,52 @@ func TestRuntimeGlobalAdmissionIsSharedByAllGenerations(t *testing.T) {
 	}
 }
 
+func TestRuntimeStopAcceptingAllowsActiveRequestToDrain(t *testing.T) {
+	c := validRuntimeConfig("initial")
+	started, release := make(chan struct{}, 1), make(chan struct{})
+	builder := func(_ config.Config, _ http.RoundTripper, _ *zap.Logger, _ map[string]*middleware.Limiter) (Generation, error) {
+		return &testGeneration{
+			handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				started <- struct{}{}
+				<-release
+				w.WriteHeader(http.StatusCreated)
+			}),
+			closed: make(chan struct{}),
+		}, nil
+	}
+	r, err := NewWithBuilder(c, zap.NewNop(), builder)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	first := httptest.NewRecorder()
+	firstDone := make(chan struct{})
+	go func() {
+		r.ServeHTTP(first, httptest.NewRequest(http.MethodGet, "http://gateway/", nil))
+		close(firstDone)
+	}()
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("active request did not start")
+	}
+	r.StopAccepting()
+	second := httptest.NewRecorder()
+	r.ServeHTTP(second, httptest.NewRequest(http.MethodGet, "http://gateway/", nil))
+	if second.Code != http.StatusServiceUnavailable {
+		t.Fatalf("post-stop status = %d, want 503", second.Code)
+	}
+	close(release)
+	select {
+	case <-firstDone:
+	case <-time.After(time.Second):
+		t.Fatal("active request did not drain")
+	}
+	if first.Code != http.StatusCreated {
+		t.Fatalf("active response = %d, want 201", first.Code)
+	}
+}
+
 func TestRuntimeServiceAdmissionSurvivesGenerationReplacement(t *testing.T) {
 	c := validRuntimeConfig("first")
 	c.Middlewares = map[string]config.Middleware{

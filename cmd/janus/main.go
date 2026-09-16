@@ -169,9 +169,24 @@ func run(ctx context.Context, path string, check bool, reloadInterval time.Durat
 		if adminState != nil {
 			adminState.SetReady(false)
 		}
+		requestRuntime.StopAccepting()
 		// Do not derive this from the already-cancelled signal context.
 		drain, cancel := context.WithTimeout(context.Background(), c.Settings.Shutdown.DrainTimeout.Duration())
 		defer cancel()
+		if delay := c.Settings.Shutdown.LoadBalancerRemovalDelay.Duration(); delay > 0 {
+			logger.Info("waiting for load balancer removal", zap.Duration("delay", delay))
+			timer := time.NewTimer(delay)
+			select {
+			case <-timer.C:
+			case <-drain.Done():
+				if !timer.Stop() {
+					select {
+					case <-timer.C:
+					default:
+					}
+				}
+			}
+		}
 		drainErrors := make(chan error, len(servers))
 		for _, server := range servers {
 			go func(server *limen.Limen) { drainErrors <- server.Shutdown(drain) }(server)

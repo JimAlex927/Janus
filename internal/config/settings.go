@@ -23,6 +23,7 @@ const (
 
 	DefaultResponseWriteHeadroom = 5 * time.Second
 	MaxServerWriteTimeout        = MaxSettingDuration + DefaultResponseWriteHeadroom
+	MaxLoadBalancerRemovalDelay  = 5 * time.Minute
 )
 
 // Duration is a time.Duration encoded as a human-readable JSON string such as
@@ -61,7 +62,8 @@ type AdminSettings struct {
 }
 
 type ShutdownSettings struct {
-	DrainTimeout Duration `json:"drain_timeout"`
+	DrainTimeout             Duration `json:"drain_timeout"`
+	LoadBalancerRemovalDelay Duration `json:"load_balancer_removal_delay"`
 }
 
 type RequestSettings struct {
@@ -228,6 +230,12 @@ func (s Settings) Validate() error {
 	}
 	if s.Shutdown.DrainTimeout < s.Server.WriteTimeout {
 		return fmt.Errorf("shutdown.drain_timeout must not be shorter than server.write_timeout")
+	}
+	if delay := s.Shutdown.LoadBalancerRemovalDelay.Duration(); delay < 0 || delay > MaxLoadBalancerRemovalDelay {
+		return fmt.Errorf("shutdown.load_balancer_removal_delay must be between 0s and %s", MaxLoadBalancerRemovalDelay)
+	}
+	if s.Shutdown.LoadBalancerRemovalDelay.Duration() > s.Shutdown.DrainTimeout.Duration() {
+		return fmt.Errorf("shutdown.load_balancer_removal_delay must not exceed shutdown.drain_timeout")
 	}
 
 	for name, value := range map[string]Duration{

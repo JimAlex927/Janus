@@ -97,7 +97,9 @@ still require restart. Legacy configurations remain startup-only.
   request IDs and bounded request outcome records. Server and backend deadlines are validated
   settings; `shutdown.drain_timeout` defaults to and cannot be shorter than
   `server.write_timeout`, which is independent from the overall request
-  deadline, which actively cancels backend work. Routes stream responses by
+  deadline, which actively cancels backend work. An optional bounded
+  `shutdown.load_balancer_removal_delay` runs after readiness is cleared and
+  consumes the same total shutdown budget. Routes stream responses by
   default; an optional route-level `buffer` middleware can hold finite responses
   up to its configured maximum before committing them.
 - The immediate peer determines `X-Forwarded-For` and `X-Forwarded-Proto`.

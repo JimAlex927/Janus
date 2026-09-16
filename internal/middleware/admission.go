@@ -11,12 +11,13 @@ import (
 // permits are active; existing work is allowed to finish and new work is
 // rejected until usage falls below the new limit.
 type Limiter struct {
-	mu     sync.Mutex
-	limit  int
-	active int
+	mu        sync.Mutex
+	limit     int
+	active    int
+	accepting bool
 }
 
-func NewLimiter(limit int) *Limiter { return &Limiter{limit: limit} }
+func NewLimiter(limit int) *Limiter { return &Limiter{limit: limit, accepting: true} }
 
 func (l *Limiter) SetLimit(limit int) {
 	if l == nil {
@@ -27,13 +28,23 @@ func (l *Limiter) SetLimit(limit int) {
 	l.mu.Unlock()
 }
 
+// Stop prevents new acquisitions while existing requests retain their permits.
+func (l *Limiter) Stop() {
+	if l == nil {
+		return
+	}
+	l.mu.Lock()
+	l.accepting = false
+	l.mu.Unlock()
+}
+
 func (l *Limiter) Acquire() bool {
 	if l == nil {
 		return true
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if l.limit < 1 || l.active >= l.limit {
+	if !l.accepting || l.limit < 1 || l.active >= l.limit {
 		return false
 	}
 	l.active++

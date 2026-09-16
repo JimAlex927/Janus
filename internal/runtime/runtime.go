@@ -135,6 +135,15 @@ func (r *Runtime) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	r.handler.ServeHTTP(w, req)
 }
 
+// StopAccepting rejects new data requests while allowing already-acquired
+// generation requests to drain. It is idempotent and is called before the
+// optional load-balancer removal delay during process shutdown.
+func (r *Runtime) StopAccepting() {
+	if r != nil && r.global != nil {
+		r.global.Stop()
+	}
+}
+
 // Replace validates and publishes a new in-memory route/service generation.
 // Listener, server, request, backend-transport, and global timeout settings
 // are startup-owned in 2B and cannot change through this method.
@@ -208,6 +217,7 @@ func (r *Runtime) Close() {
 		return
 	}
 	r.closed = true
+	r.global.Stop()
 	old := r.active
 	r.active = nil
 	shouldCloseOld := r.retireLocked(old)

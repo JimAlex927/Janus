@@ -232,6 +232,9 @@ func TestSettingsRejectInvalidBounds(t *testing.T) {
 		{"drain shorter than write", func(s *Settings) {
 			s.Shutdown.DrainTimeout = Duration(s.Server.WriteTimeout.Duration() - time.Millisecond)
 		}},
+		{"removal delay exceeds drain", func(s *Settings) {
+			s.Shutdown.LoadBalancerRemovalDelay = Duration(s.Shutdown.DrainTimeout.Duration() + time.Second)
+		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			settings := DefaultSettings()
@@ -255,5 +258,16 @@ func TestAdminAddressMustBeLoopback(t *testing.T) {
 				t.Fatal("expected invalid admin address")
 			}
 		})
+	}
+}
+
+func TestShutdownRemovalDelayUsesBoundedGraceBudget(t *testing.T) {
+	body := `{"listen":"127.0.0.1:8080","settings":{"request":{"maximum_duration":"1s"},"server":{"write_timeout":"2s"},"shutdown":{"drain_timeout":"5s","load_balancer_removal_delay":"1s"}},"services":{"s":{"upstreams":["http://localhost:9000"]}},"routes":[{"name":"r","path_prefix":"/api","service":"s"}]}`
+	c, err := Load(strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := c.Settings.Shutdown.LoadBalancerRemovalDelay.Duration(); got != time.Second {
+		t.Fatalf("removal delay = %s, want 1s", got)
 	}
 }

@@ -114,7 +114,7 @@ response through a generic panic-recovery wrapper.
 | `middlewares` definitions | Named, typed, reusable configuration; `buffer` is implemented first | Phase 1/2 |
 | `routes[].middlewares` | Ordered policies for the matched route; route-level `buffer` is implemented first | Phase 1/2 |
 | `services.<name>.middlewares` | Ordered policies on the shared service handler | Phase 2 |
-| Global admission, drain and admin settings | Process/listener lifecycle | Admission, admin health and bounded drain implemented; LB removal delay follow-up |
+| Global admission, drain and admin settings | Process/listener lifecycle | Admission, admin health, bounded removal delay and total drain budget implemented |
 | Health probes | Per-service resource lifecycle | Phase 4 |
 | Trusted proxy CIDRs and identity rules | Listener trust policy with proxy rewrite integration | Phase 4 |
 | Routing file and generation publication | Runtime; strict build-before-swap transaction | 2B/2D |

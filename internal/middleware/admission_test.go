@@ -93,3 +93,21 @@ func TestAdmissionLoweredLimitWaitsForExistingPermits(t *testing.T) {
 	}
 	limiter.Release()
 }
+
+func TestAdmissionStopPreservesExistingPermitButRejectsNewWork(t *testing.T) {
+	limiter := NewLimiter(1)
+	if !limiter.Acquire() {
+		t.Fatal("failed to acquire permit")
+	}
+	limiter.Stop()
+	if limiter.Acquire() {
+		t.Fatal("stopped limiter admitted new work")
+	}
+	if got := limiter.Active(); got != 1 {
+		t.Fatalf("active permits after stop = %d, want 1", got)
+	}
+	limiter.Release()
+	if limiter.Acquire() {
+		t.Fatal("stopped limiter admitted work after existing request drained")
+	}
+}

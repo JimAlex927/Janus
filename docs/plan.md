@@ -77,12 +77,12 @@ not just configuration types. Size effort after each phase's exit review.
 | 2D: dynamic files and certificates | Serialized validated routing reload; independent certificate rotation | Complete: invalid updates preserve last-good state; runtime and certificate resources remain bounded |
 | 2E: long-lived HTTP protocols | Explicit SSE and classic HTTP/1 WebSocket route modes | Complete: event flush, upgrade/frame forwarding, timeout bypass, and bounded upgraded-connection drain pass |
 | 2F: usable request policies | Named body-limit policies, request IDs, access observation | Policies compose in order; early rejection, upload limits, trailers, and incomplete responses covered on H1/H2 |
-| 3: bounded operation | Global/service admission, admin readiness, configurable drain | Overload rejects promptly; shared service limits hold across routes; shutdown meets its budget |
+| 3: bounded operation | Global/service admission, admin readiness, configurable drain | Complete: overload, shared service limits, readiness-first stop-admission, bounded removal delay and total shutdown budget |
 | 4: backend and trust policy | Active health checks, trusted forwarding identity, metrics | Backend failure/recovery and spoofing tests pass; telemetry explains each failure |
 | 5: HTTP/3 and deployment lifecycle | QUIC adapter reusing runtime; deployment artifacts | H3 forwarding, reload, cancellation, TLS rotation, UDP failure/fallback and coordinated drain tests pass |
 | 6: production qualification | Linux CI, security review, realistic load/soak tests, canary | All release gates pass for a named build and environment |
 
-Completed order is 1Q -> 2A -> 2B -> 2C -> 2D -> 2E. Next delivery order is 2F -> 3 -> 4 -> 5 -> 6.
+Completed order is 1Q -> 2A -> 2B -> 2C -> 2D -> 2E -> 2F -> 3. Next delivery order is 4 -> 5 -> 6.
 Phase 2C delivers the first native H1/H2 milestone; Phase 2D adds dynamic-file
 updates and certificate rotation.
 Phase 5 adds H3. All production claims still require Phase 6 qualification for
@@ -102,7 +102,7 @@ Phase 0 profile; Phase 2C now adds native TLS/H2 startup support.
 | Identity and authorization | The backend owns business authorization. Until a trusted-proxy policy exists, Janus trusts only the immediate peer and rewrites forwarding headers from that hop. |
 | Routing | Exact case-insensitive host rules without ports take precedence over hostless rules; the longest segment-bounded path prefix wins. No prefix stripping or path normalization is performed. |
 | Time budgets | The starter profile uses 5s header read, 30s request read, 30s overall context, 35s server write, and 10s backend response-header budgets. `server.write_timeout` stays greater than the overall budget. |
-| Size and overload | Header/body size bounds and fixed/service admission are implemented. Health-based removal and configurable drain remain later-phase policies. |
+| Size and overload | Header/body size bounds and fixed/service admission are implemented. Health-based removal remains a later-phase policy; drain is configurable and bounded. |
 | Composition and ownership | A fixed global chain wraps the router; matched routes use ordered route middleware; each service owns one shared proxy/pool; the transport is shared by services with the same policy. |
 | Failure semantics | Unmatched requests are 404, unsupported CONNECT/Upgrade requests are 501, upstream failures are 502, and pre-commitment overall timeouts are 504 when the socket is writable. Committed responses are never rewritten. |
 
@@ -275,7 +275,7 @@ capability tests, early-error integration coverage, configuration examples and
 the full repository test/vet/build gates. This does not certify the overall
 gateway for production; Phase 6 qualification remains required.
 
-## Phase 3: admission and lifecycle (in progress)
+## Phase 3: admission and lifecycle — complete
 
 1. Fixed global admission and a service-scoped `in_flight` policy are implemented.
    Both reject saturation immediately with 503 and have no waiting queue. The API
@@ -295,9 +295,10 @@ gateway for production; Phase 6 qualification remains required.
    whole gateway unready until Phase 4 health integration exists.
 4. Configurable drain budget is implemented through
    `settings.shutdown.drain_timeout`; omitted values follow `server.write_timeout`
-   and shorter values are rejected. Shutdown marks readiness false first, then
-   allows accepted work to finish within the bounded budget before Limen force-
-   closes remaining connections. Load-balancer removal delay remains a follow-up.
+   and shorter values are rejected. Shutdown marks readiness false and stops
+   business admission first, optionally waits the bounded
+   `shutdown.load_balancer_removal_delay`, then allows accepted work to finish
+   within the same total budget before Limen force-closes remaining connections.
 
 ## Phase 4 tasks
 

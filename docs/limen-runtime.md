@@ -9,7 +9,10 @@ typed `body_limit` middleware is available at route/service scope, and fixed
 global/service admission is available. HTTP/3 and the remaining long-lived
 protocol contracts remain future work. The fixed global request observer and
 admission are outside replaceable generations, so reloads do not change request
-ID generation or global permit ownership.
+ID generation or global permit ownership. Shutdown clears readiness and stops
+business admission before the optional load-balancer removal delay. That delay
+and the subsequent Limen drain share one bounded context, so the configured
+grace period is a total budget.
 The delivery sequence and exit gates are in [plan.md](plan.md).
 
 ## Scope
@@ -166,8 +169,10 @@ drain and force-close path. A context deadline alone cannot kill arbitrary Go co
 Runtime owns counters keyed by stable service identity. Old and new generations,
 and remove/re-add of the same service while an old generation is alive, share
 active permit accounting. A lower limit rejects new acquisitions until usage
-falls. Counter lifetime is not definition lifetime. Health workers added later
-must have explicit generation ownership or reference-counted sharing.
+falls. Counter lifetime is not definition lifetime. Shutdown clears readiness and
+stops business admission before the optional removal delay; the delay and Limen
+drain share one total bounded context. Health workers added later must have
+explicit generation ownership or reference-counted sharing.
 
 ## HTTP/2 delivery — complete
 
