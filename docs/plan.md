@@ -70,7 +70,7 @@ not just configuration types. Size effort after each phase's exit review.
 | 1: middleware foundation | Implemented chain, startup assembly and timeout migration | Qualification reopened as 1Q; implementation checkpoint is retained |
 | 1Q: deadline qualification | Correct slow-upload/reader and parent-deadline evidence | Complete: isolated deadlines, cancellation and response outcomes verified |
 | 2A: Protocol Limen | Extract existing HTTP/1 listener and lifecycle | Complete: legacy config/forwarding retained; Limen owns bind, serve and drain |
-| 2B: runtime generations | Stable dispatcher and explicit resource ownership | Old requests complete on old handlers; new requests use new handlers; retirement is race-safe |
+| 2B: runtime generations | Stable dispatcher and explicit resource ownership | Complete: old requests retain old handlers; new requests use new handlers; retirement is bounded and race-safe |
 | 2C: HTTPS and HTTP/2 | TLS Limens, protocol configuration, response capability audit | Actual H2 negotiation, sibling-stream isolation, H1 fallback and drain tests pass |
 | 2D: dynamic files and certificates | Serialized validated routing reload; independent certificate rotation | Invalid updates preserve last-good state; keepalive/H2 traffic survives updates; resource use remains bounded |
 | 2E: usable request policies | Named body-limit policies, request IDs, access observation | Policies compose in order; early rejection, upload limits, trailers, and incomplete responses covered on H1/H2 |
@@ -79,7 +79,7 @@ not just configuration types. Size effort after each phase's exit review.
 | 5: HTTP/3 and deployment lifecycle | QUIC adapter reusing runtime; deployment artifacts | H3 forwarding, reload, cancellation, TLS rotation, UDP failure/fallback and coordinated drain tests pass |
 | 6: production qualification | Linux CI, security review, realistic load/soak tests, canary | All release gates pass for a named build and environment |
 
-Completed order is 1Q -> 2A. Next delivery order is 2B -> 2C -> 2D -> 2E -> 3 -> 4 -> 5 -> 6.
+Completed order is 1Q -> 2A -> 2B. Next delivery order is 2C -> 2D -> 2E -> 3 -> 4 -> 5 -> 6.
 Phase 2D delivers the first native H1/H2 plus dynamic-file development milestone.
 Phase 5 adds H3. All production claims still require Phase 6 qualification for
 the enabled protocol set; neither development milestone is production certification.
@@ -166,16 +166,21 @@ and fixed 35-second process drain budget are unchanged. Native TLS/HTTP/2,
 runtime generations, and reload remain in later phases; no placeholder protocol
 adapters were added.
 
-## Phase 2B: stable runtime and generations
+## Phase 2B: stable runtime and generations — complete
 
-Introduce `internal/runtime` as the stable HTTP dispatcher. Put the fixed global
-chain outside the replaceable gateway handler graph. Inject one process-owned
-transport into builders; retire only generation-owned resources. Serialize
-publication and request acquisition so a retired generation cannot be freed
-between selection and reference acquisition. Test in-memory replacement,
-rollback, panic-path release, and concurrent retirement before watching files.
-Bound retired generations and pending builds; blocked handlers must not cause
-unlimited accumulation. Run race tests in a supported environment.
+`internal/runtime` now provides the stable HTTP dispatcher and in-memory
+generation replacement. The fixed protocol guard and overall-timeout chain is
+constructed once outside the replaceable Gateway route graph. Runtime owns one
+process-level outbound transport and injects it into each generation; a
+generation never closes that shared transport.
+
+Request acquisition and retirement use one lock, so a generation cannot be
+closed between selecting it and incrementing its reference count. Old
+generations close only after their active requests release them. Replacement
+build failures close any candidate generation and retain the previous one;
+panic paths release references; and eight concurrently retired generations are
+bounded. Listener/server settings remain startup-owned, and file watching is
+still deferred to Phase 2D.
 
 ## Phase 2C: HTTPS and HTTP/2
 

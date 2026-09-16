@@ -7,7 +7,8 @@ in [docs/plan.md](docs/plan.md). Start with [docs/architecture.md](docs/architec
 for the design and [docs/protocols.md](docs/protocols.md) for the mechanisms to learn.
 The Protocol Limen layer currently owns the HTTP/1 listener lifecycle. Native
 HTTP/2/HTTP/3 support and file-based configuration reload are described as later
-work in [docs/limen-runtime.md](docs/limen-runtime.md).
+work; the stable runtime generation core is now in place. See
+[docs/limen-runtime.md](docs/limen-runtime.md).
 
 The first release targets ordinary HTTP APIs behind an existing TLS load balancer.
 Janus accepts plaintext HTTP/1.x and forwards to configured HTTP or HTTPS origins.

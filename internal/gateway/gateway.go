@@ -15,11 +15,21 @@ import (
 )
 
 type Gateway struct {
-	handler   http.Handler
-	transport *http.Transport
+	handler        http.Handler
+	standalone     http.Handler
+	transport      *http.Transport
+	ownedTransport *http.Transport
 }
 
 func New(c config.Config, logger *zap.Logger) (*Gateway, error) {
+	return NewWithTransport(c, logger, nil)
+}
+
+// NewWithTransport builds a route/service handler graph using a caller-owned
+// outbound transport. A nil transport creates an owned transport for the
+// standalone Gateway compatibility path; runtime generations inject the
+// process-owned transport instead.
+func NewWithTransport(c config.Config, logger *zap.Logger, transport http.RoundTripper) (*Gateway, error) {
 	c = c.WithDefaults()
 	if err := c.Validate(); err != nil {
 		return nil, err
@@ -30,7 +40,11 @@ func New(c config.Config, logger *zap.Logger) (*Gateway, error) {
 	//
 	//NOTE: A shared transport is created for all reverse proxy requests
 	//this transport itself is designed to be used in concurrency
-	sharedTransportLayer := proxy.NewTransport(c.Settings.Backend)
+	var ownedTransport *http.Transport
+	if transport == nil {
+		ownedTransport = proxy.NewTransport(c.Settings.Backend)
+		transport = ownedTransport
+	}
 	services := make(map[string]http.Handler, len(c.Services))
 	for name, service := range c.Services {
 		targets := make([]*url.URL, 0, len(service.Upstreams))
@@ -49,7 +63,7 @@ func New(c config.Config, logger *zap.Logger) (*Gateway, error) {
 		if err != nil {
 			return nil, err
 		}
-		services[name] = proxy.New(pool, sharedTransportLayer, logger.With(zap.String("service", name)))
+		services[name] = proxy.New(pool, transport, logger.With(zap.String("service", name)))
 	}
 	routes := make([]router.Route, 0, len(c.Routes))
 	for _, r := range c.Routes {
@@ -67,22 +81,29 @@ func New(c config.Config, logger *zap.Logger) (*Gateway, error) {
 	// Router itself is a loop of match. It contains
 	// Every Route has a handler . So if the request has matched a route, the handler corresponding to the route will handler the request.
 	// And will only use the shared transport
+	routeHandler := router.New(routes)
 	return &Gateway{
-		handler: middleware.Chain(
-			router.New(routes),
+		handler: routeHandler,
+		standalone: middleware.Chain(
+			routeHandler,
+			middleware.RejectUnsupportedProtocols,
 			middleware.Timeout(c.Settings.Request.MaximumDuration.Duration()),
 		),
-		transport: sharedTransportLayer,
+		transport:      ownedTransport,
+		ownedTransport: ownedTransport,
 	}, nil
 }
 
 func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	// Long-lived and tunnel protocols need their own limits and drain lifecycle.
-	if r.Method == http.MethodConnect || r.Header.Get("Upgrade") != "" {
-		http.Error(w, "protocol upgrades are not supported", http.StatusNotImplemented)
-		return
-	}
-	g.handler.ServeHTTP(w, r)
+	g.standalone.ServeHTTP(w, r)
 }
 
-func (g *Gateway) Close() { g.transport.CloseIdleConnections() }
+// Handler returns the route/service graph for embedding in a stable runtime
+// dispatcher. It intentionally excludes process-global middleware.
+func (g *Gateway) Handler() http.Handler { return g.handler }
+
+func (g *Gateway) Close() {
+	if g.ownedTransport != nil {
+		g.ownedTransport.CloseIdleConnections()
+	}
+}

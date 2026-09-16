@@ -12,8 +12,8 @@ import (
 	"time"
 
 	"janus/internal/config"
-	"janus/internal/gateway"
 	"janus/internal/limen"
+	janusruntime "janus/internal/runtime"
 	appLogger "janus/pkg/logger"
 
 	"go.uber.org/zap"
@@ -58,14 +58,14 @@ func run(ctx context.Context, path string, check bool, logger *zap.Logger) error
 		logger.Info("configuration valid")
 		return nil
 	}
-	// construct gateway ,gateway is constructed with routers, router contain reverse handler.
-	gatewayWithinHandlers, err := gateway.New(c, logger)
+	// Runtime owns the stable handler, active generation, and shared transport.
+	requestRuntime, err := janusruntime.New(c, logger)
 	if err != nil {
 		return err
 	}
-	defer gatewayWithinHandlers.Close()
+	defer requestRuntime.Close()
 	//Start the server
-	protocolLimen := limen.New(c.Listen, gatewayWithinHandlers, c.Settings)
+	protocolLimen := limen.New(c.Listen, requestRuntime, c.Settings)
 	// Bind the configured address before starting the serving goroutine so
 	// startup failures are returned synchronously.
 	ln, err := protocolLimen.Listen()

@@ -11,10 +11,11 @@ SSE, WebSockets, gRPC and arbitrary TCP/UDP tunnels remain outside this scope.
 Use Go's `net/http`, `httputil.ReverseProxy`, and `http.Transport` as the protocol
 foundation. Backend applications retain business authorization responsibilities.
 
-This is the target design for the phases in [plan.md](plan.md). Today `gateway`
-constructs the router, service proxies, pools, and one shared transport. It now
-builds the generic middleware chain and applies the overall deadline through
-that chain. The initial route-level `buffer` policy is implemented; other named
+This is the target design for the phases in [plan.md](plan.md). Today `runtime`
+owns the stable dispatcher and process-level transport, while `gateway`
+constructs each router, service proxies, pools, and route middleware generation.
+The fixed global protocol guard and overall deadline are applied once by
+runtime. The initial route-level `buffer` policy is implemented; other named
 policies, observation, admission, health, admin, and reload below are planned,
 not available configuration features.
 
@@ -229,7 +230,7 @@ files below are responsibilities, not empty directories to scaffold immediately.
 | `cmd/janus` | CLI, process signals, invoke startup/drain | Existing |
 | `internal/limen` | Listener and protocol adapters, inbound TLS identity, coordinated server lifecycle | HTTP/1 lifecycle in 2A; H2 in 2C, H3 in 5 |
 | `internal/config` | Settings, named policy schema, reference/scope validation | Existing; policy types in 2 |
-| `internal/gateway` | Builds route/service handler generations from validated config and injected runtime resources | Existing; server wiring moves to Limen in 2A |
+| `internal/gateway` | Builds route/service handler generations from validated config and injected runtime resources | 2B generation builder; server wiring moved to Limen in 2A |
 | `internal/middleware` | `chain.go`, `timeout.go`, then IDs, observation, body limits and admission | 1–3 |
 | `internal/router` | Immutable host/path matching against prebuilt `http.Handler` | Existing |
 | `internal/proxy` | ReverseProxy, outbound transport, trusted-header rewrite, error mapping | Existing |
@@ -237,7 +238,7 @@ files below are responsibilities, not empty directories to scaffold immediately.
 | `internal/telemetry` | Request outcome type and access logging; later metrics exporters | 2 and 4 |
 | `internal/admin` | Private liveness/readiness handlers; later metrics endpoint | 3 |
 | `internal/health` | Bounded scheduled probes and recovery state transitions | 4 |
-| `internal/runtime` | Stable dispatcher, generation publication, request references, file reload and resource retirement | 2B/2D |
+| `internal/runtime` | Stable dispatcher, generation publication, request references, file reload and resource retirement | 2B complete; file reload in 2D |
 | `test/integration`, `test/load`, `deploy` | Cross-package scenarios, load evidence, deployment artifacts | As scenarios arrive |
 
 Dependencies flow from `cmd` to `gateway`, then to leaf packages. `gateway` owns

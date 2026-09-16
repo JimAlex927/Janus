@@ -1,8 +1,9 @@
 # Protocol Limen and dynamic configuration
 
 Status: implementation plan reviewed against the repository on 2026-09-16.
-Phase 1Q qualification and the Phase 2A HTTP/1 Limen extraction are shipped;
-native TLS/HTTP/2, runtime generations, and reload APIs below are not shipped.
+Phase 1Q qualification, the Phase 2A HTTP/1 Limen extraction, and the Phase 2B
+stable runtime/generation core are shipped; native TLS/HTTP/2 and file reload
+APIs below are not shipped.
 The delivery sequence and exit gates are in [plan.md](plan.md).
 
 ## Scope
@@ -59,14 +60,15 @@ HTTP request remain within the observed HTTP chain.
    the legacy configuration and HTTP/1 behavior remain unchanged. Future Limen
    adapters must bind required sockets before reporting success and close all
    partial resources if any binding fails.
-2. Add a stable runtime handler. Extract the fixed global timeout/guards from
-   generation construction, so they are built once. Later global observation
-   and admission also live outside generation replacement.
+2. Add a stable runtime handler. `internal/runtime` now extracts the fixed
+   global timeout/guards from generation construction, so they are built once.
+   Later global observation and admission also live outside generation
+   replacement.
 3. Refactor the gateway builder to accept an injected shared transport and
    return an immutable handler generation with explicit cleanup of resources
-   it owns. Currently `gateway.New` creates a transport and `Gateway.Close`
-   closes its idle pool; using that lifecycle unchanged for every reload would
-   unnecessarily replace pools and could multiply transport connection limits.
+   it owns. The runtime now keeps the process-owned transport alive across
+   replacements; standalone `gateway.New` retains an owned transport for direct
+   use and tests.
 4. Add TLS and HTTP/2 to Limen, then wire file changes to the runtime reload
    transaction. Add HTTP/3 only after these contracts pass their tests.
 

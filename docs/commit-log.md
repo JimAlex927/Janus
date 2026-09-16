@@ -5,6 +5,35 @@ repository commit. Add a new dated section before every future commit.
 
 ## 2026-09-16
 
+### Add stable runtime generations
+
+Commit message: `feat(runtime): add stable generation dispatcher`
+
+Scope:
+
+- Added `internal/runtime` with a stable `http.Handler`, process-owned outbound
+  transport, in-memory generation replacement, and startup-setting protection.
+- Added synchronized request acquisition and retirement so old generations are
+  closed only after their active requests release them.
+- Added candidate cleanup on build failure, rollback preservation, panic-path
+  release, shared-transport reuse, and a bounded retired-generation limit.
+- Refactored Gateway construction to accept an injected `http.RoundTripper` and
+  keep route/service middleware inside the generation graph.
+- Moved the global protocol guard and overall timeout into the stable runtime
+  chain; `cmd/janus` now installs Runtime in Protocol Limen.
+- Updated the plan, architecture, runtime design, and README to mark 2B
+  complete. File watching, TLS/HTTP/2, and certificate reload remain future work.
+
+Verification:
+
+- `go test ./...`
+- `go test -count=5 ./internal/runtime ./internal/gateway ./internal/middleware`
+- `go vet ./...`
+- `go build -o bin/janus.exe ./cmd/janus`
+- `go run ./cmd/janus -check -config configs/janus.json`
+
+## 2026-09-16
+
 ### Qualify deadlines and extract Protocol Limen HTTP/1 lifecycle
 
 Commit message: `feat(limen): extract HTTP/1 lifecycle and qualify deadlines`
