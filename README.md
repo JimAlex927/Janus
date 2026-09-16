@@ -88,7 +88,9 @@ still require restart. Legacy configurations remain startup-only.
 - No health-based removal: failed backends remain in round-robin rotation.
 - No application retry loop. Go's transport can still retry certain replayable
   requests on connection failures; see the protocol guide.
-- No global concurrency limit, metrics, or separate readiness listener yet. Named
+- No metrics or separate readiness listener yet. A fixed non-waiting global
+  admission cap defaults to 1024 requests and named `in_flight` middleware adds
+  a service-scoped cap; saturated requests receive 503 without queueing. Named
   `body_limit` middleware bounds request bodies at route or service scope; multiple
   applicable limits compose by the smallest cap. A fixed access observer emits
   request IDs and bounded request outcome records. Server and backend deadlines are validated

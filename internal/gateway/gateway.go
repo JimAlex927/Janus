@@ -31,6 +31,13 @@ func New(c config.Config, logger *zap.Logger) (*Gateway, error) {
 // standalone Gateway compatibility path; runtime generations inject the
 // process-owned transport instead.
 func NewWithTransport(c config.Config, logger *zap.Logger, transport http.RoundTripper) (*Gateway, error) {
+	return NewWithTransportAndLimiters(c, logger, transport, nil)
+}
+
+// NewWithTransportAndLimiters builds a generation with runtime-owned service
+// limiters. A nil map keeps the standalone Gateway path source-compatible by
+// creating generation-local service limiters.
+func NewWithTransportAndLimiters(c config.Config, logger *zap.Logger, transport http.RoundTripper, serviceLimiters map[string]*middleware.Limiter) (*Gateway, error) {
 	c = c.WithDefaults()
 	if err := c.Validate(); err != nil {
 		return nil, err
@@ -65,7 +72,13 @@ func NewWithTransport(c config.Config, logger *zap.Logger, transport http.RoundT
 			return nil, err
 		}
 		serviceHandler := proxy.New(pool, transport, logger.With(zap.String("service", name)))
-		serviceMiddlewares, err := buildMiddlewares(c, service.Middlewares)
+		serviceLimiter := serviceLimiters[name]
+		if serviceLimiter == nil {
+			if limit, ok := configuredServiceLimit(c, service); ok {
+				serviceLimiter = middleware.NewLimiter(limit)
+			}
+		}
+		serviceMiddlewares, err := buildMiddlewares(c, service.Middlewares, serviceLimiter)
 		if err != nil {
 			return nil, err
 		}
@@ -73,7 +86,7 @@ func NewWithTransport(c config.Config, logger *zap.Logger, transport http.RoundT
 	}
 	routes := make([]router.Route, 0, len(c.Routes))
 	for _, r := range c.Routes {
-		routeMiddlewares, err := buildMiddlewares(c, r.Middlewares)
+		routeMiddlewares, err := buildMiddlewares(c, r.Middlewares, nil)
 		if err != nil {
 			return nil, err
 		}
@@ -100,7 +113,16 @@ func NewWithTransport(c config.Config, logger *zap.Logger, transport http.RoundT
 	}, nil
 }
 
-func buildMiddlewares(c config.Config, names []string) ([]middleware.Middleware, error) {
+func configuredServiceLimit(c config.Config, service config.Service) (int, bool) {
+	for _, name := range service.Middlewares {
+		if definition := c.Middlewares[name]; definition.InFlight != nil {
+			return definition.InFlight.MaxConcurrent, true
+		}
+	}
+	return 0, false
+}
+
+func buildMiddlewares(c config.Config, names []string, serviceLimiter *middleware.Limiter) ([]middleware.Middleware, error) {
 	result := make([]middleware.Middleware, 0, len(names))
 	for _, name := range names {
 		definition := c.Middlewares[name]
@@ -109,6 +131,11 @@ func buildMiddlewares(c config.Config, names []string) ([]middleware.Middleware,
 			result = append(result, middleware.Buffer(definition.Buffer.MaxResponseBodyBytes))
 		case definition.BodyLimit != nil:
 			result = append(result, middleware.BodyLimit(definition.BodyLimit.MaxBytes))
+		case definition.InFlight != nil:
+			if serviceLimiter == nil {
+				return nil, fmt.Errorf("middleware %q requires a service limiter", name)
+			}
+			result = append(result, middleware.Admission(serviceLimiter))
 		default:
 			return nil, fmt.Errorf("middleware %q has no supported policy", name)
 		}

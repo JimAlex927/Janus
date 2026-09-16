@@ -5,10 +5,11 @@ Phase 1Q qualification, the Phase 2A HTTP/1 Limen extraction, the Phase 2B
 stable runtime/generation core, and the Phase 2C TLS/HTTP/2 startup path are
 shipped; the Phase 2D routing file reload and certificate rotation path is also
 shipped. Explicit SSE and classic HTTP/1 WebSocket routes are supported, and the
-typed `body_limit` middleware is available at route/service scope. HTTP/3 and
-the remaining long-lived protocol contracts remain future work. The fixed global
-request observer is outside replaceable generations, so reloads do not change
-request ID generation or access-record ownership.
+typed `body_limit` middleware is available at route/service scope, and fixed
+global/service admission is available. HTTP/3 and the remaining long-lived
+protocol contracts remain future work. The fixed global request observer and
+admission are outside replaceable generations, so reloads do not change request
+ID generation or global permit ownership.
 The delivery sequence and exit gates are in [plan.md](plan.md).
 
 ## Scope
@@ -162,8 +163,8 @@ report the condition and reject/defer further reloads at the configured bound;
 do not prematurely free resources still in use. Shutdown has a separate bounded
 drain and force-close path. A context deadline alone cannot kill arbitrary Go code.
 
-When service admission is added, runtime owns counters keyed by stable service
-identity. Old and new generations, and remove/re-add of the same service, share
+Runtime owns counters keyed by stable service identity. Old and new generations,
+and remove/re-add of the same service while an old generation is alive, share
 active permit accounting. A lower limit rejects new acquisitions until usage
 falls. Counter lifetime is not definition lifetime. Health workers added later
 must have explicit generation ownership or reference-counted sharing.

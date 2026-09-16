@@ -14,11 +14,11 @@ foundation. Backend applications retain business authorization responsibilities.
 This is the target design for the phases in [plan.md](plan.md). Today `runtime`
 owns the stable dispatcher and process-level transport, while `gateway`
 constructs each router, service proxies, pools, and route middleware generation.
-The fixed global protocol guard and overall deadline are applied once by
-runtime. The initial route-level `buffer` policy, versioned routing reload, TLS
+The fixed global protocol guard, admission cap, request observation and overall
+deadline are applied once by runtime. The route-level `buffer`, route/service
+`body_limit`, service `in_flight`, versioned routing reload, TLS
 certificate-content rotation, and protocol-scoped streaming routes are
-implemented; other named policies, observation, admission, health, and admin
-remain planned.
+implemented; health and admin remain planned.
 
 The concrete multi-protocol and reload design is in
 [limen-runtime.md](limen-runtime.md). Limen owns protocol servers, runtime owns
@@ -113,7 +113,7 @@ response through a generic panic-recovery wrapper.
 | `middlewares` definitions | Named, typed, reusable configuration; `buffer` is implemented first | Phase 1/2 |
 | `routes[].middlewares` | Ordered policies for the matched route; route-level `buffer` is implemented first | Phase 1/2 |
 | `services.<name>.middlewares` | Ordered policies on the shared service handler | Phase 2 |
-| Global admission, drain and admin settings | Process/listener lifecycle | Phase 3 |
+| Global admission, drain and admin settings | Process/listener lifecycle | Admission implemented; drain/admin follow-up |
 | Health probes | Per-service resource lifecycle | Phase 4 |
 | Trusted proxy CIDRs and identity rules | Listener trust policy with proxy rewrite integration | Phase 4 |
 | Routing file and generation publication | Runtime; strict build-before-swap transaction | 2B/2D |
@@ -175,10 +175,11 @@ Validate unused definitions too, and reject missing references, wrong scopes,
 duplicate references within one list, and incompatible policy combinations.
 Definitions in a JSON object have no execution order; attachment arrays do.
 
-The implemented configurable policies are route/service `body_limit` and
-route-level `buffer`. Multiple applicable body limits compose by the minimum.
-The example therefore allows at most 1 MiB on `/api`. Phase 3 adds `in_flight` at service scope only; global
-admission remains fixed infrastructure. Requests must pass both active caps.
+The implemented configurable policies are route/service `body_limit`,
+route-level `buffer`, and service-only `in_flight`. Multiple applicable body
+limits compose by the minimum. The example therefore allows at most 1 MiB on
+`/api`. Global admission remains fixed infrastructure. Requests must pass both
+active caps.
 No route-level timeout override or arbitrary global policy list is needed initially.
 
 Initially use flat attachment arrays. A reusable named `chain` can be added when

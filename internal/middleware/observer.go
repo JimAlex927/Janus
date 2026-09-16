@@ -257,6 +257,8 @@ func defaultErrorClass(outcome telemetry.Outcome) string {
 		return "upstream"
 	case http.StatusGatewayTimeout:
 		return "timeout"
+	case http.StatusServiceUnavailable:
+		return "admission_rejected"
 	default:
 		if outcome.Status >= 400 {
 			return "http_error"

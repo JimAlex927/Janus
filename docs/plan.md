@@ -102,7 +102,7 @@ Phase 0 profile; Phase 2C now adds native TLS/H2 startup support.
 | Identity and authorization | The backend owns business authorization. Until a trusted-proxy policy exists, Janus trusts only the immediate peer and rewrites forwarding headers from that hop. |
 | Routing | Exact case-insensitive host rules without ports take precedence over hostless rules; the longest segment-bounded path prefix wins. No prefix stripping or path normalization is performed. |
 | Time budgets | The starter profile uses 5s header read, 30s request read, 30s overall context, 35s server write, and 10s backend response-header budgets. `server.write_timeout` stays greater than the overall budget. |
-| Size and overload | Header size and connection-pool bounds are configured now. Request-body limits, admission, health-based removal, and reload are intentionally later-phase policies. |
+| Size and overload | Header/body size bounds and fixed/service admission are implemented. Health-based removal and configurable drain remain later-phase policies. |
 | Composition and ownership | A fixed global chain wraps the router; matched routes use ordered route middleware; each service owns one shared proxy/pool; the transport is shared by services with the same policy. |
 | Failure semantics | Unmatched requests are 404, unsupported CONNECT/Upgrade requests are 501, upstream failures are 502, and pre-commitment overall timeouts are 504 when the socket is writable. Committed responses are never rewritten. |
 
@@ -275,15 +275,19 @@ capability tests, early-error integration coverage, configuration examples and
 the full repository test/vet/build gates. This does not certify the overall
 gateway for production; Phase 6 qualification remains required.
 
-## Phase 3 tasks
+## Phase 3: admission and lifecycle (in progress)
 
-1. Add fixed global admission and a service-scoped `in_flight` policy. Both reject
-   saturation immediately with 503 and have no waiting queue. Define explicit
-   bounded defaults for the API profile. Release permits on every exit, including
-   cancellation and panic unwinding. Connection-pool limits are not admission.
-2. Build one service handler/limiter per service; all routes targeting it share
-   its limit. Identical policy names on different services share configuration
-   but have independent counters. Test this distinction under concurrency.
+1. Fixed global admission and a service-scoped `in_flight` policy are implemented.
+   Both reject saturation immediately with 503 and have no waiting queue. The API
+   profile defaults to a bounded global cap of 1024. Permits release on normal
+   return, cancellation and panic unwinding; connection-pool limits are not
+   admission.
+2. Runtime owns one service limiter per stable service identity. All routes
+   targeting it share the cap, identical policy names on different services have
+   independent counters, and old/new generations share the counter during reload.
+   Candidate limit changes are applied only at publication, so failed reloads do
+   not mutate the active policy. Cross-generation and lowered-limit tests cover
+   this behavior.
 3. Add a separate loopback/private admin listener with `/livez` and `/readyz`.
    Readiness means startup completed and requests are accepted under the global
    policy; one unhealthy service does not make the whole gateway unready.

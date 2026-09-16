@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"janus/internal/config"
+	"janus/internal/middleware"
 
 	"go.uber.org/zap"
 )
@@ -19,7 +20,7 @@ func TestFileReloaderPublishesChangedGenerationAndKeepsLastGood(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "janus.json")
 	writeReloaderConfig(t, configPath, "first", "127.0.0.1:8080")
 	built := 0
-	builder := func(c config.Config, _ http.RoundTripper, _ *zap.Logger) (Generation, error) {
+	builder := func(c config.Config, _ http.RoundTripper, _ *zap.Logger, _ map[string]*middleware.Limiter) (Generation, error) {
 		built++
 		body := c.Routes[0].Name
 		return &testGeneration{
@@ -74,7 +75,7 @@ func TestFileReloaderRejectsStartupChanges(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r, err := NewWithBuilder(c, zap.NewNop(), func(c config.Config, _ http.RoundTripper, _ *zap.Logger) (Generation, error) {
+	r, err := NewWithBuilder(c, zap.NewNop(), func(c config.Config, _ http.RoundTripper, _ *zap.Logger, _ map[string]*middleware.Limiter) (Generation, error) {
 		return &testGeneration{
 			handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, c.Routes[0].Name) }),
 			closed:  make(chan struct{}),

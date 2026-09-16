@@ -1,0 +1,39 @@
+{
+  "version": 1,
+  "limens": {
+    "private": {
+      "address": "127.0.0.1:8081",
+      "protocols": ["http1"]
+    }
+  },
+  "settings": {
+    "request": {
+      "max_in_flight": 1024
+    }
+  },
+  "middlewares": {
+    "storage-cap": {
+      "in_flight": { "max_concurrent": 32 }
+    }
+  },
+  "routes": [
+    {
+      "name": "upload-status",
+      "limen": "private",
+      "path_prefix": "/upload-status",
+      "service": "storage"
+    },
+    {
+      "name": "upload-finalize",
+      "limen": "private",
+      "path_prefix": "/upload-finalize",
+      "service": "storage"
+    }
+  ],
+  "services": {
+    "storage": {
+      "upstreams": ["http://127.0.0.1:9000"],
+      "middlewares": ["storage-cap"]
+    }
+  }
+}

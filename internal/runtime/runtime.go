@@ -35,7 +35,7 @@ type Generation interface {
 
 // Builder constructs a generation using the process-owned outbound transport.
 // The transport must not be closed by the returned generation.
-type Builder func(config.Config, http.RoundTripper, *zap.Logger) (Generation, error)
+type Builder func(config.Config, http.RoundTripper, *zap.Logger, map[string]*middleware.Limiter) (Generation, error)
 
 // Runtime is a stable handler whose active generation can be replaced without
 // changing the handler installed in the protocol Limen.
@@ -53,12 +53,15 @@ type Runtime struct {
 	builder   Builder
 	logger    *zap.Logger
 	transport *http.Transport
+	global    *middleware.Limiter
+	services  *serviceLimiterRegistry
 	handler   http.Handler
 }
 
 type generationRef struct {
 	generation Generation
 	handler    http.Handler
+	commit     func()
 	refs       int
 	retired    bool
 	closed     bool
@@ -86,11 +89,13 @@ func NewWithBuilder(c config.Config, logger *zap.Logger, builder Builder) (*Runt
 	}
 
 	transport := proxy.NewTransport(c.Settings.Backend)
-	initial, err := buildGeneration(builder, c, transport, logger)
+	services := newServiceLimiterRegistry()
+	initial, err := buildGeneration(builder, c, transport, logger, services)
 	if err != nil {
 		transport.CloseIdleConnections()
 		return nil, err
 	}
+	initial.commit()
 	r := &Runtime{
 		active:    initial,
 		retired:   make(map[*generationRef]struct{}),
@@ -100,6 +105,8 @@ func NewWithBuilder(c config.Config, logger *zap.Logger, builder Builder) (*Runt
 		builder:   builder,
 		logger:    logger,
 		transport: transport,
+		global:    middleware.NewLimiter(c.Settings.Request.MaxInFlight),
+		services:  services,
 	}
 	// This chain is process-owned and is deliberately outside the replaceable
 	// generation. Its order preserves the existing behavior: observation wraps
@@ -108,6 +115,7 @@ func NewWithBuilder(c config.Config, logger *zap.Logger, builder Builder) (*Runt
 		http.HandlerFunc(r.dispatch),
 		middleware.Observe(logger),
 		middleware.RejectUnsupportedProtocols,
+		middleware.Admission(r.global),
 		middleware.Timeout(c.Settings.Request.MaximumDuration.Duration()),
 		middleware.ClearStreamingWriteDeadline,
 	)
@@ -115,8 +123,8 @@ func NewWithBuilder(c config.Config, logger *zap.Logger, builder Builder) (*Runt
 }
 
 // DefaultBuilder adapts the Gateway builder to Runtime's generation contract.
-func DefaultBuilder(c config.Config, transport http.RoundTripper, logger *zap.Logger) (Generation, error) {
-	return gateway.NewWithTransport(c, logger, transport)
+func DefaultBuilder(c config.Config, transport http.RoundTripper, logger *zap.Logger, serviceLimiters map[string]*middleware.Limiter) (Generation, error) {
+	return gateway.NewWithTransportAndLimiters(c, logger, transport, serviceLimiters)
 }
 
 // Handler returns the stable dispatcher to install in Protocol Limen.
@@ -153,7 +161,7 @@ func (r *Runtime) Replace(c config.Config) error {
 	}
 	r.mu.Unlock()
 
-	candidate, err := buildGeneration(r.builder, c, r.transport, r.logger)
+	candidate, err := buildGeneration(r.builder, c, r.transport, r.logger, r.services)
 	if err != nil {
 		return err
 	}
@@ -164,6 +172,7 @@ func (r *Runtime) Replace(c config.Config) error {
 		candidate.generation.Close()
 		return ErrClosed
 	}
+	candidate.commit()
 	old := r.active
 	r.active = candidate
 	shouldCloseOld := r.retireLocked(old)
@@ -256,24 +265,114 @@ func (r *Runtime) retireLocked(ref *generationRef) bool {
 	return true
 }
 
-func buildGeneration(builder Builder, c config.Config, transport http.RoundTripper, logger *zap.Logger) (*generationRef, error) {
-	candidate, err := builder(c, transport, logger)
+func buildGeneration(builder Builder, c config.Config, transport http.RoundTripper, logger *zap.Logger, services *serviceLimiterRegistry) (*generationRef, error) {
+	serviceLimiters, commitServices, releaseServices := services.acquire(c)
+	candidate, err := builder(c, transport, logger, serviceLimiters)
 	if err != nil {
 		if candidate != nil {
 			candidate.Close()
 		}
+		releaseServices()
 		return nil, err
 	}
 	if candidate == nil {
-		if candidate != nil {
-			candidate.Close()
-		}
+		releaseServices()
 		return nil, fmt.Errorf("builder returned an invalid generation")
 	}
 	handler := candidate.Handler()
 	if handler == nil {
 		candidate.Close()
+		releaseServices()
 		return nil, fmt.Errorf("builder returned an invalid generation")
 	}
-	return &generationRef{generation: candidate, handler: handler}, nil
+	managed := &managedGeneration{Generation: candidate, release: releaseServices}
+	return &generationRef{generation: managed, handler: handler, commit: commitServices}, nil
+}
+
+type managedGeneration struct {
+	Generation
+	release func()
+	once    sync.Once
+}
+
+func (g *managedGeneration) Close() {
+	g.once.Do(func() {
+		defer g.release()
+		g.Generation.Close()
+	})
+}
+
+type serviceLimiterRegistry struct {
+	mu      sync.Mutex
+	entries map[string]*serviceLimiterEntry
+}
+
+type serviceLimiterEntry struct {
+	limiter *middleware.Limiter
+	refs    int
+}
+
+func newServiceLimiterRegistry() *serviceLimiterRegistry {
+	return &serviceLimiterRegistry{entries: make(map[string]*serviceLimiterEntry)}
+}
+
+func (r *serviceLimiterRegistry) acquire(c config.Config) (map[string]*middleware.Limiter, func(), func()) {
+	r.mu.Lock()
+	limiters := make(map[string]*middleware.Limiter)
+	names := make([]string, 0)
+	limits := make(map[string]int)
+	for name, service := range c.Services {
+		limit, ok := serviceInFlightLimit(c, service)
+		if !ok {
+			continue
+		}
+		entry := r.entries[name]
+		if entry == nil {
+			entry = &serviceLimiterEntry{limiter: middleware.NewLimiter(limit)}
+			r.entries[name] = entry
+		}
+		entry.refs++
+		limiters[name] = entry.limiter
+		limits[name] = limit
+		names = append(names, name)
+	}
+	r.mu.Unlock()
+
+	var once sync.Once
+	var commitOnce sync.Once
+	return limiters, func() {
+			commitOnce.Do(func() {
+				r.mu.Lock()
+				defer r.mu.Unlock()
+				for name, limit := range limits {
+					if entry := r.entries[name]; entry != nil {
+						entry.limiter.SetLimit(limit)
+					}
+				}
+			})
+		}, func() {
+			once.Do(func() {
+				r.mu.Lock()
+				defer r.mu.Unlock()
+				for _, name := range names {
+					entry := r.entries[name]
+					if entry == nil {
+						continue
+					}
+					entry.refs--
+					if entry.refs == 0 {
+						delete(r.entries, name)
+					}
+				}
+			})
+		}
+}
+
+func serviceInFlightLimit(c config.Config, service config.Service) (int, bool) {
+	for _, name := range service.Middlewares {
+		if definition := c.Middlewares[name]; definition.InFlight != nil {
+			return definition.InFlight.MaxConcurrent, true
+		}
+	}
+	return 0, false
 }

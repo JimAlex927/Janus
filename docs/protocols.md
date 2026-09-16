@@ -47,8 +47,8 @@ have observed a prefix, but Janus does not retry the request.
 
 When both the matched route and its service have body-limit policies, the nested
 standard-library readers enforce the smallest effective cap. The policy limits
-bytes, not upload duration; use the server read deadline and a future admission
-policy for those separate concerns.
+bytes, not upload duration; use the server read deadline and the fixed/service
+admission policies for those separate concerns.
 
 The fixed global observer adds a fresh `X-Request-ID` to each request and response,
 overwriting client input until a trusted-proxy policy exists. Its access record

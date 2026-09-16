@@ -5,6 +5,35 @@ repository commit. Add a new dated section before every future commit.
 
 ## 2026-09-16
 
+### Add bounded global and service admission
+
+Commit message: `feat(admission): add global and service concurrency limits`
+
+Scope:
+
+- Added a bounded non-waiting global admission cap with a default of 1024 and
+  immediate 503 rejection when saturated.
+- Added service-only typed `in_flight` middleware. Runtime owns stable service
+  limiter state so routes sharing a service and old/new generations share active
+  permits; lowering a cap does not create capacity for existing work.
+- Applied service limit changes transactionally at generation publication, so a
+  failed reload preserves the active limit. Permits release on normal return,
+  cancellation and panic paths.
+- Added configuration validation, a runnable admission example, concurrency,
+  panic, lowered-limit, cross-generation and failed-reload regression tests.
+
+Verification:
+
+- `gofmt` on touched Go files
+- `go test ./...`
+- `go vet ./...`
+- `go build -o bin/janus.exe ./cmd/janus`
+- `go run ./cmd/janus -check` for the runnable configuration examples
+- `git diff --check`
+
+Scope note: admin readiness, configurable drain, health probes, metrics and
+overall production qualification remain future work.
+
 ### Preserve abort semantics while finalizing access observation
 
 Commit message: `fix(observability): preserve response abort semantics`

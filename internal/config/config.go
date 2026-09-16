@@ -55,6 +55,7 @@ type TLSSettings struct {
 type Middleware struct {
 	Buffer    *BufferSettings    `json:"buffer,omitempty"`
 	BodyLimit *BodyLimitSettings `json:"body_limit,omitempty"`
+	InFlight  *InFlightSettings  `json:"in_flight,omitempty"`
 }
 
 type BufferSettings struct {
@@ -63,6 +64,10 @@ type BufferSettings struct {
 
 type BodyLimitSettings struct {
 	MaxBytes int64 `json:"max_bytes"`
+}
+
+type InFlightSettings struct {
+	MaxConcurrent int `json:"max_concurrent"`
 }
 
 type Service struct {
@@ -185,6 +190,7 @@ func (c Config) Validate() error {
 			seen[raw] = true
 		}
 		seenMiddlewares := map[string]bool{}
+		inFlightPolicies := 0
 		for _, middlewareName := range s.Middlewares {
 			if middlewareName == "" {
 				return fmt.Errorf("service %q has an empty middleware reference", name)
@@ -196,6 +202,12 @@ func (c Config) Validate() error {
 			if _, ok := c.Middlewares[middlewareName]; !ok {
 				return fmt.Errorf("service %q references missing middleware %q", name, middlewareName)
 			}
+			if c.Middlewares[middlewareName].InFlight != nil {
+				inFlightPolicies++
+			}
+		}
+		if inFlightPolicies > 1 {
+			return fmt.Errorf("service %q may reference at most one in_flight middleware", name)
 		}
 	}
 	names, matches := map[string]bool{}, map[string]bool{}
@@ -236,6 +248,9 @@ func (c Config) Validate() error {
 			if _, ok := c.Middlewares[middlewareName]; !ok {
 				return fmt.Errorf("route %q references missing middleware %q", r.Name, middlewareName)
 			}
+			if c.Middlewares[middlewareName].InFlight != nil {
+				return fmt.Errorf("route %q cannot use service-only in_flight middleware %q", r.Name, middlewareName)
+			}
 		}
 		if !strings.HasPrefix(r.PathPrefix, "/") || strings.ContainsAny(r.PathPrefix, "?#%\\ \t\r\n") {
 			return fmt.Errorf("route %q needs an unescaped absolute path prefix", r.Name)
@@ -270,6 +285,9 @@ func (c Config) Validate() error {
 		if definition.BodyLimit != nil {
 			defined++
 		}
+		if definition.InFlight != nil {
+			defined++
+		}
 		if defined != 1 {
 			return fmt.Errorf("middleware %q must define exactly one policy", name)
 		}
@@ -278,6 +296,9 @@ func (c Config) Validate() error {
 		}
 		if definition.BodyLimit != nil && (definition.BodyLimit.MaxBytes < 1 || definition.BodyLimit.MaxBytes > MaxRequestBodyBytes) {
 			return fmt.Errorf("middleware %q body_limit.max_bytes must be between 1 and %d bytes", name, MaxRequestBodyBytes)
+		}
+		if definition.InFlight != nil && (definition.InFlight.MaxConcurrent < 1 || definition.InFlight.MaxConcurrent > MaxBackendConnections) {
+			return fmt.Errorf("middleware %q in_flight.max_concurrent must be between 1 and %d", name, MaxBackendConnections)
 		}
 	}
 	return nil

@@ -94,6 +94,29 @@ func TestServiceMiddlewareConfig(t *testing.T) {
 	}
 }
 
+func TestInFlightMiddlewareConfig(t *testing.T) {
+	valid := `{"listen":"127.0.0.1:8080","middlewares":{"cap":{"in_flight":{"max_concurrent":2}}},"services":{"s":{"upstreams":["http://localhost:9000"],"middlewares":["cap"]}},"routes":[{"name":"r","path_prefix":"/api","service":"s"}]}`
+	if _, err := Load(strings.NewReader(valid)); err != nil {
+		t.Fatal(err)
+	}
+	routeScope := strings.Replace(valid, `"path_prefix":"/api","service":"s"`, `"path_prefix":"/api","service":"s","middlewares":["cap"]`, 1)
+	for _, tc := range []struct {
+		name string
+		body string
+	}{
+		{"route scope", routeScope},
+		{"duplicate service reference", strings.Replace(valid, `"cap"]}},"routes"`, `"cap","cap"]}},"routes"`, 1)},
+		{"invalid limit", strings.Replace(valid, `"max_concurrent":2`, `"max_concurrent":0`, 1)},
+		{"multiple policies", strings.Replace(valid, `"in_flight":{"max_concurrent":2}`, `"in_flight":{"max_concurrent":2},"buffer":{"max_response_body_bytes":1024}`, 1)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := Load(strings.NewReader(tc.body)); err == nil {
+				t.Fatal("expected configuration validation error")
+			}
+		})
+	}
+}
+
 func TestRouteProtocolConfig(t *testing.T) {
 	base := `{"listen":"127.0.0.1:8080","services":{"s":{"upstreams":["http://localhost:9000"]}},"routes":[{"name":"r","path_prefix":"/stream","protocols":["sse","websocket"],"service":"s"}]}`
 	if _, err := Load(strings.NewReader(base)); err != nil {
@@ -168,6 +191,9 @@ func TestSettingsDurationSyntaxAndDefaults(t *testing.T) {
 	if got := c.Settings.Backend.ConnectTimeout.Duration(); got != 3*time.Second {
 		t.Fatalf("connect timeout = %s, want 3s default", got)
 	}
+	if c.Settings.Request.MaxInFlight != DefaultGlobalInFlight {
+		t.Fatalf("max in-flight = %d, want %d default", c.Settings.Request.MaxInFlight, DefaultGlobalInFlight)
+	}
 }
 
 func TestMaximumOverallDerivesValidWriteHeadroom(t *testing.T) {
@@ -196,6 +222,9 @@ func TestSettingsRejectInvalidBounds(t *testing.T) {
 		}},
 		{"header bytes too large", func(s *Settings) {
 			s.Server.MaxHeaderBytes = MaxHeaderBytes + 1
+		}},
+		{"global admission too large", func(s *Settings) {
+			s.Request.MaxInFlight = MaxGlobalInFlight + 1
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

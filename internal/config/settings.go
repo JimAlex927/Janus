@@ -13,6 +13,8 @@ const (
 	MaxBackendConnections          = 1_000_000
 	MaxBufferedResponseBytes int64 = 64 << 20
 	MaxRequestBodyBytes      int64 = 64 << 20
+	MaxGlobalInFlight              = 1_000_000
+	DefaultGlobalInFlight          = 1024
 
 	MinSettingDuration = time.Millisecond
 	MaxSettingDuration = 24 * time.Hour
@@ -53,6 +55,7 @@ type Settings struct {
 type RequestSettings struct {
 	ReadTimeout     Duration `json:"read_timeout"`     // inbound request read budget, including headers and body
 	MaximumDuration Duration `json:"maximum_duration"` // active end-to-end request deadline
+	MaxInFlight     int      `json:"max_in_flight"`    // process-wide non-waiting admission cap
 }
 
 type ServerSettings struct {
@@ -82,6 +85,7 @@ func DefaultSettings() Settings {
 		Request: RequestSettings{
 			ReadTimeout:     Duration(30 * time.Second),
 			MaximumDuration: Duration(30 * time.Second),
+			MaxInFlight:     DefaultGlobalInFlight,
 		},
 		Server: ServerSettings{
 			ReadHeaderTimeout: Duration(5 * time.Second),
@@ -113,6 +117,9 @@ func (s Settings) WithDefaults() Settings {
 	}
 	if s.Request.MaximumDuration == 0 {
 		s.Request.MaximumDuration = d.Request.MaximumDuration
+	}
+	if s.Request.MaxInFlight == 0 {
+		s.Request.MaxInFlight = d.Request.MaxInFlight
 	}
 	if s.Server.ReadHeaderTimeout == 0 {
 		s.Server.ReadHeaderTimeout = d.Server.ReadHeaderTimeout
@@ -173,6 +180,9 @@ func (s Settings) Validate() error {
 	}
 	if err := validateDuration("request.maximum_duration", s.Request.MaximumDuration); err != nil {
 		return err
+	}
+	if s.Request.MaxInFlight < 1 || s.Request.MaxInFlight > MaxGlobalInFlight {
+		return fmt.Errorf("request.max_in_flight must be between 1 and %d", MaxGlobalInFlight)
 	}
 	if err := validateDuration("server.read_header_timeout", s.Server.ReadHeaderTimeout); err != nil {
 		return err
