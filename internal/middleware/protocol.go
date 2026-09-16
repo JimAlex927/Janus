@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"janus/internal/protocol"
+	"janus/internal/telemetry"
 )
 
 // RejectUnsupportedProtocols keeps tunnel and upgrade traffic out of the
@@ -12,10 +13,12 @@ import (
 func RejectUnsupportedProtocols(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodConnect {
+			telemetry.MarkError(r.Context(), "unsupported_protocol")
 			http.Error(w, "protocol upgrades are not supported", http.StatusNotImplemented)
 			return
 		}
 		if r.Header.Get("Upgrade") != "" && !protocol.IsWebSocketRequest(r) {
+			telemetry.MarkError(r.Context(), "unsupported_protocol")
 			http.Error(w, "protocol upgrades are not supported", http.StatusNotImplemented)
 			return
 		}

@@ -9,9 +9,11 @@ import (
 
 	"janus/internal/config"
 	"janus/internal/protocol"
+	"janus/internal/telemetry"
 )
 
 type Route struct {
+	Name       string
 	Limen      string
 	Protocols  []string
 	Host       string
@@ -60,6 +62,7 @@ func (rt *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		p := route.PathPrefix
 		if p == "/" || r.URL.Path == p || strings.HasPrefix(r.URL.Path, p+"/") {
 			if !routeProtocolMatches(route.Protocols, r) {
+				telemetry.MarkError(r.Context(), "unsupported_protocol")
 				http.Error(w, "request protocol is not enabled for this route", http.StatusNotImplemented)
 				return
 			}
@@ -68,6 +71,7 @@ func (rt *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	//If nothing matched. Return 404 not found
+	telemetry.MarkError(r.Context(), "route_not_found")
 	http.NotFound(w, r)
 }
 

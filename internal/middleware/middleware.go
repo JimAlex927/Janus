@@ -1,7 +1,11 @@
 // Package middleware contains the small, built-in HTTP middleware pipeline.
 package middleware
 
-import "net/http"
+import (
+	"net/http"
+
+	"janus/internal/telemetry"
+)
 
 // Middleware transforms an HTTP handler. Middleware are applied in declaration
 // order: Chain(final, a, b) enters a, then b, then final.
@@ -27,6 +31,7 @@ func BodyLimit(maxBytes int64) Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if maxBytes > 0 && r.ContentLength > maxBytes {
+				telemetry.MarkError(r.Context(), "request_body_too_large")
 				http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
 				return
 			}

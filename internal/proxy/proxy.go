@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"janus/internal/config"
+	"janus/internal/telemetry"
 	"janus/internal/upstream"
 
 	"go.uber.org/zap"
@@ -86,16 +87,21 @@ func New(pool *upstream.Pool, transport http.RoundTripper, logger *zap.Logger) h
 		},
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
 			if errors.Is(err, context.Canceled) {
+				telemetry.MarkError(r.Context(), "client_canceled")
 				return
 			}
 			status := http.StatusBadGateway
 			var maxBytesError *http.MaxBytesError
 			if errors.As(err, &maxBytesError) {
 				status = http.StatusRequestEntityTooLarge
+				telemetry.MarkError(r.Context(), "request_body_too_large")
 			}
 			var timeout net.Error
 			if status == http.StatusBadGateway && (errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &timeout) && timeout.Timeout())) {
 				status = http.StatusGatewayTimeout
+				telemetry.MarkError(r.Context(), "timeout")
+			} else if status == http.StatusBadGateway {
+				telemetry.MarkError(r.Context(), "upstream")
 			}
 			logger.Warn("upstream request failed", zap.Int("status", status), zap.Error(err))
 			http.Error(w, http.StatusText(status), status)

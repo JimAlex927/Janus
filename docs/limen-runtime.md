@@ -6,7 +6,9 @@ stable runtime/generation core, and the Phase 2C TLS/HTTP/2 startup path are
 shipped; the Phase 2D routing file reload and certificate rotation path is also
 shipped. Explicit SSE and classic HTTP/1 WebSocket routes are supported, and the
 typed `body_limit` middleware is available at route/service scope. HTTP/3 and
-the remaining long-lived protocol contracts remain future work.
+the remaining long-lived protocol contracts remain future work. The fixed global
+request observer is outside replaceable generations, so reloads do not change
+request ID generation or access-record ownership.
 The delivery sequence and exit gates are in [plan.md](plan.md).
 
 ## Scope

@@ -102,10 +102,11 @@ func NewWithBuilder(c config.Config, logger *zap.Logger, builder Builder) (*Runt
 		transport: transport,
 	}
 	// This chain is process-owned and is deliberately outside the replaceable
-	// generation. Its order preserves the existing behavior: protocol guards
-	// run before the overall timeout, then the active generation is acquired.
+	// generation. Its order preserves the existing behavior: observation wraps
+	// protocol guards, timeout, and active-generation dispatch.
 	r.handler = middleware.Chain(
 		http.HandlerFunc(r.dispatch),
+		middleware.Observe(logger),
 		middleware.RejectUnsupportedProtocols,
 		middleware.Timeout(c.Settings.Request.MaximumDuration.Duration()),
 		middleware.ClearStreamingWriteDeadline,

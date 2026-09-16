@@ -239,10 +239,16 @@ The route buffer middleware bypasses both modes.
    IDs by default; define validation and trust before accepting client-supplied
    IDs. Record route/service IDs, final status, duration, consumed request bytes,
    written response bytes, and error class, including early 404/413/501/502/504.
-   Keep authorization, cookies, bodies, and raw queries out of logs.
+   Keep authorization, cookies, bodies, and raw queries out of logs. The fixed
+   observer, regenerated IDs, route/service metadata, bounded fields and early
+   error classification path are implemented; final integration coverage for
+   every listed status remains.
 2. Extend the Phase 2C response capability tests through observation: `Unwrap`, flushing,
    trailers, informational responses, implicit 200, and copy/error accounting.
    Test `ResponseController`; do not advertise unsupported optional interfaces.
+   The observer preserves `Unwrap`, supported Flusher/Hijacker/Pusher
+   capabilities, informational/final status handling, and controller flushing;
+   trailer/copy/error accounting coverage remains.
 3. Extend typed named middleware definitions and ordered route/service references.
    `body_limit` is implemented at route and service scope. Missing references,
    unknown types/options, multiple types per definition, and duplicate references
@@ -254,8 +260,9 @@ The route buffer middleware bypasses both modes.
    body. Do not add retries. Multiple route/service body caps use the smallest cap.
 5. Preserve configurations without middleware references. A runnable body-limit
    example and end-to-end tests for short-circuit behavior and chunked forwarding
-   are now present. Request IDs, access observation, response capability audit and
-   the remaining 2F policy validation work are still outstanding.
+   are now present. Request ID/access observation is partially implemented; the
+   response capability audit and remaining 2F policy validation work are still
+   outstanding.
 
 The first 2F delivery is the bounded request-body policy. It is intentionally a
 request-size guard, not an upload-duration or global admission policy: server read

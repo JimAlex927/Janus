@@ -196,7 +196,7 @@ is a reference for that later convenience, not a Phase 1 dependency.
 | Route chain | One instance per route attachment | Route policies keep route-local state |
 | Service handler / limiter | Handler per generation; limiter state runtime-owned by service ID | Routes share the handler; generations share active permit accounting |
 | Global admission | One process-wide instance | All data requests share permits, including across reloads |
-| Request observation | One object per request | Outer observer and inner route/proxy stages share metadata |
+| Request observation | One object per request | Fixed outer observer and inner route/proxy stages share synchronized metadata |
 | Transport | Process-owned for the initial fixed trust/TLS policy | Services and routing generations share pools; never mutate a live transport |
 | Probe workers and backend health | Per service, managed by runtime owner | Start/stop outside the request path |
 
@@ -213,8 +213,10 @@ completion in the same state so the outer observer can report them after return.
 Define synchronization for any concurrent callbacks; do not assume a child context
 value set inside a route can be read back from the outer request.
 
-Transparent response wrappers provide `Unwrap` and preserve flushing and trailers. If they
-expose `ReaderFrom`, it must update byte counts rather than bypass observation.
+Transparent response wrappers provide `Unwrap` and preserve only the optional
+capabilities supported by the underlying writer: Flusher, Hijacker, and Pusher.
+They preserve flushing and final/informational status handling. If they expose
+`ReaderFrom`, it must update byte counts rather than bypass observation.
 Do not pretend unsupported `Hijacker` or other interfaces exist. Test behavior
 through the actual proxy/server, including informational responses and body errors.
 Buffering has an intentional flush barrier and needs its own capability contract;

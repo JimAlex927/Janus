@@ -5,6 +5,32 @@ repository commit. Add a new dated section before every future commit.
 
 ## 2026-09-16
 
+### Add fixed request observation and response capability preservation
+
+Commit message: `feat(observability): add request IDs and access observation`
+
+Scope:
+
+- Added a process-owned observer outside runtime generations. It regenerates
+  request IDs, counts consumed request and written response bytes, records route
+  and service metadata, and emits one access record without query strings,
+  headers, cookies or bodies.
+- Added synchronized request-local outcome state and explicit early-error classes
+  for routing, protocol, body-limit, timeout, cancellation and upstream failures.
+- Added response-writer capability preservation for `Unwrap`, supported flushing,
+  HTTP/1 hijacking and HTTP/2 push, without advertising capabilities absent from
+  the underlying writer; informational/final status handling is covered.
+- Added observer tests for request ID replacement, field boundaries, 103/200
+  handling, controller flushing, capability boundaries and WebSocket 101.
+
+Verification:
+
+- `gofmt` on touched Go files
+- `go test ./...`
+
+Scope note: complete response trailer/copy accounting audit, metrics export,
+trusted client identity and production qualification remain future work.
+
 ### Add bounded request-body middleware
 
 Commit message: `feat(policy): add route and service body limits`

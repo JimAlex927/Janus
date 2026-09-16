@@ -2,10 +2,12 @@ package middleware
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"time"
 
 	"janus/internal/protocol"
+	"janus/internal/telemetry"
 )
 
 // Timeout applies an overall handler budget. It cancels outbound work through
@@ -22,6 +24,11 @@ func Timeout(timeout time.Duration) Middleware {
 			ctx, cancel := context.WithTimeout(r.Context(), timeout)
 			defer cancel()
 			next.ServeHTTP(w, r.WithContext(ctx))
+			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+				telemetry.MarkError(r.Context(), "timeout")
+			} else if errors.Is(ctx.Err(), context.Canceled) {
+				telemetry.MarkError(r.Context(), "client_canceled")
+			}
 		})
 	}
 }

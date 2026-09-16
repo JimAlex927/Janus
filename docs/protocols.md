@@ -50,6 +50,13 @@ standard-library readers enforce the smallest effective cap. The policy limits
 bytes, not upload duration; use the server read deadline and a future admission
 policy for those separate concerns.
 
+The fixed global observer adds a fresh `X-Request-ID` to each request and response,
+overwriting client input until a trusted-proxy policy exists. Its access record
+contains only the method, path without query, route/service names, status, duration,
+request/response byte counts and a bounded error class. It does not log headers,
+cookies, bodies or raw queries. Route metadata is written into request-local shared
+state so early route-policy responses remain attributable after the handler returns.
+
 Let the standard library parse and serialize HTTP. Never concatenate raw request
 headers or implement chunk decoding yourself. Go's reverse proxy handles
 hop-by-hop removal; its `Rewrite` API clears standard forwarding headers before
