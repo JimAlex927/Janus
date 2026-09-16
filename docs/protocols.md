@@ -18,6 +18,24 @@ break at a protocol boundary and how to demonstrate correct behavior.
 
 ## HTTP framing and header trust
 
+## Phase 0 support matrix
+
+| Request or condition | Janus behavior |
+| --- | --- |
+| `GET /api`, `GET /api/users` | Matches a `/api` segment prefix. |
+| `GET /apix` | Does not match `/api`; returns 404 unless another route matches. |
+| Exact host plus hostless route | The exact, case-insensitive host rule wins; the incoming port is ignored for matching. |
+| `GET /api/a%2Fb` | Routing uses Go's decoded `URL.Path`; the reverse proxy preserves the escaped path for the backend. |
+| Client-supplied `X-Forwarded-*`, `X-Real-IP`, or `Forwarded` | Removed or rewritten; v0 reports only the immediate connection peer. |
+| `CONNECT` or any `Upgrade` request | Rejected with 501; Janus does not create a tunnel. |
+| No matching host/path | Returns 404 without contacting a backend. |
+| Overall deadline before response commitment | Returns 504 when the response socket remains writable. |
+| Overall deadline after response commitment | Stops the stream; it does not append a second 504 response. |
+
+This matrix is the Phase 0 protocol boundary. Body-size rejection, admission,
+trusted multi-hop forwarding identity, and additional protocol modes are later
+policies, not implicit behavior.
+
 Let the standard library parse and serialize HTTP. Never concatenate raw request
 headers or implement chunk decoding yourself. Go's reverse proxy handles
 hop-by-hop removal; its `Rewrite` API clears standard forwarding headers before

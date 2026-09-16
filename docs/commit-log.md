@@ -5,6 +5,37 @@ repository commit. Add a new dated section before every future commit.
 
 ## 2026-09-16
 
+### Complete Phase 0 contract and Phase 1 qualification
+
+Commit message: `test(phase1): complete phase0 and phase1 qualification`
+
+Scope:
+
+- Completed the Phase 0 repository contract with explicit deployment boundary,
+  workload scope, routing precedence, timeout semantics, identity trust,
+  middleware ownership, and failure behavior.
+- Added the Phase 0 protocol support matrix for path boundaries, escaped paths,
+  forwarding headers, unsupported upgrades, unmatched routes, and committed
+  versus uncommitted timeout responses.
+- Added real-listener coverage for incomplete slow uploads and slow response
+  readers, and retained the shorter-parent-deadline middleware contract test.
+- Updated the plan to mark Phase 0 and the Phase 1 middleware foundation as
+  complete while keeping deployment-specific production sizing as a later
+  qualification input.
+
+Verification:
+
+- `go test ./...`
+- `go test -count=5 ./internal/gateway ./internal/middleware`
+- `go vet ./...`
+- `go build -o bin/janus.exe ./cmd/janus`
+- `go run ./cmd/janus -check -config configs/janus.json`
+
+Scope note: body-limit, request observation, admission, service middleware,
+health, admin, reload, and production qualification remain in later phases.
+
+## 2026-09-16
+
 ### Add route-level response buffering
 
 Commit message: `feat(middleware): add route-level response buffering`

@@ -35,8 +35,10 @@ timeout middleware, while `server.write_timeout` supplies the independent socket
 write deadline. The default write budget is 5 seconds longer than
 `request.maximum_duration`; an omitted write setting derives the same headroom
 from a customized overall budget. Server write deadlines allow the same 5-second
-headroom above the 24-hour overall maximum. Real-socket coverage now proves clean 504s
-before commitment and incomplete responses after commitment.
+headroom above the 24-hour overall maximum. Real-socket coverage now proves clean
+504s before commitment, incomplete responses after commitment, slow-upload
+termination, and slow-reader termination. The middleware unit contract also
+proves that an earlier parent deadline is preserved.
 
 Keep only settings with runtime consumers. Previously removed body-limit,
 capacity, SLO, and trusted-proxy fields return only with their implementations.
@@ -69,14 +71,32 @@ not just configuration types. Size effort after each phase's exit review.
 The minimum production candidate completes phases 0–6. Phase 2 is a useful
 development milestone, not a production-readiness claim.
 
-## Phase 0 decisions
+## Phase 0 decisions — complete
 
-Record the deployment assumptions above and review concrete allowed/rejected
-request examples: host precedence, segment prefixes, escaped paths, forwarding
-identity, large bodies, and unsupported upgrades. Agree on the fixed global
-chain, ordered route/service lists, and per-service state sharing documented in
-the architecture. Select workload-specific limits and pass/fail latency targets
-before qualification; they are not universal defaults promised by the framework.
+The initial repository contract is now explicit:
+
+| Area | Decision |
+| --- | --- |
+| Deployment boundary | Janus listens on a private HTTP/1.x interface behind an existing TLS load balancer; public TLS termination is outside Janus. |
+| Workload | Ordinary bounded-duration HTTP APIs; streaming is the default response behavior, while SSE, WebSocket, gRPC, HTTP/2 listener mode, HTTP/3, and TCP/UDP tunnels are outside this contract. |
+| Identity and authorization | The backend owns business authorization. Until a trusted-proxy policy exists, Janus trusts only the immediate peer and rewrites forwarding headers from that hop. |
+| Routing | Exact case-insensitive host rules without ports take precedence over hostless rules; the longest segment-bounded path prefix wins. No prefix stripping or path normalization is performed. |
+| Time budgets | The starter profile uses 5s header read, 30s request read, 30s overall context, 35s server write, and 10s backend response-header budgets. `server.write_timeout` stays greater than the overall budget. |
+| Size and overload | Header size and connection-pool bounds are configured now. Request-body limits, admission, health-based removal, and reload are intentionally later-phase policies. |
+| Composition and ownership | A fixed global chain wraps the router; matched routes use ordered route middleware; each service owns one shared proxy/pool; the transport is shared by services with the same policy. |
+| Failure semantics | Unmatched requests are 404, unsupported CONNECT/Upgrade requests are 501, upstream failures are 502, and pre-commitment overall timeouts are 504 when the socket is writable. Committed responses are never rewritten. |
+
+The concrete examples reviewed for this contract are: `/api` matches `/api`
+and `/api/users` but not `/apix`; an exact `example.com` host beats a hostless
+route; `/api/a%2Fb` routes using the decoded path while forwarding the escaped
+path; client forwarding-identity hints are removed; and incomplete or
+unsupported protocol requests do not bypass routing policy. These cases are
+covered by router and real-listener tests.
+
+Phase 0 is complete for the repository contract. Actual production RPS,
+concurrency, payload distribution, availability target, and added-p99 target
+remain deployment-owner inputs for Phase 6 qualification; Janus does not claim
+universal values for them.
 
 ## Phase 1 tasks and remaining item1 work
 
@@ -99,12 +119,13 @@ before qualification; they are not universal defaults promised by the framework.
    entry; header reading has its own earlier deadline. It cancels outbound work
    but does not forcibly stop arbitrary application code.
 5. Test using a real Janus listener: backend header stall, stalled response body,
-   client cancellation, and the pre/post-commitment deadline behavior are now
-   covered. Slow upload, slow response-reader, and shorter-parent-deadline
-   cases remain qualification work for the Phase 1 exit review. Do not buffer
-   whole responses for timeout.
+   client cancellation, slow upload, slow response-reader, and the
+   pre/post-commitment deadline behavior are covered. The timeout unit test
+   covers preservation of a shorter parent deadline. Do not buffer whole
+   responses for timeout.
 
-Phase 1 introduces the first named route policy, `buffer`, to prove route
+Phase 1 is complete for the middleware foundation and the first route-policy
+checkpoint. It introduces the named route policy `buffer` to prove route
 handler assembly. It is optional and bounded by `max_response_body_bytes`;
 routes without it retain streaming behavior. HTTP server settings and backend
 transport settings remain infrastructure configuration. Broader policy types,
