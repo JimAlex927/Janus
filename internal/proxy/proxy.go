@@ -89,8 +89,12 @@ func New(pool *upstream.Pool, transport http.RoundTripper, logger *zap.Logger) h
 				return
 			}
 			status := http.StatusBadGateway
+			var maxBytesError *http.MaxBytesError
+			if errors.As(err, &maxBytesError) {
+				status = http.StatusRequestEntityTooLarge
+			}
 			var timeout net.Error
-			if errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &timeout) && timeout.Timeout()) {
+			if status == http.StatusBadGateway && (errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &timeout) && timeout.Timeout())) {
 				status = http.StatusGatewayTimeout
 			}
 			logger.Warn("upstream request failed", zap.Int("status", status), zap.Error(err))

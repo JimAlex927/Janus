@@ -72,6 +72,28 @@ func TestRouteMiddlewareConfigRejectsBadReferences(t *testing.T) {
 	}
 }
 
+func TestServiceMiddlewareConfig(t *testing.T) {
+	valid := `{"listen":"127.0.0.1:8080","middlewares":{"cap":{"body_limit":{"max_bytes":1024}}},"services":{"s":{"upstreams":["http://localhost:9000"],"middlewares":["cap"]}},"routes":[{"name":"r","path_prefix":"/api","service":"s"}]}`
+	if _, err := Load(strings.NewReader(valid)); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name string
+		body string
+	}{
+		{"missing reference", strings.Replace(valid, `"cap"]`, `"missing"]`, 1)},
+		{"duplicate reference", strings.Replace(valid, `"cap"]`, `"cap","cap"]`, 1)},
+		{"multiple policies", strings.Replace(valid, `"body_limit":{"max_bytes":1024}`, `"body_limit":{"max_bytes":1024},"buffer":{"max_response_body_bytes":1024}`, 1)},
+		{"invalid body limit", strings.Replace(valid, `"max_bytes":1024`, `"max_bytes":0`, 1)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := Load(strings.NewReader(tc.body)); err == nil {
+				t.Fatal("expected configuration validation error")
+			}
+		})
+	}
+}
+
 func TestRouteProtocolConfig(t *testing.T) {
 	base := `{"listen":"127.0.0.1:8080","services":{"s":{"upstreams":["http://localhost:9000"]}},"routes":[{"name":"r","path_prefix":"/stream","protocols":["sse","websocket"],"service":"s"}]}`
 	if _, err := Load(strings.NewReader(base)); err != nil {

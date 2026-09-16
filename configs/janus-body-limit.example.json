@@ -1,0 +1,32 @@
+{
+  "version": 1,
+  "limens": {
+    "private": {
+      "address": "127.0.0.1:8081",
+      "protocols": ["http1"]
+    }
+  },
+  "middlewares": {
+    "route-upload-cap": {
+      "body_limit": { "max_bytes": 1048576 }
+    },
+    "service-upload-cap": {
+      "body_limit": { "max_bytes": 8388608 }
+    }
+  },
+  "routes": [
+    {
+      "name": "uploads",
+      "limen": "private",
+      "path_prefix": "/uploads",
+      "middlewares": ["route-upload-cap"],
+      "service": "storage"
+    }
+  ],
+  "services": {
+    "storage": {
+      "upstreams": ["http://127.0.0.1:9000"],
+      "middlewares": ["service-upload-cap"]
+    }
+  }
+}

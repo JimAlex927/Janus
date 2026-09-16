@@ -50,18 +50,24 @@ type TLSSettings struct {
 	MinVersion string `json:"min_version,omitempty"`
 }
 
-// Middleware is a named, typed route middleware definition.
-// Exactly one policy is currently supported per definition.
+// Middleware is a named, typed route/service middleware definition.
+// Exactly one policy is allowed per definition.
 type Middleware struct {
-	Buffer *BufferSettings `json:"buffer,omitempty"`
+	Buffer    *BufferSettings    `json:"buffer,omitempty"`
+	BodyLimit *BodyLimitSettings `json:"body_limit,omitempty"`
 }
 
 type BufferSettings struct {
 	MaxResponseBodyBytes int64 `json:"max_response_body_bytes"`
 }
 
+type BodyLimitSettings struct {
+	MaxBytes int64 `json:"max_bytes"`
+}
+
 type Service struct {
-	Upstreams []string `json:"upstreams"`
+	Upstreams   []string `json:"upstreams"`
+	Middlewares []string `json:"middlewares"`
 }
 
 type Route struct {
@@ -178,6 +184,19 @@ func (c Config) Validate() error {
 			}
 			seen[raw] = true
 		}
+		seenMiddlewares := map[string]bool{}
+		for _, middlewareName := range s.Middlewares {
+			if middlewareName == "" {
+				return fmt.Errorf("service %q has an empty middleware reference", name)
+			}
+			if seenMiddlewares[middlewareName] {
+				return fmt.Errorf("service %q references middleware %q more than once", name, middlewareName)
+			}
+			seenMiddlewares[middlewareName] = true
+			if _, ok := c.Middlewares[middlewareName]; !ok {
+				return fmt.Errorf("service %q references missing middleware %q", name, middlewareName)
+			}
+		}
 	}
 	names, matches := map[string]bool{}, map[string]bool{}
 	for _, r := range c.Routes {
@@ -244,11 +263,21 @@ func (c Config) Validate() error {
 		if name == "" {
 			return fmt.Errorf("middleware names must be nonempty")
 		}
-		if definition.Buffer == nil {
-			return fmt.Errorf("middleware %q must define buffer", name)
+		defined := 0
+		if definition.Buffer != nil {
+			defined++
 		}
-		if definition.Buffer.MaxResponseBodyBytes < 1 || definition.Buffer.MaxResponseBodyBytes > MaxBufferedResponseBytes {
+		if definition.BodyLimit != nil {
+			defined++
+		}
+		if defined != 1 {
+			return fmt.Errorf("middleware %q must define exactly one policy", name)
+		}
+		if definition.Buffer != nil && (definition.Buffer.MaxResponseBodyBytes < 1 || definition.Buffer.MaxResponseBodyBytes > MaxBufferedResponseBytes) {
 			return fmt.Errorf("middleware %q buffer.max_response_body_bytes must be between 1 and %d bytes", name, MaxBufferedResponseBytes)
+		}
+		if definition.BodyLimit != nil && (definition.BodyLimit.MaxBytes < 1 || definition.BodyLimit.MaxBytes > MaxRequestBodyBytes) {
+			return fmt.Errorf("middleware %q body_limit.max_bytes must be between 1 and %d bytes", name, MaxRequestBodyBytes)
 		}
 	}
 	return nil

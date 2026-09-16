@@ -12,6 +12,7 @@ const (
 
 	MaxBackendConnections          = 1_000_000
 	MaxBufferedResponseBytes int64 = 64 << 20
+	MaxRequestBodyBytes      int64 = 64 << 20
 
 	MinSettingDuration = time.Millisecond
 	MaxSettingDuration = 24 * time.Hour

@@ -2,9 +2,12 @@ package middleware
 
 import (
 	"context"
+	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -60,5 +63,38 @@ func TestChainPreservesParentCancellation(t *testing.T) {
 	Chain(final).ServeHTTP(httptest.NewRecorder(), r)
 	if !cancelled {
 		t.Fatal("parent cancellation was not visible to the final handler")
+	}
+}
+
+func TestBodyLimitRejectsKnownLengthBeforeNext(t *testing.T) {
+	called := false
+	h := BodyLimit(4)(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		called = true
+	}))
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/", strings.NewReader("12345"))
+	h.ServeHTTP(w, r)
+	if called {
+		t.Fatal("body limit invoked next for a known oversized body")
+	}
+	if w.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status = %d, want 413", w.Code)
+	}
+}
+
+func TestBodyLimitRejectsUnknownLengthWhileReading(t *testing.T) {
+	h := BodyLimit(4)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, err := io.ReadAll(r.Body)
+		var maxBytesError *http.MaxBytesError
+		if !errors.As(err, &maxBytesError) {
+			t.Errorf("body read error = %v, want MaxBytesError", err)
+		}
+	}))
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/", strings.NewReader("12345"))
+	r.ContentLength = -1
+	h.ServeHTTP(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want handler-completed 200", w.Code)
 	}
 }

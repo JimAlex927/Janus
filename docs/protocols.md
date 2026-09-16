@@ -32,9 +32,23 @@ break at a protocol boundary and how to demonstrate correct behavior.
 | Overall deadline before response commitment | Returns 504 when the response socket remains writable. |
 | Overall deadline after response commitment | Stops the stream; it does not append a second 504 response. |
 
-This matrix is the Phase 0 protocol boundary. Body-size rejection, admission,
-trusted multi-hop forwarding identity, and additional protocol modes are later
-policies, not implicit behavior.
+This matrix is the Phase 0 protocol boundary. Body-size rejection is now an
+explicit named request policy; admission, trusted multi-hop forwarding identity,
+and additional protocol modes remain later policies, not implicit behavior.
+
+## Request body limits
+
+`body_limit.max_bytes` is a named middleware that can be attached to a route or
+service. A known `Content-Length` above the cap is rejected with 413 before the
+backend handler is invoked. Chunked and otherwise unknown-length bodies are
+bounded as they are read; if the cap is exceeded while the proxy is forwarding,
+Janus returns 413 when the response is still writable. The backend can therefore
+have observed a prefix, but Janus does not retry the request.
+
+When both the matched route and its service have body-limit policies, the nested
+standard-library readers enforce the smallest effective cap. The policy limits
+bytes, not upload duration; use the server read deadline and a future admission
+policy for those separate concerns.
 
 Let the standard library parse and serialize HTTP. Never concatenate raw request
 headers or implement chunk decoding yourself. Go's reverse proxy handles
@@ -71,8 +85,8 @@ The starter exposes these values as validated settings. Its overall API duration
 is an active request-context deadline, so outbound backend work observes cancellation
 when that budget expires. `server.write_timeout` is an independent socket deadline
 and must exceed the overall budget by enough headroom to write a timeout response;
-it is not a replacement for context cancellation. Body-size enforcement and the
-remaining admission policy are still planned. Do not apply a short API timeout to
+it is not a replacement for context cancellation. The named body-size policy is
+separate from these time budgets. Do not apply a short API timeout to
 WebSockets, gRPC streams or SSE. Janus now skips the bounded API timeout for
 explicitly classified SSE/WebSocket requests, clears the finite response-write
 deadline, and lets Limen shutdown own the drain. Streaming still needs a

@@ -383,3 +383,115 @@ func TestBufferedRouteReturns504BeforeCommitment(t *testing.T) {
 		t.Fatalf("status = %d, want 504", resp.StatusCode)
 	}
 }
+
+func TestBodyLimitRejectsKnownLengthBeforeBackend(t *testing.T) {
+	called := make(chan struct{}, 1)
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called <- struct{}{}
+		w.WriteHeader(http.StatusCreated)
+	}))
+	defer backend.Close()
+	g := testGatewayWithConfig(t, config.Config{
+		Listen: "127.0.0.1:8080",
+		Middlewares: map[string]config.Middleware{
+			"upload-cap": {BodyLimit: &config.BodyLimitSettings{MaxBytes: 4}},
+		},
+		Services: map[string]config.Service{"s": {Upstreams: []string{backend.URL}}},
+		Routes:   []config.Route{{Name: "api", PathPrefix: "/api", Service: "s", Middlewares: []string{"upload-cap"}}},
+	})
+	front := serveTestGateway(t, g, config.DefaultSettings())
+	req, err := http.NewRequest(http.MethodPost, front+"/api", strings.NewReader("12345"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := (&http.Client{Timeout: 2 * time.Second}).Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status = %d, want 413", resp.StatusCode)
+	}
+	select {
+	case <-called:
+		t.Fatal("backend received a request for a known oversized body")
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+func TestBodyLimitRejectsChunkedBodyWhileForwarding(t *testing.T) {
+	backendStarted := make(chan struct{}, 1)
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		backendStarted <- struct{}{}
+		_, _ = io.ReadAll(r.Body)
+	}))
+	defer backend.Close()
+	g := testGatewayWithConfig(t, config.Config{
+		Listen: "127.0.0.1:8080",
+		Middlewares: map[string]config.Middleware{
+			"upload-cap": {BodyLimit: &config.BodyLimitSettings{MaxBytes: 4}},
+		},
+		Services: map[string]config.Service{"s": {Upstreams: []string{backend.URL}}},
+		Routes:   []config.Route{{Name: "api", PathPrefix: "/api", Service: "s", Middlewares: []string{"upload-cap"}}},
+	})
+	front := serveTestGateway(t, g, config.DefaultSettings())
+	req, err := http.NewRequest(http.MethodPost, front+"/api", io.NopCloser(strings.NewReader("12345")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.ContentLength = -1
+	resp, err := (&http.Client{Timeout: 2 * time.Second}).Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status = %d, want 413", resp.StatusCode)
+	}
+	select {
+	case <-backendStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("backend did not observe the bounded chunked request")
+	}
+}
+
+func TestServiceBodyLimitAppliesToAllRoutes(t *testing.T) {
+	called := make(chan struct{}, 1)
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called <- struct{}{}
+		w.WriteHeader(http.StatusCreated)
+	}))
+	defer backend.Close()
+	g := testGatewayWithConfig(t, config.Config{
+		Listen: "127.0.0.1:8080",
+		Middlewares: map[string]config.Middleware{
+			"service-cap": {BodyLimit: &config.BodyLimitSettings{MaxBytes: 4}},
+			"route-cap":   {BodyLimit: &config.BodyLimitSettings{MaxBytes: 8}},
+		},
+		Services: map[string]config.Service{
+			"s": {Upstreams: []string{backend.URL}, Middlewares: []string{"service-cap"}},
+		},
+		Routes: []config.Route{
+			{Name: "wide", PathPrefix: "/wide", Service: "s", Middlewares: []string{"route-cap"}},
+			{Name: "plain", PathPrefix: "/plain", Service: "s"},
+		},
+	})
+	front := serveTestGateway(t, g, config.DefaultSettings())
+	client := &http.Client{Timeout: 2 * time.Second}
+	for _, path := range []string{"/wide", "/plain"} {
+		resp, err := client.Post(front+path, "text/plain", strings.NewReader("12345"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if resp.StatusCode != http.StatusRequestEntityTooLarge {
+			resp.Body.Close()
+			t.Fatalf("%s status = %d, want 413", path, resp.StatusCode)
+		}
+		resp.Body.Close()
+	}
+	select {
+	case <-called:
+		t.Fatal("service body limit allowed an oversized request to reach the backend")
+	case <-time.After(100 * time.Millisecond):
+	}
+}

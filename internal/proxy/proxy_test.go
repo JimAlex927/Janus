@@ -29,6 +29,7 @@ func TestErrorMapping(t *testing.T) {
 	}{
 		{"connection failure", errors.New("connection refused"), 502},
 		{"deadline", context.DeadlineExceeded, 504},
+		{"request body too large", &http.MaxBytesError{Limit: 4}, 413},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			pool, _ := upstream.New([]*url.URL{u})

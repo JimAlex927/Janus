@@ -2,6 +2,7 @@
 package gateway
 
 import (
+	"fmt"
 	"net/http"
 	"net/url"
 
@@ -63,16 +64,18 @@ func NewWithTransport(c config.Config, logger *zap.Logger, transport http.RoundT
 		if err != nil {
 			return nil, err
 		}
-		services[name] = proxy.New(pool, transport, logger.With(zap.String("service", name)))
+		serviceHandler := proxy.New(pool, transport, logger.With(zap.String("service", name)))
+		serviceMiddlewares, err := buildMiddlewares(c, service.Middlewares)
+		if err != nil {
+			return nil, err
+		}
+		services[name] = middleware.Chain(serviceHandler, serviceMiddlewares...)
 	}
 	routes := make([]router.Route, 0, len(c.Routes))
 	for _, r := range c.Routes {
-		routeMiddlewares := make([]middleware.Middleware, 0, len(r.Middlewares))
-		for _, name := range r.Middlewares {
-			definition := c.Middlewares[name]
-			if definition.Buffer != nil {
-				routeMiddlewares = append(routeMiddlewares, middleware.Buffer(definition.Buffer.MaxResponseBodyBytes))
-			}
+		routeMiddlewares, err := buildMiddlewares(c, r.Middlewares)
+		if err != nil {
+			return nil, err
 		}
 		routeHandler := middleware.Chain(services[r.Service], routeMiddlewares...)
 		routes = append(routes, router.Route{Limen: r.Limen, Protocols: r.Protocols, Host: r.Host, PathPrefix: r.PathPrefix, Handler: routeHandler})
@@ -93,6 +96,22 @@ func NewWithTransport(c config.Config, logger *zap.Logger, transport http.RoundT
 		transport:      ownedTransport,
 		ownedTransport: ownedTransport,
 	}, nil
+}
+
+func buildMiddlewares(c config.Config, names []string) ([]middleware.Middleware, error) {
+	result := make([]middleware.Middleware, 0, len(names))
+	for _, name := range names {
+		definition := c.Middlewares[name]
+		switch {
+		case definition.Buffer != nil:
+			result = append(result, middleware.Buffer(definition.Buffer.MaxResponseBodyBytes))
+		case definition.BodyLimit != nil:
+			result = append(result, middleware.BodyLimit(definition.BodyLimit.MaxBytes))
+		default:
+			return nil, fmt.Errorf("middleware %q has no supported policy", name)
+		}
+	}
+	return result, nil
 }
 
 func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {

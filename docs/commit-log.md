@@ -5,6 +5,29 @@ repository commit. Add a new dated section before every future commit.
 
 ## 2026-09-16
 
+### Add bounded request-body middleware
+
+Commit message: `feat(policy): add route and service body limits`
+
+Scope:
+
+- Added typed `body_limit` definitions with strict validation and ordered
+  middleware references on both routes and services.
+- Rejected known oversized request bodies before backend forwarding and bounded
+  chunked/unknown-length bodies while they are read; proxy errors map to 413.
+- Composed route and service limits by nesting standard-library readers, giving
+  the request the smallest applicable cap without adding retries.
+- Added runnable configuration, unit/integration regression tests, and updated
+  the Phase 2F capability documentation.
+
+Verification:
+
+- `gofmt` on touched Go files
+- `go test ./...`
+
+Scope note: request IDs, access observation, global/service admission, health,
+metrics, and production qualification remain future work.
+
 ### Add SSE and classic HTTP/1 WebSocket routes
 
 Commit message: `feat(protocol): support SSE and WebSocket forwarding`

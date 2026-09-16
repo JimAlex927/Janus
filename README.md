@@ -88,8 +88,9 @@ still require restart. Legacy configurations remain startup-only.
 - No health-based removal: failed backends remain in round-robin rotation.
 - No application retry loop. Go's transport can still retry certain replayable
   requests on connection failures; see the protocol guide.
-- No request-body size enforcement, global concurrency limit, metrics, access log,
-  or separate readiness listener yet. Server and backend deadlines are validated
+- No global concurrency limit, metrics, access log, or separate readiness listener
+  yet. Named `body_limit` middleware bounds request bodies at route or service
+  scope; multiple applicable limits compose by the smallest cap. Server and backend deadlines are validated
   settings; `server.write_timeout` is independent from the overall request
   deadline, which actively cancels backend work. Routes stream responses by
   default; an optional route-level `buffer` middleware can hold finite responses
@@ -114,7 +115,8 @@ On 2026-09-16, with Go 1.25.1 on Windows/amd64: `go test ./...`, `go vet ./...`,
 the binary build, and example configuration validation passed. Tests exercise real
 HTTP connections, escaped paths, bodies/trailers, forwarding-header sanitation,
 HTTPS certificate trust, cancellation, route precedence, concurrent round-robin
-selection, and completion of an accepted request during shutdown.
+selection, body-limit rejection for known and chunked bodies, and completion of
+an accepted request during shutdown.
 
 `go test -race ./...` could not build: the installed Go `runtime/cgo` tool exited
 with status 2, including a retry with an explicit GCC path. Race-detector validation

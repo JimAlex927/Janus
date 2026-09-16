@@ -233,7 +233,7 @@ requests bypass the bounded API timeout and finite write deadline, while Limen
 tracks upgraded connections and force-closes them when the drain budget expires.
 The route buffer middleware bypasses both modes.
 
-## Phase 2F: request policies (original Phase 2 scope)
+## Phase 2F: request policies (in progress)
 
 1. Add request ID and a single access observer in the fixed global chain. Generate
    IDs by default; define validation and trust before accepting client-supplied
@@ -244,17 +244,22 @@ The route buffer middleware bypasses both modes.
    trailers, informational responses, implicit 200, and copy/error accounting.
    Test `ResponseController`; do not advertise unsupported optional interfaces.
 3. Extend typed named middleware definitions and ordered route/service references.
-   Implement `body_limit` as the next named policy and add service attachments.
-   Missing references, unknown types/options, multiple types per definition,
-   unsupported scopes, and duplicate references within a list fail validation
-   before opening listeners.
-4. Enforce known-length limits before forwarding; enforce chunked limits while
-   streaming. Return 413 when still possible; terminate an already-started
-   response otherwise. A backend may have received a prefix of an oversized body.
-   Do not add retries. Multiple route/service body caps use the smallest cap.
-5. Preserve configurations without middleware references. Include runnable
-   examples and end-to-end tests for two routes sharing one service, short-circuit
-   behavior, and ordered policies. Add policy fields only when they take effect.
+   `body_limit` is implemented at route and service scope. Missing references,
+   unknown types/options, multiple types per definition, and duplicate references
+   within a list fail validation before opening listeners. Scope compatibility is
+   currently explicit: the built-in policies are valid at both scopes.
+4. Enforce known-length limits before forwarding; enforce chunked and unknown-length
+   limits while streaming. Return 413 when still possible; terminate an already-
+   started response otherwise. A backend may have received a prefix of an oversized
+   body. Do not add retries. Multiple route/service body caps use the smallest cap.
+5. Preserve configurations without middleware references. A runnable body-limit
+   example and end-to-end tests for short-circuit behavior and chunked forwarding
+   are now present. Request IDs, access observation, response capability audit and
+   the remaining 2F policy validation work are still outstanding.
+
+The first 2F delivery is the bounded request-body policy. It is intentionally a
+request-size guard, not an upload-duration or global admission policy: server read
+deadlines and the later Phase 3 admission controls remain independent.
 
 ## Phase 3 tasks
 
@@ -317,7 +322,7 @@ Perform representative load, a 24-hour soak, and a canary with rollback criteria
 
 Start with 1Q qualification fixes, then separate commits for Limen extraction,
 runtime generation ownership, HTTPS/H2, file reload, and TLS pair rotation.
-Follow with the observer/body-limit work in 2E and the existing operation phases.
+Follow with the observer/body-limit work in 2F and the existing operation phases.
 HTTP/3 lands as its own adapter and integration-test changes in Phase 5.
 Each implementation commit updates [commit-log.md](commit-log.md) with actual
 changes and verification. Do not describe planned capabilities as shipped.

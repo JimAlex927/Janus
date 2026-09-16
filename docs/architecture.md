@@ -134,9 +134,9 @@ possible at the overall timeout maximum.
 
 ### Proposed named policy example
 
-This example includes future Phase 2 policy types and service attachments. It is
-not accepted by the current binary; the current accepted route-level `buffer`
-example is in `configs/janus.json`.
+This is a runnable versioned policy example. The current binary accepts the
+`body_limit` definition and service attachment shown below; the route-level
+`buffer` example remains in `configs/janus.json`.
 
 ```json
 {
@@ -175,10 +175,9 @@ Validate unused definitions too, and reject missing references, wrong scopes,
 duplicate references within one list, and incompatible policy combinations.
 Definitions in a JSON object have no execution order; attachment arrays do.
 
-The first implemented configurable policy is route-level `buffer`; `body_limit`
-is the next planned policy (route or service scope). Multiple
-applicable body limits compose by the minimum. The example therefore allows at
-most 1 MiB on `/api`. Phase 3 adds `in_flight` at service scope only; global
+The implemented configurable policies are route/service `body_limit` and
+route-level `buffer`. Multiple applicable body limits compose by the minimum.
+The example therefore allows at most 1 MiB on `/api`. Phase 3 adds `in_flight` at service scope only; global
 admission remains fixed infrastructure. Requests must pass both active caps.
 No route-level timeout override or arbitrary global policy list is needed initially.
 
