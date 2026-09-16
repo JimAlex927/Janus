@@ -1,11 +1,21 @@
 package config
 
 import (
+	"bytes"
 	"encoding/json"
 	"strings"
 	"testing"
 	"time"
 )
+
+func FuzzLoadNeverPanics(f *testing.F) {
+	f.Add([]byte(`{"listen":"127.0.0.1:8080","services":{"s":{"upstreams":["http://localhost:9000"]}},"routes":[{"name":"r","path_prefix":"/","service":"s"}]}`))
+	f.Add([]byte(`{"version":1,"limens":{"public":{"address":"127.0.0.1:8443","protocols":["http1"]}},"services":{"s":{"upstreams":["http://localhost:9000"]}},"routes":[{"name":"r","limen":"public","path_prefix":"/","service":"s"}]}`))
+	f.Add([]byte(`{"listen":"127.0.0.1:8080","listen":"127.0.0.1:8081"}`))
+	f.Fuzz(func(t *testing.T, data []byte) {
+		_, _ = Load(bytes.NewReader(data))
+	})
+}
 
 func TestEffectiveViewNormalizesLegacyConfigAndOmitsTLSAssets(t *testing.T) {
 	body := `{"listen":"127.0.0.1:8080","settings":{"request":{"maximum_duration":"1s"}},"services":{"s":{"upstreams":["https://backend.internal:8443"]}},"routes":[{"name":"r","path_prefix":"/","service":"s"}]}`

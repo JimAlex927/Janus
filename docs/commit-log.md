@@ -5,6 +5,27 @@ repository commit. Add a new dated section before every future commit.
 
 ## 2026-09-16
 
+### Add configuration parser fuzz smoke
+
+Commit message: `test(config): add parser fuzz smoke`
+
+Scope:
+
+- Added `FuzzLoadNeverPanics` with valid, versioned and duplicate-key seed
+  inputs for the bounded strict configuration loader.
+- Added a ten-second fuzz smoke step to the Linux CI job.
+- Updated the release plan to distinguish parser fuzz coverage from broader
+  malformed-framing, security-audit and long-running fuzz qualification.
+
+Verification:
+
+- `gofmt -w internal/config/config_test.go`
+- `go test -fuzz=FuzzLoadNeverPanics -fuzztime=5s ./internal/config`
+- `git diff --check`
+
+Scope note: this checks parser panic resistance only; it is not a complete
+protocol fuzzer or security review.
+
 ### Add pinned Linux CI release gates
 
 Commit message: `ci: add pinned Linux test and build gates`

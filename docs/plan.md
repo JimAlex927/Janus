@@ -361,8 +361,10 @@ The repository now defines a pinned Ubuntu CI job for the release gates: full
 tests, the race detector, vet, and a static Linux build. A real CI run is still
 required before treating those checks as release evidence. Add Linux
 signal/socket tests, malformed framing, ambiguous paths, middleware composition,
-and repeated failed/successful reload coverage. Perform representative load, a
-24-hour soak, and a canary with rollback criteria.
+and repeated failed/successful reload coverage. A configuration-parser fuzz
+target and a short CI fuzz smoke are now present; longer fuzz campaigns remain
+required. Perform representative load, a 24-hour soak, and a canary with
+rollback criteria.
 
 ## Suggested implementation commits
 

@@ -30,6 +30,9 @@ jobs:
       - name: Test
         run: go test -count=2 ./...
 
+      - name: Config parser fuzz smoke
+        run: go test -fuzz=FuzzLoadNeverPanics -fuzztime=10s ./internal/config
+
       - name: Race test
         run: go test -race -count=1 ./...
 
