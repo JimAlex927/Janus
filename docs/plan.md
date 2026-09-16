@@ -288,9 +288,11 @@ gateway for production; Phase 6 qualification remains required.
    Candidate limit changes are applied only at publication, so failed reloads do
    not mutate the active policy. Cross-generation and lowered-limit tests cover
    this behavior.
-3. Add a separate loopback/private admin listener with `/livez` and `/readyz`.
-   Readiness means startup completed and requests are accepted under the global
-   policy; one unhealthy service does not make the whole gateway unready.
+3. The separate loopback/private admin listener with `/livez` and `/readyz` is
+   implemented. Readiness becomes true only after all configured business
+   listeners bind and start, and is cleared before graceful drain. Admin health
+   requests bypass business admission; one unhealthy service does not make the
+   whole gateway unready until Phase 4 health integration exists.
 4. Extend Limen's configurable drain with an optional bounded load-balancer removal
    delay. Mark unready first, stop admitting new work, allow accepted work to
    finish within budget, then force-close remaining connections. Align the grace

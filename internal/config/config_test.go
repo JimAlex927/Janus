@@ -236,3 +236,18 @@ func TestSettingsRejectInvalidBounds(t *testing.T) {
 		})
 	}
 }
+
+func TestAdminAddressMustBeLoopback(t *testing.T) {
+	base := `{"listen":"127.0.0.1:8080","settings":{"admin":{"address":"127.0.0.1:9090"}},"services":{"s":{"upstreams":["http://localhost:9000"]}},"routes":[{"name":"r","path_prefix":"/api","service":"s"}]}`
+	if _, err := Load(strings.NewReader(base)); err != nil {
+		t.Fatal(err)
+	}
+	for _, address := range []string{"0.0.0.0:9090", "localhost:9090", "127.0.0.1:0", "127.0.0.1:not-a-port"} {
+		t.Run(address, func(t *testing.T) {
+			body := strings.Replace(base, "127.0.0.1:9090", address, 1)
+			if _, err := Load(strings.NewReader(body)); err == nil {
+				t.Fatal("expected invalid admin address")
+			}
+		})
+	}
+}

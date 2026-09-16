@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "limens": {
+    "private": {
+      "address": "127.0.0.1:8081",
+      "protocols": ["http1"]
+    }
+  },
+  "settings": {
+    "admin": {
+      "address": "127.0.0.1:9090"
+    }
+  },
+  "routes": [
+    {
+      "name": "api",
+      "limen": "private",
+      "path_prefix": "/api",
+      "service": "api"
+    }
+  ],
+  "services": {
+    "api": {
+      "upstreams": ["http://127.0.0.1:9000"]
+    }
+  }
+}

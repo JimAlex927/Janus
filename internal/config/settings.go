@@ -3,6 +3,8 @@ package config
 import (
 	"encoding/json"
 	"fmt"
+	"net"
+	"strconv"
 	"time"
 )
 
@@ -50,6 +52,11 @@ type Settings struct {
 	Request RequestSettings `json:"request"`
 	Server  ServerSettings  `json:"server"`
 	Backend BackendSettings `json:"backend"`
+	Admin   AdminSettings   `json:"admin"`
+}
+
+type AdminSettings struct {
+	Address string `json:"address"` // optional loopback-only private listener
 }
 
 type RequestSettings struct {
@@ -199,6 +206,11 @@ func (s Settings) Validate() error {
 	if err := validateSize("server.max_header_bytes", s.Server.MaxHeaderBytes, MinHeaderBytes, MaxHeaderBytes); err != nil {
 		return err
 	}
+	if s.Admin.Address != "" {
+		if err := validateLoopbackAddress(s.Admin.Address); err != nil {
+			return fmt.Errorf("admin.address: %w", err)
+		}
+	}
 
 	for name, value := range map[string]Duration{
 		"backend.connect_timeout":         s.Backend.ConnectTimeout,
@@ -225,6 +237,22 @@ func (s Settings) Validate() error {
 	}
 	if s.Backend.MaxIdleConnsPerHost > s.Backend.MaxConnsPerHost {
 		return fmt.Errorf("backend.max_idle_conns_per_host must not exceed backend.max_conns_per_host")
+	}
+	return nil
+}
+
+func validateLoopbackAddress(address string) error {
+	host, port, err := net.SplitHostPort(address)
+	if err != nil || host == "" {
+		return fmt.Errorf("address must be a loopback host:port")
+	}
+	p, portErr := strconv.Atoi(port)
+	if portErr != nil || p < 1 || p > 65535 {
+		return fmt.Errorf("address must be a loopback host:port with port 1..65535")
+	}
+	ip := net.ParseIP(host)
+	if ip == nil || !ip.IsLoopback() {
+		return fmt.Errorf("address must use a loopback IP")
 	}
 	return nil
 }

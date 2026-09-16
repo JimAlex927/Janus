@@ -114,7 +114,7 @@ scope are rejected before startup.
 | Setting | Update policy in the first implementation |
 | --- | --- |
 | Limen addresses, protocols, TLS enablement, socket/stream limits | Restart |
-| Global timeout, observer options, global admission, drain budget | Restart |
+| Global timeout, observer options, global admission, admin address, drain budget | Restart |
 | Outbound transport/TLS options and pool limits | Restart; shared process-owned transport |
 | Routes, Limen attachments, middleware definitions/references, service targets | Transactional routing reload in Phase 2D |
 | Certificate/key contents at configured paths | Separate validated pair rotation in Phase 2D; new handshakes use it |

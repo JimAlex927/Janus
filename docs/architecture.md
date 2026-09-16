@@ -18,7 +18,8 @@ The fixed global protocol guard, admission cap, request observation and overall
 deadline are applied once by runtime. The route-level `buffer`, route/service
 `body_limit`, service `in_flight`, versioned routing reload, TLS
 certificate-content rotation, and protocol-scoped streaming routes are
-implemented; health and admin remain planned.
+implemented; admin liveness/readiness is wired at process scope, while health
+probes remain planned.
 
 The concrete multi-protocol and reload design is in
 [limen-runtime.md](limen-runtime.md). Limen owns protocol servers, runtime owns
@@ -113,7 +114,7 @@ response through a generic panic-recovery wrapper.
 | `middlewares` definitions | Named, typed, reusable configuration; `buffer` is implemented first | Phase 1/2 |
 | `routes[].middlewares` | Ordered policies for the matched route; route-level `buffer` is implemented first | Phase 1/2 |
 | `services.<name>.middlewares` | Ordered policies on the shared service handler | Phase 2 |
-| Global admission, drain and admin settings | Process/listener lifecycle | Admission implemented; drain/admin follow-up |
+| Global admission, drain and admin settings | Process/listener lifecycle | Admission and admin health implemented; drain follow-up |
 | Health probes | Per-service resource lifecycle | Phase 4 |
 | Trusted proxy CIDRs and identity rules | Listener trust policy with proxy rewrite integration | Phase 4 |
 | Routing file and generation publication | Runtime; strict build-before-swap transaction | 2B/2D |

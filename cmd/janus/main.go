@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"janus/internal/admin"
 	"janus/internal/config"
 	"janus/internal/limen"
 	janusruntime "janus/internal/runtime"
@@ -77,15 +78,41 @@ func run(ctx context.Context, path string, check bool, reloadInterval time.Durat
 	servers := make([]*limen.Limen, 0, len(names))
 	serversByName := make(map[string]*limen.Limen, len(names))
 	listeners := make([]net.Listener, 0, len(names))
+	var adminState *admin.State
+	var adminServer *http.Server
+	var adminListener net.Listener
+	if address := c.Settings.Admin.Address; address != "" {
+		adminState = admin.NewState()
+		adminServer = &http.Server{
+			Handler:           admin.NewHandler(adminState),
+			ReadHeaderTimeout: c.Settings.Server.ReadHeaderTimeout.Duration(),
+			WriteTimeout:      c.Settings.Server.WriteTimeout.Duration(),
+			IdleTimeout:       c.Settings.Server.IdleTimeout.Duration(),
+			MaxHeaderBytes:    int(c.Settings.Server.MaxHeaderBytes),
+		}
+		adminListener, err = net.Listen("tcp", address)
+		if err != nil {
+			closeListeners(listeners)
+			closeServers(servers)
+			return fmt.Errorf("admin listener: %w", err)
+		}
+		defer func() { _ = adminServer.Close() }()
+	}
 	for _, name := range names {
 		protocolLimen, err := limen.NewBinding(name, bindings[name], requestRuntime, c.Settings)
 		if err != nil {
+			if adminListener != nil {
+				_ = adminServer.Close()
+			}
 			closeListeners(listeners)
 			closeServers(servers)
 			return err
 		}
 		ln, err := protocolLimen.Listen()
 		if err != nil {
+			if adminListener != nil {
+				_ = adminServer.Close()
+			}
 			closeListeners(listeners)
 			closeServers(servers)
 			return fmt.Errorf("limen %q: %w", name, err)
@@ -113,13 +140,25 @@ func run(ctx context.Context, path string, check bool, reloadInterval time.Durat
 		go func() { _ = routeReloader.Run(reloadCtx) }()
 		go func() { _ = certificateReloader.Run(reloadCtx) }()
 	}
-	done := make(chan error, len(servers))
+	done := make(chan error, len(servers)+1)
 	for i, server := range servers {
 		go func(i int, server *limen.Limen) { done <- server.Serve(listeners[i]) }(i, server)
+	}
+	if adminServer != nil {
+		go func() { done <- adminServer.Serve(adminListener) }()
+	}
+	if adminState != nil {
+		adminState.SetReady(true)
 	}
 	select {
 	case err := <-done:
 		cancelReload()
+		if adminState != nil {
+			adminState.SetReady(false)
+		}
+		if adminServer != nil {
+			_ = adminServer.Close()
+		}
 		closeServers(servers)
 		if errors.Is(err, http.ErrServerClosed) {
 			return nil
@@ -127,6 +166,9 @@ func run(ctx context.Context, path string, check bool, reloadInterval time.Durat
 		return err
 	case <-ctx.Done():
 		logger.Info("draining requests")
+		if adminState != nil {
+			adminState.SetReady(false)
+		}
 		// Do not derive this from the already-cancelled signal context.
 		drain, cancel := context.WithTimeout(context.Background(), 35*time.Second)
 		defer cancel()
@@ -134,10 +176,22 @@ func run(ctx context.Context, path string, check bool, reloadInterval time.Durat
 		for _, server := range servers {
 			go func(server *limen.Limen) { drainErrors <- server.Shutdown(drain) }(server)
 		}
+		if adminServer != nil {
+			go func() { drainErrors <- adminServer.Shutdown(drain) }()
+		}
 		for range servers {
 			if err := <-drainErrors; err != nil {
+				if adminServer != nil {
+					_ = adminServer.Close()
+				}
 				closeServers(servers)
 				return fmt.Errorf("drain: %w", err)
+			}
+		}
+		if adminServer != nil {
+			if err := <-drainErrors; err != nil {
+				closeServers(servers)
+				return fmt.Errorf("admin drain: %w", err)
 			}
 		}
 		return nil

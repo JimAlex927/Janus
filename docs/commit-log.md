@@ -5,6 +5,32 @@ repository commit. Add a new dated section before every future commit.
 
 ## 2026-09-16
 
+### Add private liveness and readiness listener
+
+Commit message: `feat(admin): add loopback health endpoints`
+
+Scope:
+
+- Added optional loopback-only `settings.admin.address` validation and a
+  separate admin HTTP server exposing `GET`/`HEAD` `/livez` and `/readyz`.
+- Readiness becomes true only after all business listeners are bound and serving,
+  and is cleared before graceful drain; liveness remains true while the process
+  drains. Admin requests do not consume business admission permits.
+- Added startup cleanup for partial listener failures and state/method/HEAD
+  endpoint tests plus a runnable admin configuration example.
+
+Verification:
+
+- `gofmt` on touched Go files
+- `go test ./...`
+- `go vet ./...`
+- `go build -o bin/janus.exe ./cmd/janus`
+- `go run ./cmd/janus -check` for the runnable configuration examples
+- `git diff --check`
+
+Scope note: backend health probes, metrics, configurable drain and overall
+production qualification remain future work.
+
 ### Add bounded global and service admission
 
 Commit message: `feat(admission): add global and service concurrency limits`
