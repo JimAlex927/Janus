@@ -5,6 +5,31 @@ repository commit. Add a new dated section before every future commit.
 
 ## 2026-09-16
 
+### Preserve abort semantics while finalizing access observation
+
+Commit message: `fix(observability): preserve response abort semantics`
+
+Scope:
+
+- Changed the fixed observer to log `http.ErrAbortHandler` outcomes before
+  re-panicking, preserving net/http's truncated-response behavior instead of
+  accidentally emitting a terminating chunk after a response-copy failure.
+- Added trailer, partial-write, response-copy-abort and gateway-level 404/413/
+  501/502/504 access-observation regression coverage.
+- Updated the Phase 2F status and current capability documentation.
+
+Verification:
+
+- `gofmt` on touched Go files
+- `go test ./...`
+- `go vet ./...`
+- `go build -o bin/janus.exe ./cmd/janus`
+- `go run ./cmd/janus -check` for the runnable configuration examples
+- `git diff --check`
+
+Scope note: metrics, admission, health, trusted-proxy identity and overall
+production qualification remain future work.
+
 ### Add fixed request observation and response capability preservation
 
 Commit message: `feat(observability): add request IDs and access observation`

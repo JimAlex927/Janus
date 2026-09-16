@@ -76,6 +76,61 @@ func TestObserveClassifiesEarlyRouteNotFound(t *testing.T) {
 	}
 }
 
+func TestObserveLogsResponseCopyAbort(t *testing.T) {
+	core, logs := observer.New(zap.InfoLevel)
+	h := Observe(zap.New(core))(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, "prefix")
+		panic(http.ErrAbortHandler)
+	}))
+	w := httptest.NewRecorder()
+	panicked := false
+	func() {
+		defer func() {
+			panicked = recover() == http.ErrAbortHandler
+		}()
+		h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "http://gateway/stream", nil))
+	}()
+	if !panicked {
+		t.Fatal("observer swallowed response-copy abort")
+	}
+	if got := logs.All()[0].ContextMap()["error_class"]; got != "response_copy" {
+		t.Fatalf("error class = %#v, want response_copy", got)
+	}
+}
+
+func TestObserveCountsPartialWrites(t *testing.T) {
+	observation := newTestObservation()
+	writer := wrapResponseWriter(&shortWriteResponseWriter{}, observation, false)
+	if n, err := writer.Write([]byte("hello")); n != 2 || err == nil {
+		t.Fatalf("write = %d, %v, want partial write with error", n, err)
+	}
+	outcome := observation.Outcome()
+	if outcome.Status != http.StatusOK || outcome.ResponseBytes != 2 {
+		t.Fatalf("outcome = %+v, want status 200 and 2 response bytes", outcome)
+	}
+}
+
+func TestObservePreservesTrailersOverRealConnection(t *testing.T) {
+	server := httptest.NewServer(Observe(zap.NewNop())(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Trailer", "X-Result")
+		_, _ = io.WriteString(w, "body")
+		w.Header().Set("X-Result", "complete")
+	})))
+	defer server.Close()
+	resp, err := server.Client().Get(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(body) != "body" || resp.Trailer.Get("X-Result") != "complete" {
+		t.Fatalf("body=%q trailers=%v", body, resp.Trailer)
+	}
+}
+
 func TestObserverPreservesResponseCapabilities(t *testing.T) {
 	plain := &plainResponseWriter{header: make(http.Header)}
 	wrapped := wrapResponseWriter(plain, nil, false)
@@ -132,6 +187,21 @@ type plainResponseWriter struct {
 	header http.Header
 	status int
 	body   bytes.Buffer
+}
+
+type shortWriteResponseWriter struct {
+	header http.Header
+}
+
+func (w *shortWriteResponseWriter) Header() http.Header {
+	if w.header == nil {
+		w.header = make(http.Header)
+	}
+	return w.header
+}
+func (w *shortWriteResponseWriter) WriteHeader(int) {}
+func (w *shortWriteResponseWriter) Write(p []byte) (int, error) {
+	return 2, io.ErrShortWrite
 }
 
 type informationalResponseWriter struct {

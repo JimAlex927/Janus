@@ -88,9 +88,10 @@ still require restart. Legacy configurations remain startup-only.
 - No health-based removal: failed backends remain in round-robin rotation.
 - No application retry loop. Go's transport can still retry certain replayable
   requests on connection failures; see the protocol guide.
-- No global concurrency limit, metrics, access log, or separate readiness listener
-  yet. Named `body_limit` middleware bounds request bodies at route or service
-  scope; multiple applicable limits compose by the smallest cap. Server and backend deadlines are validated
+- No global concurrency limit, metrics, or separate readiness listener yet. Named
+  `body_limit` middleware bounds request bodies at route or service scope; multiple
+  applicable limits compose by the smallest cap. A fixed access observer emits
+  request IDs and bounded request outcome records. Server and backend deadlines are validated
   settings; `server.write_timeout` is independent from the overall request
   deadline, which actively cancels backend work. Routes stream responses by
   default; an optional route-level `buffer` middleware can hold finite responses

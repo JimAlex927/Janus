@@ -42,29 +42,47 @@ func Observe(logger *zap.Logger) Middleware {
 				r.Body = &countingBody{ReadCloser: r.Body, observation: observation}
 			}
 
+			defer func() {
+				recovered := recover()
+				if recovered != nil {
+					if recovered == http.ErrAbortHandler {
+						observation.MarkError("response_copy")
+					} else {
+						observation.MarkError("handler_panic")
+					}
+				}
+				logOutcome(logger, r, observation)
+				if recovered != nil {
+					panic(recovered)
+				}
+			}()
+
 			next.ServeHTTP(wrapResponseWriter(w, observation, protocol.IsWebSocketRequest(r)), r)
-			outcome := observation.Outcome()
-			if outcome.ErrorClass == "" {
-				outcome.ErrorClass = defaultErrorClass(outcome)
-			}
-			fields := []zap.Field{
-				zap.String("request_id", outcome.RequestID),
-				zap.String("method", r.Method),
-				zap.String("path", r.URL.Path),
-				zap.String("route", outcome.Route),
-				zap.String("service", outcome.Service),
-				zap.Int("status", outcome.Status),
-				zap.Duration("duration", time.Since(outcome.Started)),
-				zap.Int64("request_bytes", outcome.RequestBytes),
-				zap.Int64("response_bytes", outcome.ResponseBytes),
-				zap.String("error_class", outcome.ErrorClass),
-			}
-			if outcome.Status >= 500 {
-				logger.Warn("request completed", fields...)
-			} else {
-				logger.Info("request completed", fields...)
-			}
 		})
+	}
+}
+
+func logOutcome(logger *zap.Logger, r *http.Request, observation *telemetry.Observation) {
+	outcome := observation.Outcome()
+	if outcome.ErrorClass == "" {
+		outcome.ErrorClass = defaultErrorClass(outcome)
+	}
+	fields := []zap.Field{
+		zap.String("request_id", outcome.RequestID),
+		zap.String("method", r.Method),
+		zap.String("path", r.URL.Path),
+		zap.String("route", outcome.Route),
+		zap.String("service", outcome.Service),
+		zap.Int("status", outcome.Status),
+		zap.Duration("duration", time.Since(outcome.Started)),
+		zap.Int64("request_bytes", outcome.RequestBytes),
+		zap.Int64("response_bytes", outcome.ResponseBytes),
+		zap.String("error_class", outcome.ErrorClass),
+	}
+	if outcome.Status >= 500 {
+		logger.Warn("request completed", fields...)
+	} else {
+		logger.Info("request completed", fields...)
 	}
 }
 
