@@ -5,6 +5,33 @@ repository commit. Add a new dated section before every future commit.
 
 ## 2026-09-16
 
+### Add safe effective configuration inspection and native systemd artifact
+
+Commit message: `feat(ops): add effective config inspection and systemd artifact`
+
+Scope:
+
+- Added `-print-effective-config`, which validates startup requirements and
+  prints normalized Limen bindings and defaulted settings without TLS
+  certificate or private-key asset fields.
+- Added config-level coverage for legacy Limen normalization, default
+  expansion, and TLS asset omission.
+- Added a native Linux systemd unit and deployment/rollout/rollback guide with
+  dedicated non-root execution, explicit starter resource budgets and a clear
+  qualification boundary.
+- Documented that the artifact is not Linux/systemd-certified on the current
+  Windows development host and that container packaging remains unverified.
+
+Verification:
+
+- `gofmt -w internal/config/effective.go internal/config/config_test.go cmd/janus/main.go`
+- `go test ./internal/config ./cmd/janus`
+- `go run ./cmd/janus -print-effective-config -config configs/janus.json`
+
+Scope note: effective inspection and the systemd artifact improve operator
+reviewability but do not certify Linux behavior, CA-root packaging, resource
+capacity, load/soak, or production readiness.
+
 ### Verify HTTP/3 failure stops TCP fallback
 
 Commit message: `test(protocol): verify HTTP/3 failure stops TCP fallback`

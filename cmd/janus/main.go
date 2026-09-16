@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -27,6 +28,7 @@ func main() {
 	//1、parse the argument in the exe command-----------
 	path := flag.String("config", "configs/janus.json", "configuration file")
 	check := flag.Bool("check", false, "validate configuration and exit")
+	printEffective := flag.Bool("print-effective-config", false, "print normalized configuration without TLS asset paths and exit")
 	reloadInterval := flag.Duration("reload-interval", time.Second, "poll interval for versioned configuration and TLS files")
 	flag.Parse()
 	//2、logger init---------------------------------
@@ -40,25 +42,32 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	//4、Run : the core logics
-	if err := run(ctx, *path, *check, *reloadInterval, logger); err != nil {
+	if err := run(ctx, *path, *check, *printEffective, *reloadInterval, logger); err != nil {
 		logger.Error("janus stopped", zap.Error(err))
 		os.Exit(1)
 	}
 }
 
-func run(ctx context.Context, path string, check bool, reloadInterval time.Duration, logger *zap.Logger) error {
+func run(ctx context.Context, path string, check, printEffective bool, reloadInterval time.Duration, logger *zap.Logger) error {
 	// Open and validate the Janus configuration. Versioned TLS paths are
 	// resolved relative to this file by LoadFile.
 	c, err := config.LoadFile(path)
 	if err != nil {
 		return err
 	}
-	//check is used for what? TODO
-	if check {
+	if check || printEffective {
 		for name, binding := range c.LimenBindings() {
 			if _, err := limen.NewBinding(name, binding, http.NotFoundHandler(), c.Settings); err != nil {
 				return err
 			}
+		}
+		if printEffective {
+			encoder := json.NewEncoder(os.Stdout)
+			encoder.SetIndent("", "  ")
+			if err := encoder.Encode(c.EffectiveView()); err != nil {
+				return fmt.Errorf("print effective configuration: %w", err)
+			}
+			return nil
 		}
 		logger.Info("configuration valid")
 		return nil

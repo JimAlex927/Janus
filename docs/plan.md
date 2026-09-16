@@ -347,9 +347,13 @@ in Phase 4 also need retirement/reload tests when introduced.
    coordinated bounded shutdown are covered by forced local-drain tests.
    H3 buffer/stream response semantics, broader fault-injection, deployment and
    Linux interop remain.
-4. Ship a minimal deployment artifact, verified CA roots, non-root execution,
-   resource budgets, rollout/rollback instructions, and effective-config inspection
-   that excludes secrets. Add per-service transport/TLS policy only when required.
+4. Partially complete: ship a minimal native systemd artifact with non-root
+   execution, explicit starter resource budgets, restart/drain settings,
+   rollout/rollback instructions, and `-print-effective-config` inspection that
+   normalizes defaults while excluding TLS asset paths. Docker/container images,
+   verified CA-root packaging, Linux execution, measured resource budgets and
+   canary rollback evidence remain. Add per-service transport/TLS policy only
+   when required.
 
 ## Phase 6 tasks
 

@@ -1,10 +1,39 @@
 package config
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
 )
+
+func TestEffectiveViewNormalizesLegacyConfigAndOmitsTLSAssets(t *testing.T) {
+	body := `{"listen":"127.0.0.1:8080","settings":{"request":{"maximum_duration":"1s"}},"services":{"s":{"upstreams":["https://backend.internal:8443"]}},"routes":[{"name":"r","path_prefix":"/","service":"s"}]}`
+	c, err := Load(strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	view := c.EffectiveView()
+	limen, ok := view.Limens["default"]
+	if !ok || limen.Address != "127.0.0.1:8080" || len(limen.Protocols) != 1 || limen.Protocols[0] != ProtocolHTTP1 {
+		t.Fatalf("legacy limen was not normalized: %+v", view.Limens)
+	}
+	if view.Version != CurrentConfigVersion || view.Settings.Server.WriteTimeout.Duration() != 6*time.Second {
+		t.Fatalf("effective defaults = version %d, write timeout %s", view.Version, view.Settings.Server.WriteTimeout.Duration())
+	}
+	tlsConfig, err := Load(strings.NewReader(`{"version":1,"limens":{"public":{"address":"127.0.0.1:8443","protocols":["http1"],"tls":{"cert_file":"private/server.crt","key_file":"private/server.key"}}},"services":{"s":{"upstreams":["https://backend.internal:8443"]}},"routes":[{"name":"r","limen":"public","path_prefix":"/","service":"s"}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(tlsConfig.EffectiveView())
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(encoded)
+	if strings.Contains(text, "cert_file") || strings.Contains(text, "key_file") {
+		t.Fatalf("effective view exposed TLS asset fields: %s", text)
+	}
+}
 
 func TestLoad(t *testing.T) {
 	valid := `{"listen":"127.0.0.1:8080","services":{"s":{"upstreams":["http://localhost:9000"]}},"routes":[{"name":"r","path_prefix":"/api","service":"s"}]}`

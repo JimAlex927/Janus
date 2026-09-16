@@ -44,6 +44,7 @@ signal testing, build and run the binary directly instead of using `go run`.
 
 ```sh
 go run ./cmd/janus -check -config configs/janus.json
+go run ./cmd/janus -print-effective-config -config configs/janus.json
 go test ./...
 go test -race ./...
 go vet ./...
@@ -72,6 +73,7 @@ configs/janus-streaming.example.json  SSE/WebSocket route example
 configs/janus-health.example.json     active upstream health-check example
 examples/backend/     local test service
 docs/                  architecture, delivery plan, protocol learning guide
+deploy/systemd/        native Linux non-root systemd deployment artifact
 ```
 
 Rules use exact, case-insensitive host matching with the incoming port removed.

@@ -1,0 +1,43 @@
+[Unit]
+Description=Janus HTTP gateway
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=janus
+Group=janus
+ExecStart=/usr/local/bin/janus -config /etc/janus/janus.json -reload-interval 1s
+Restart=on-failure
+RestartSec=2s
+KillSignal=SIGTERM
+TimeoutStopSec=40s
+UMask=0027
+
+# Starting resource budgets. Tune them from measured traffic and keep the
+# process configuration limits consistent with the host's capacity.
+LimitNOFILE=65536
+TasksMax=4096
+MemoryMax=1G
+
+# The gateway is an unprivileged network service. It has no filesystem write
+# requirement; route and certificate reloads only read atomically replaced files.
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectHome=yes
+ProtectSystem=strict
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectHostname=yes
+ProtectClock=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+RestrictSUIDSGID=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+CapabilityBoundingSet=
+
+[Install]
+WantedBy=multi-user.target
