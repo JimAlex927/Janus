@@ -194,6 +194,9 @@ func TestSettingsDurationSyntaxAndDefaults(t *testing.T) {
 	if c.Settings.Request.MaxInFlight != DefaultGlobalInFlight {
 		t.Fatalf("max in-flight = %d, want %d default", c.Settings.Request.MaxInFlight, DefaultGlobalInFlight)
 	}
+	if got := c.Settings.Shutdown.DrainTimeout.Duration(); got != 5*time.Second+750*time.Millisecond {
+		t.Fatalf("drain timeout = %s, want server write timeout", got)
+	}
 }
 
 func TestMaximumOverallDerivesValidWriteHeadroom(t *testing.T) {
@@ -225,6 +228,9 @@ func TestSettingsRejectInvalidBounds(t *testing.T) {
 		}},
 		{"global admission too large", func(s *Settings) {
 			s.Request.MaxInFlight = MaxGlobalInFlight + 1
+		}},
+		{"drain shorter than write", func(s *Settings) {
+			s.Shutdown.DrainTimeout = Duration(s.Server.WriteTimeout.Duration() - time.Millisecond)
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

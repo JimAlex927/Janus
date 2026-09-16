@@ -5,6 +5,30 @@ repository commit. Add a new dated section before every future commit.
 
 ## 2026-09-16
 
+### Make graceful-drain budget configurable
+
+Commit message: `feat(lifecycle): configure graceful drain budget`
+
+Scope:
+
+- Added `settings.shutdown.drain_timeout`; omission follows the effective
+  `server.write_timeout`, and values shorter than that write budget are rejected.
+- Replaced the command's hard-coded 35-second shutdown context with the validated
+  configured budget while preserving readiness-first drain and force-close flow.
+- Added settings regression coverage and updated lifecycle/configuration docs.
+
+Verification:
+
+- `gofmt` on touched Go files
+- `go test ./...`
+- `go vet ./...`
+- `go build -o bin/janus.exe ./cmd/janus`
+- `go run ./cmd/janus -check` for the runnable configuration examples
+- `git diff --check`
+
+Scope note: load-balancer removal delay, health probes, metrics and overall
+production qualification remain future work.
+
 ### Add private liveness and readiness listener
 
 Commit message: `feat(admin): add loopback health endpoints`

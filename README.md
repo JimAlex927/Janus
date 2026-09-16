@@ -95,7 +95,8 @@ still require restart. Legacy configurations remain startup-only.
   `body_limit` middleware bounds request bodies at route or service scope; multiple
   applicable limits compose by the smallest cap. A fixed access observer emits
   request IDs and bounded request outcome records. Server and backend deadlines are validated
-  settings; `server.write_timeout` is independent from the overall request
+  settings; `shutdown.drain_timeout` defaults to and cannot be shorter than
+  `server.write_timeout`, which is independent from the overall request
   deadline, which actively cancels backend work. Routes stream responses by
   default; an optional route-level `buffer` middleware can hold finite responses
   up to its configured maximum before committing them.

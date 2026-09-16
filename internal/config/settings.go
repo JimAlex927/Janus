@@ -49,14 +49,19 @@ func (d *Duration) UnmarshalJSON(data []byte) error {
 }
 
 type Settings struct {
-	Request RequestSettings `json:"request"`
-	Server  ServerSettings  `json:"server"`
-	Backend BackendSettings `json:"backend"`
-	Admin   AdminSettings   `json:"admin"`
+	Request  RequestSettings  `json:"request"`
+	Server   ServerSettings   `json:"server"`
+	Backend  BackendSettings  `json:"backend"`
+	Admin    AdminSettings    `json:"admin"`
+	Shutdown ShutdownSettings `json:"shutdown"`
 }
 
 type AdminSettings struct {
 	Address string `json:"address"` // optional loopback-only private listener
+}
+
+type ShutdownSettings struct {
+	DrainTimeout Duration `json:"drain_timeout"`
 }
 
 type RequestSettings struct {
@@ -112,6 +117,9 @@ func DefaultSettings() Settings {
 			IdleConnTimeout:        Duration(90 * time.Second),
 			DisableCompression:     &disableCompression,
 		},
+		Shutdown: ShutdownSettings{
+			DrainTimeout: Duration(35 * time.Second),
+		},
 	}
 }
 
@@ -140,6 +148,10 @@ func (s Settings) WithDefaults() Settings {
 	}
 	if s.Server.MaxHeaderBytes == 0 {
 		s.Server.MaxHeaderBytes = d.Server.MaxHeaderBytes
+	}
+	if s.Shutdown.DrainTimeout == 0 {
+		// Drain must leave enough time for the configured server write deadline.
+		s.Shutdown.DrainTimeout = s.Server.WriteTimeout
 	}
 	s.Backend = s.Backend.WithDefaults()
 	return s
@@ -210,6 +222,12 @@ func (s Settings) Validate() error {
 		if err := validateLoopbackAddress(s.Admin.Address); err != nil {
 			return fmt.Errorf("admin.address: %w", err)
 		}
+	}
+	if err := validateDurationBound("shutdown.drain_timeout", s.Shutdown.DrainTimeout, MaxServerWriteTimeout); err != nil {
+		return err
+	}
+	if s.Shutdown.DrainTimeout < s.Server.WriteTimeout {
+		return fmt.Errorf("shutdown.drain_timeout must not be shorter than server.write_timeout")
 	}
 
 	for name, value := range map[string]Duration{

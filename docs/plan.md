@@ -19,10 +19,10 @@ The composition contract, package ownership, and proposed configuration are in
 [Traefik middleware composition](https://doc.traefik.io/traefik/reference/routing-configuration/http/middlewares/overview/).
 They do not imply configuration compatibility with Traefik.
 
-This document separates implemented work from future phases. Phase 1 now
-changes the accepted configuration schema by adding the consumed
-`server.write_timeout` field and the first named route policy, `buffer`;
-broader middleware policy types and service attachments remain future work.
+This document separates implemented work from future phases. The accepted
+configuration now includes consumed timeout, admission, admin and named
+middleware fields; remaining phases add health, metrics and deployment
+qualification rather than speculative unused settings.
 
 ## Current baseline and the original item1
 
@@ -30,10 +30,10 @@ As of 2026-09-16, the baseline has host/path routing, round-robin services,
 streaming reverse proxying, HTTPS certificate verification, typed server and
 transport settings, a startup-built middleware chain, request-context
 cancellation, the `internal/limen` HTTP/1 lifecycle, and native TLS/HTTP/2
-bindings. Shutdown exists, with a fixed 35-second drain budget. Body limits,
-admission, access observation, admin endpoints, and health checks are not
-implemented. Versioned routing reload and TLS certificate rotation are now
-implemented; legacy single-file mode remains startup-only.
+bindings. Shutdown uses a validated configurable drain budget. Body limits,
+admission, access observation and optional admin endpoints are implemented;
+health checks are not. Versioned routing reload and TLS certificate rotation are
+now implemented; legacy single-file mode remains startup-only.
 
 The original item1 was settings/deadline configuration, not all of Phase 1.
 Its main implementation exists; Phase 1 below completes its migration and
@@ -293,10 +293,11 @@ gateway for production; Phase 6 qualification remains required.
    listeners bind and start, and is cleared before graceful drain. Admin health
    requests bypass business admission; one unhealthy service does not make the
    whole gateway unready until Phase 4 health integration exists.
-4. Extend Limen's configurable drain with an optional bounded load-balancer removal
-   delay. Mark unready first, stop admitting new work, allow accepted work to
-   finish within budget, then force-close remaining connections. Align the grace
-   budget with header, request, and response-write budgets and the orchestrator.
+4. Configurable drain budget is implemented through
+   `settings.shutdown.drain_timeout`; omitted values follow `server.write_timeout`
+   and shorter values are rejected. Shutdown marks readiness false first, then
+   allows accepted work to finish within the bounded budget before Limen force-
+   closes remaining connections. Load-balancer removal delay remains a follow-up.
 
 ## Phase 4 tasks
 

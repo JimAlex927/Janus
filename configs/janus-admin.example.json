@@ -9,6 +9,9 @@
   "settings": {
     "admin": {
       "address": "127.0.0.1:9090"
+    },
+    "shutdown": {
+      "drain_timeout": "35s"
     }
   },
   "routes": [

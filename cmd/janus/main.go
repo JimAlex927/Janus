@@ -170,7 +170,7 @@ func run(ctx context.Context, path string, check bool, reloadInterval time.Durat
 			adminState.SetReady(false)
 		}
 		// Do not derive this from the already-cancelled signal context.
-		drain, cancel := context.WithTimeout(context.Background(), 35*time.Second)
+		drain, cancel := context.WithTimeout(context.Background(), c.Settings.Shutdown.DrainTimeout.Duration())
 		defer cancel()
 		drainErrors := make(chan error, len(servers))
 		for _, server := range servers {
