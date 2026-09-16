@@ -1,7 +1,9 @@
 package limen
 
 import (
+	"bufio"
 	"bytes"
+	"context"
 	"errors"
 	"io"
 	"net"
@@ -149,5 +151,72 @@ func TestLimenSlowReaderTerminatesAtWriteDeadline(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("slow reader was not terminated by the write deadline")
+	}
+}
+
+func TestLimenShutdownForceClosesHijackedConnectionAtDeadline(t *testing.T) {
+	handshakeDone := make(chan struct{})
+	l := New("127.0.0.1:0", http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		conn, buffered, err := w.(http.Hijacker).Hijack()
+		if err != nil {
+			t.Errorf("hijack: %v", err)
+			return
+		}
+		_, _ = io.WriteString(buffered, "HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n")
+		_ = buffered.Flush()
+		close(handshakeDone)
+		// The hijacked connection is intentionally left open until Limen
+		// reaches the bounded shutdown deadline.
+		_ = conn
+	}), config.DefaultSettings())
+	ln, err := l.Listen()
+	if err != nil {
+		t.Fatal(err)
+	}
+	serveDone := make(chan error, 1)
+	go func() { serveDone <- l.Serve(ln) }()
+	t.Cleanup(func() {
+		_ = l.Close()
+		if err := <-serveDone; err != nil && !errors.Is(err, http.ErrServerClosed) {
+			t.Errorf("limen stopped: %v", err)
+		}
+	})
+
+	conn, err := net.DialTimeout("tcp", ln.Addr().String(), time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	if _, err := io.WriteString(conn, "GET /socket HTTP/1.1\r\nHost: limen\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n"); err != nil {
+		t.Fatal(err)
+	}
+	reader := bufio.NewReader(conn)
+	select {
+	case <-handshakeDone:
+	case <-time.After(time.Second):
+		t.Fatal("hijacked connection did not start")
+	}
+	response, err := http.ReadResponse(reader, &http.Request{Method: http.MethodGet})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.StatusCode != http.StatusSwitchingProtocols {
+		t.Fatalf("handshake status = %d", response.StatusCode)
+	}
+	l.hijackedMu.Lock()
+	hijackedCount := len(l.hijacked)
+	l.hijackedMu.Unlock()
+	if hijackedCount != 1 {
+		t.Fatalf("tracked hijacked connections = %d, want 1", hijackedCount)
+	}
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	if err := l.Shutdown(shutdownCtx); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("shutdown error = %v, want deadline exceeded", err)
+	}
+	_ = conn.SetReadDeadline(time.Now().Add(time.Second))
+	if _, err := reader.ReadByte(); err == nil {
+		t.Fatal("hijacked connection remained open after forced shutdown")
 	}
 }

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"sync"
 	"sync/atomic"
 
 	"janus/internal/config"
@@ -23,6 +24,11 @@ type Limen struct {
 	server  *http.Server
 	tls     *tls.Config
 	cert    *atomic.Pointer[tls.Certificate]
+
+	hijackedMu    sync.Mutex
+	hijacked      map[net.Conn]struct{}
+	hijackedEmpty chan struct{}
+	shuttingDown  bool
 }
 
 // New creates a Limen using the server budgets from settings. The caller must
@@ -57,10 +63,13 @@ func NewBinding(name string, binding config.LimenConfig, handler http.Handler, s
 			next.ServeHTTP(w, protocol.WithLimenID(r, name))
 		})
 	}
-	return &Limen{
-		address: binding.Address,
-		tls:     tlsConfig,
-		cert:    certificates,
+	hijackedEmpty := make(chan struct{})
+	close(hijackedEmpty)
+	l := &Limen{
+		address:  binding.Address,
+		tls:      tlsConfig,
+		cert:     certificates,
+		hijacked: make(map[net.Conn]struct{}), hijackedEmpty: hijackedEmpty,
 		server: &http.Server{
 			Addr: binding.Address, Handler: handler,
 			Protocols:         protocols,
@@ -70,7 +79,15 @@ func NewBinding(name string, binding config.LimenConfig, handler http.Handler, s
 			IdleTimeout:       settings.Server.IdleTimeout.Duration(),
 			MaxHeaderBytes:    int(settings.Server.MaxHeaderBytes),
 		},
-	}, nil
+	}
+	l.server.ConnState = func(conn net.Conn, state http.ConnState) {
+		// net/http reports StateHijacked for the frontend connection after
+		// ReverseProxy completes a WebSocket upgrade.
+		if state == http.StateHijacked || state == http.StateClosed {
+			l.trackHijacked(conn, state)
+		}
+	}
+	return l, nil
 }
 
 func serverProtocols(binding config.LimenConfig) (*http.Protocols, error) {
@@ -158,6 +175,7 @@ func (l *Limen) Listen() (net.Listener, error) {
 // Serve runs the HTTP server on a listener. The listener is owned by the
 // server after this call and is closed by Shutdown or Close.
 func (l *Limen) Serve(listener net.Listener) error {
+	listener = &trackingListener{Listener: listener, owner: l}
 	if l.tls != nil {
 		listener = tls.NewListener(listener, l.tls)
 	}
@@ -167,10 +185,115 @@ func (l *Limen) Serve(listener net.Listener) error {
 // Shutdown stops accepting new connections and waits for active requests until
 // ctx expires. It preserves net/http's graceful shutdown semantics.
 func (l *Limen) Shutdown(ctx context.Context) error {
-	return l.server.Shutdown(ctx)
+	l.hijackedMu.Lock()
+	l.shuttingDown = true
+	l.hijackedMu.Unlock()
+	if err := l.server.Shutdown(ctx); err != nil {
+		l.closeHijacked()
+		return err
+	}
+	l.hijackedMu.Lock()
+	empty := l.hijackedEmpty
+	l.hijackedMu.Unlock()
+	select {
+	case <-empty:
+		return nil
+	case <-ctx.Done():
+		l.closeHijacked()
+		return ctx.Err()
+	}
 }
 
 // Close immediately closes the server's listeners and active connections.
 func (l *Limen) Close() error {
-	return l.server.Close()
+	l.hijackedMu.Lock()
+	l.shuttingDown = true
+	l.hijackedMu.Unlock()
+	err := l.server.Close()
+	l.closeHijacked()
+	return err
+}
+
+func (l *Limen) trackHijacked(conn net.Conn, state http.ConnState) {
+	conn = underlyingConnection(conn)
+	l.hijackedMu.Lock()
+	closeNow := false
+	switch state {
+	case http.StateHijacked:
+		if l.shuttingDown {
+			closeNow = true
+		} else {
+			if len(l.hijacked) == 0 {
+				l.hijackedEmpty = make(chan struct{})
+			}
+			l.hijacked[conn] = struct{}{}
+		}
+	case http.StateClosed:
+		if _, ok := l.hijacked[conn]; ok {
+			delete(l.hijacked, conn)
+			if len(l.hijacked) == 0 {
+				close(l.hijackedEmpty)
+			}
+		}
+	}
+	l.hijackedMu.Unlock()
+	if closeNow {
+		_ = conn.Close()
+	}
+}
+
+func underlyingConnection(conn net.Conn) net.Conn {
+	if tlsConn, ok := conn.(*tls.Conn); ok {
+		return tlsConn.NetConn()
+	}
+	return conn
+}
+
+func (l *Limen) untrackHijacked(conn net.Conn) {
+	l.hijackedMu.Lock()
+	defer l.hijackedMu.Unlock()
+	if _, ok := l.hijacked[conn]; !ok {
+		return
+	}
+	delete(l.hijacked, conn)
+	if len(l.hijacked) == 0 {
+		close(l.hijackedEmpty)
+	}
+}
+
+func (l *Limen) closeHijacked() {
+	l.hijackedMu.Lock()
+	connections := make([]net.Conn, 0, len(l.hijacked))
+	for conn := range l.hijacked {
+		connections = append(connections, conn)
+	}
+	l.hijackedMu.Unlock()
+	for _, conn := range connections {
+		_ = conn.Close()
+	}
+}
+
+type trackingListener struct {
+	net.Listener
+	owner *Limen
+}
+
+func (l *trackingListener) Accept() (net.Conn, error) {
+	conn, err := l.Listener.Accept()
+	if err != nil {
+		return nil, err
+	}
+	return &trackingConn{Conn: conn, owner: l.owner}, nil
+}
+
+type trackingConn struct {
+	net.Conn
+	owner *Limen
+	once  sync.Once
+}
+
+func (c *trackingConn) Close() error {
+	err := c.Conn.Close()
+	c.once.Do(func() { c.owner.untrackHijacked(c) })
+	return err
 }

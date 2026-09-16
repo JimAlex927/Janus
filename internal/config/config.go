@@ -28,9 +28,12 @@ type Config struct {
 }
 
 const (
-	CurrentConfigVersion = 1
-	ProtocolHTTP1        = "http1"
-	ProtocolHTTP2        = "http2"
+	CurrentConfigVersion   = 1
+	ProtocolHTTP1          = "http1"
+	ProtocolHTTP2          = "http2"
+	RouteProtocolHTTP      = "http"
+	RouteProtocolSSE       = "sse"
+	RouteProtocolWebSocket = "websocket"
 )
 
 // LimenConfig describes one inbound protocol binding. HTTP/2 is enabled only
@@ -64,6 +67,7 @@ type Service struct {
 type Route struct {
 	Name        string   `json:"name"`
 	Limen       string   `json:"limen,omitempty"`
+	Protocols   []string `json:"protocols,omitempty"`
 	Host        string   `json:"host"`
 	PathPrefix  string   `json:"path_prefix"`
 	Service     string   `json:"service"`
@@ -190,6 +194,16 @@ func (c Config) Validate() error {
 			}
 		} else if _, ok := bindings[r.Limen]; !ok {
 			return fmt.Errorf("route %q references missing limen %q", r.Name, r.Limen)
+		}
+		seenProtocols := map[string]bool{}
+		for _, routeProtocol := range r.Protocols {
+			if routeProtocol != RouteProtocolHTTP && routeProtocol != RouteProtocolSSE && routeProtocol != RouteProtocolWebSocket {
+				return fmt.Errorf("route %q has unsupported protocol %q", r.Name, routeProtocol)
+			}
+			if seenProtocols[routeProtocol] {
+				return fmt.Errorf("route %q enables protocol %q more than once", r.Name, routeProtocol)
+			}
+			seenProtocols[routeProtocol] = true
 		}
 		seenMiddlewares := map[string]bool{}
 		for _, middlewareName := range r.Middlewares {

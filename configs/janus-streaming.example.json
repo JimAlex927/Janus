@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "limens": {
+    "private": {
+      "address": "127.0.0.1:8081",
+      "protocols": ["http1"]
+    }
+  },
+  "routes": [
+    { "name": "events", "limen": "private", "path_prefix": "/events", "protocols": ["sse"], "service": "streaming" },
+    { "name": "socket", "limen": "private", "path_prefix": "/socket", "protocols": ["websocket"], "service": "streaming" }
+  ],
+  "services": {
+    "streaming": { "upstreams": ["http://127.0.0.1:9000"] }
+  }
+}

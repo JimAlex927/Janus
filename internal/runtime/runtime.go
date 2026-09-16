@@ -108,6 +108,7 @@ func NewWithBuilder(c config.Config, logger *zap.Logger, builder Builder) (*Runt
 		http.HandlerFunc(r.dispatch),
 		middleware.RejectUnsupportedProtocols,
 		middleware.Timeout(c.Settings.Request.MaximumDuration.Duration()),
+		middleware.ClearStreamingWriteDeadline,
 	)
 	return r, nil
 }

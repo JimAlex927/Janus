@@ -2,13 +2,14 @@
 
 ## Objective
 
-A small, auditable HTTP API reverse proxy that an individual can maintain.
+A small, auditable HTTP gateway that an individual can maintain.
 The current deployment profile supports private HTTP/1.x or native HTTPS/HTTP/2
-listeners through Protocol Limen. Later deliveries add a stable runtime
-dispatcher for file-based routing reload and HTTP/3. Backend apps retain their
-business authorization responsibility.
-Support remains scoped to bounded-duration HTTP APIs; adding an HTTP version does
-not add streaming RPC or tunnel support. Concrete ownership and update rules are in
+listeners through Protocol Limen. The stable runtime dispatcher and versioned
+file-based routing reload are implemented; HTTP/3 is later. Backend apps retain
+their business authorization responsibility.
+Support remains scoped to ordinary bounded APIs plus explicit SSE and classic
+HTTP/1 WebSocket routes; adding an HTTP version does not add streaming RPC or
+tunnel support. Concrete ownership and update rules are in
 [limen-runtime.md](limen-runtime.md).
 
 Adopt built-in HTTP middleware composed at startup, with named policy definitions
@@ -74,13 +75,14 @@ not just configuration types. Size effort after each phase's exit review.
 | 2B: runtime generations | Stable dispatcher and explicit resource ownership | Complete: old requests retain old handlers; new requests use new handlers; retirement is bounded and race-safe |
 | 2C: HTTPS and HTTP/2 | TLS Limens, protocol configuration, response capability audit | Complete: actual H2 negotiation, sibling-stream isolation, H1 fallback and TLS startup checks pass |
 | 2D: dynamic files and certificates | Serialized validated routing reload; independent certificate rotation | Complete: invalid updates preserve last-good state; runtime and certificate resources remain bounded |
-| 2E: usable request policies | Named body-limit policies, request IDs, access observation | Policies compose in order; early rejection, upload limits, trailers, and incomplete responses covered on H1/H2 |
+| 2E: long-lived HTTP protocols | Explicit SSE and classic HTTP/1 WebSocket route modes | Complete: event flush, upgrade/frame forwarding, timeout bypass, and bounded upgraded-connection drain pass |
+| 2F: usable request policies | Named body-limit policies, request IDs, access observation | Policies compose in order; early rejection, upload limits, trailers, and incomplete responses covered on H1/H2 |
 | 3: bounded operation | Global/service admission, admin readiness, configurable drain | Overload rejects promptly; shared service limits hold across routes; shutdown meets its budget |
 | 4: backend and trust policy | Active health checks, trusted forwarding identity, metrics | Backend failure/recovery and spoofing tests pass; telemetry explains each failure |
 | 5: HTTP/3 and deployment lifecycle | QUIC adapter reusing runtime; deployment artifacts | H3 forwarding, reload, cancellation, TLS rotation, UDP failure/fallback and coordinated drain tests pass |
 | 6: production qualification | Linux CI, security review, realistic load/soak tests, canary | All release gates pass for a named build and environment |
 
-Completed order is 1Q -> 2A -> 2B -> 2C -> 2D. Next delivery order is 2E -> 3 -> 4 -> 5 -> 6.
+Completed order is 1Q -> 2A -> 2B -> 2C -> 2D -> 2E. Next delivery order is 2F -> 3 -> 4 -> 5 -> 6.
 Phase 2C delivers the first native H1/H2 milestone; Phase 2D adds dynamic-file
 updates and certificate rotation.
 Phase 5 adds H3. All production claims still require Phase 6 qualification for
@@ -221,7 +223,17 @@ generation replacement, malformed certificate-pair retention, successful
 certificate rotation, and bounded configuration input. Full H1/H2 response
 capability and GOAWAY qualification remain in later protocol work.
 
-## Phase 2E: request policies (original Phase 2 scope)
+## Phase 2E: long-lived HTTP protocols — complete
+
+Routes can explicitly declare `sse` or `websocket` in their `protocols` list.
+SSE uses the normal HTTP response path with immediate event flushing. Classic
+HTTP/1 WebSocket upgrades are forwarded through `ReverseProxy`; arbitrary
+upgrades, CONNECT, and HTTP/2 extended CONNECT remain rejected. Long-lived
+requests bypass the bounded API timeout and finite write deadline, while Limen
+tracks upgraded connections and force-closes them when the drain budget expires.
+The route buffer middleware bypasses both modes.
+
+## Phase 2F: request policies (original Phase 2 scope)
 
 1. Add request ID and a single access observer in the fixed global chain. Generate
    IDs by default; define validation and trust before accepting client-supplied
@@ -362,7 +374,7 @@ failure contract, and retry needs bounded replay and idempotency rules.
 
 Plugin marketplace, scripting, dashboard, Kubernetes/Docker discovery, distributed
 configuration store, caching, WAF rules, transformation language, ACME, outbound
-HTTP/3, unencrypted HTTP/2, SSE/WebSocket/gRPC, arbitrary TCP/UDP proxying,
-and a general policy engine. Each expands the security
+HTTP/3, unencrypted HTTP/2, HTTP/2 WebSocket extended CONNECT, gRPC, arbitrary
+TCP/UDP proxying, and a general policy engine. Each expands the security
 and operational contract substantially. Add one only after defining its owner,
 tests and failure behavior.

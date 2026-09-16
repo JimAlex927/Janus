@@ -66,3 +66,26 @@ func TestLimenScopedRoutes(t *testing.T) {
 		})
 	}
 }
+
+func TestRouteProtocolScope(t *testing.T) {
+	rt := New([]Route{
+		{Protocols: []string{"sse"}, PathPrefix: "/events", Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("sse")) })},
+	})
+	for _, tc := range []struct {
+		name, accept string
+		code, body   int
+	}{
+		{name: "sse", accept: "text/event-stream", code: http.StatusOK},
+		{name: "ordinary", accept: "application/json", code: http.StatusNotImplemented},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := httptest.NewRequest(http.MethodGet, "http://gateway/events", nil)
+			r.Header.Set("Accept", tc.accept)
+			w := httptest.NewRecorder()
+			rt.ServeHTTP(w, r)
+			if w.Code != tc.code {
+				t.Fatalf("status = %d, want %d", w.Code, tc.code)
+			}
+		})
+	}
+}

@@ -4,6 +4,8 @@ import (
 	"context"
 	"net/http"
 	"time"
+
+	"janus/internal/protocol"
 )
 
 // Timeout applies an overall handler budget. It cancels outbound work through
@@ -13,7 +15,7 @@ import (
 func Timeout(timeout time.Duration) Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if timeout <= 0 {
+			if timeout <= 0 || protocol.IsWebSocketRequest(r) || protocol.WantsSSE(r) {
 				next.ServeHTTP(w, r)
 				return
 			}

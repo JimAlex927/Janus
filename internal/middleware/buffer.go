@@ -5,6 +5,8 @@ import (
 	"context"
 	"errors"
 	"net/http"
+
+	"janus/internal/protocol"
 )
 
 var errResponseTooLarge = errors.New("buffered response exceeds configured limit")
@@ -15,6 +17,10 @@ var errResponseTooLarge = errors.New("buffered response exceeds configured limit
 func Buffer(maxResponseBodyBytes int64) Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if protocol.IsWebSocketRequest(r) || protocol.WantsSSE(r) {
+				next.ServeHTTP(w, r)
+				return
+			}
 			buffered := &responseBuffer{
 				header:   make(http.Header),
 				maxBytes: maxResponseBodyBytes,

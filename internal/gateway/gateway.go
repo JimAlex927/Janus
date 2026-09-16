@@ -75,7 +75,7 @@ func NewWithTransport(c config.Config, logger *zap.Logger, transport http.RoundT
 			}
 		}
 		routeHandler := middleware.Chain(services[r.Service], routeMiddlewares...)
-		routes = append(routes, router.Route{Limen: r.Limen, Host: r.Host, PathPrefix: r.PathPrefix, Handler: routeHandler})
+		routes = append(routes, router.Route{Limen: r.Limen, Protocols: r.Protocols, Host: r.Host, PathPrefix: r.PathPrefix, Handler: routeHandler})
 	}
 	//http.Handler is an interface.
 	// Router itself is a loop of match. It contains
@@ -88,6 +88,7 @@ func NewWithTransport(c config.Config, logger *zap.Logger, transport http.RoundT
 			routeHandler,
 			middleware.RejectUnsupportedProtocols,
 			middleware.Timeout(c.Settings.Request.MaximumDuration.Duration()),
+			middleware.ClearStreamingWriteDeadline,
 		),
 		transport:      ownedTransport,
 		ownedTransport: ownedTransport,

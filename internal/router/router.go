@@ -7,11 +7,13 @@ import (
 	"sort"
 	"strings"
 
+	"janus/internal/config"
 	"janus/internal/protocol"
 )
 
 type Route struct {
 	Limen      string
+	Protocols  []string
 	Host       string
 	PathPrefix string
 	Handler    http.Handler
@@ -57,10 +59,37 @@ func (rt *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// 2、 if matched host, then match the  PathPrefix to url.path of current request.
 		p := route.PathPrefix
 		if p == "/" || r.URL.Path == p || strings.HasPrefix(r.URL.Path, p+"/") {
+			if !routeProtocolMatches(route.Protocols, r) {
+				http.Error(w, "request protocol is not enabled for this route", http.StatusNotImplemented)
+				return
+			}
 			route.Handler.ServeHTTP(w, r)
 			return
 		}
 	}
 	//If nothing matched. Return 404 not found
 	http.NotFound(w, r)
+}
+
+func routeProtocolMatches(protocols []string, r *http.Request) bool {
+	if len(protocols) == 0 {
+		return !protocol.IsWebSocketRequest(r) && !protocol.WantsSSE(r)
+	}
+	for _, name := range protocols {
+		switch name {
+		case config.RouteProtocolHTTP:
+			if !protocol.IsWebSocketRequest(r) && !protocol.WantsSSE(r) {
+				return true
+			}
+		case config.RouteProtocolSSE:
+			if protocol.WantsSSE(r) {
+				return true
+			}
+		case config.RouteProtocolWebSocket:
+			if protocol.IsWebSocketRequest(r) {
+				return true
+			}
+		}
+	}
+	return false
 }

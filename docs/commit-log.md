@@ -5,6 +5,37 @@ repository commit. Add a new dated section before every future commit.
 
 ## 2026-09-16
 
+### Add SSE and classic HTTP/1 WebSocket routes
+
+Commit message: `feat(protocol): support SSE and WebSocket forwarding`
+
+Scope:
+
+- Added explicit route protocol modes: `http`, `sse`, and `websocket`; routes
+  without a mode remain ordinary HTTP routes by default.
+- Added SSE streaming through the existing reverse proxy, including immediate
+  event flushing and bypasses for finite API timeout, write deadline, and route
+  buffering.
+- Enabled classic HTTP/1 WebSocket upgrades through `ReverseProxy`, while
+  continuing to reject CONNECT, arbitrary upgrades, and HTTP/2 extended CONNECT.
+- Added Limen tracking and bounded shutdown handling for upgraded frontend
+  connections, plus end-to-end SSE event and WebSocket handshake/frame tests.
+- Added a runnable [configs/janus-streaming.example.json](../configs/janus-streaming.example.json)
+  and updated protocol, architecture, plan, and README documentation.
+
+Verification:
+
+- `gofmt` on touched Go files
+- `go test ./...`
+- `go vet ./...`
+- `go build -o bin/janus.exe ./cmd/janus`
+- `go run ./cmd/janus -check -config configs/janus-streaming.example.json`
+
+Scope note: HTTP/2 WebSocket extended CONNECT, gRPC, HTTP/3, per-stream idle
+policies, and application-level WebSocket authentication remain future work.
+
+## 2026-09-16
+
 ### Add dynamic routing reload and certificate rotation
 
 Commit message: `feat(runtime): add file reload and certificate rotation`

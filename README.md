@@ -11,10 +11,12 @@ certificate-content rotation; HTTP/3 remains later work. See
 [docs/limen-runtime.md](docs/limen-runtime.md).
 
 The first release targets ordinary HTTP APIs behind an existing TLS load balancer.
-Janus accepts plaintext HTTP/1.x, and versioned startup configuration can enable
-native TLS/HTTP/2, forwarding to configured HTTP or HTTPS origins.
+Janus accepts plaintext HTTP/1.x, and versioned configuration can enable native
+TLS/HTTP/2 plus explicitly scoped SSE and HTTP/1 WebSocket routes, forwarding to
+configured HTTP or HTTPS origins.
 HTTPS upstreams use normal certificate verification and may negotiate HTTP/2.
-Public TLS termination, gRPC, WebSockets, SSE, TCP/UDP, and HTTP/3 are outside this starter's contract.
+Public TLS termination, gRPC, HTTP/2 WebSocket extended CONNECT, TCP/UDP, and
+HTTP/3 are outside this starter's contract.
 
 ## Try it
 
@@ -60,7 +62,9 @@ internal/middleware/   global timeout and optional route response policies
 internal/router/       immutable host and path matching
 internal/upstream/     concurrent round-robin selection
 internal/proxy/        reverse proxy and shared outbound transport
+internal/runtime/      stable generations and versioned file reload
 configs/janus.json     local example configuration
+configs/janus-streaming.example.json  SSE/WebSocket route example
 examples/backend/     local test service
 docs/                  architecture, delivery plan, protocol learning guide
 ```
@@ -93,7 +97,9 @@ still require restart. Legacy configurations remain startup-only.
 - The immediate peer determines `X-Forwarded-For` and `X-Forwarded-Proto`.
   Behind a TLS load balancer these describe that load balancer and the internal
   HTTP hop. Original client IP/HTTPS identity needs the planned trusted-proxy policy.
-- No endpoint is a tunnel: CONNECT and Upgrade requests receive 501.
+- CONNECT and non-WebSocket Upgrade requests receive 501. SSE routes stream
+  `text/event-stream` responses; WebSocket routes proxy RFC 6455 upgrades over
+  HTTP/1. Existing upgraded connections are tracked for bounded Limen drain.
 - Unknown JSON fields and duplicate route matches fail validation. Go's JSON
   decoder still accepts duplicate object keys using its normal semantics; a
   stricter duplicate-key policy is a production configuration task.

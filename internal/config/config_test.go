@@ -72,6 +72,24 @@ func TestRouteMiddlewareConfigRejectsBadReferences(t *testing.T) {
 	}
 }
 
+func TestRouteProtocolConfig(t *testing.T) {
+	base := `{"listen":"127.0.0.1:8080","services":{"s":{"upstreams":["http://localhost:9000"]}},"routes":[{"name":"r","path_prefix":"/stream","protocols":["sse","websocket"],"service":"s"}]}`
+	if _, err := Load(strings.NewReader(base)); err != nil {
+		t.Fatal(err)
+	}
+	for _, value := range []string{"http3", "sse"} {
+		body := base
+		if value == "http3" {
+			body = strings.Replace(body, `"sse","websocket"`, `"http3"`, 1)
+		} else {
+			body = strings.Replace(body, `"sse","websocket"`, `"`+value+`","`+value+`"`, 1)
+		}
+		if _, err := Load(strings.NewReader(body)); err == nil {
+			t.Fatalf("expected invalid route protocol configuration for %q", value)
+		}
+	}
+}
+
 func TestVersionedLimenConfig(t *testing.T) {
 	body := `{"version":1,"limens":{"public":{"address":"127.0.0.1:8443","protocols":["http1","http2"],"tls":{"cert_file":"server.crt","key_file":"server.key","min_version":"1.3"}}},"services":{"s":{"upstreams":["http://localhost:9000"]}},"routes":[{"name":"r","limen":"public","path_prefix":"/api","service":"s"}]}`
 	c, err := Load(strings.NewReader(body))

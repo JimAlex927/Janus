@@ -4,9 +4,10 @@
 
 Janus currently serves bounded-duration HTTP APIs through Protocol Limen on
 private HTTP/1.x or native TLS/HTTP/2 listeners, forwarding to static
-HTTP/HTTPS origins. Versioned file-based routing reload and TLS certificate
-content rotation are implemented; HTTP/3 remains a planned capability.
-SSE, WebSockets, gRPC and arbitrary TCP/UDP tunnels remain outside this scope.
+HTTP/HTTPS origins. Versioned file-based routing reload, TLS certificate
+content rotation, SSE, and HTTP/1 WebSocket proxying are implemented; HTTP/3,
+HTTP/2 WebSocket extended CONNECT, gRPC and arbitrary TCP/UDP tunnels remain
+outside this scope.
 Use Go's `net/http`, `httputil.ReverseProxy`, and `http.Transport` as the protocol
 foundation. Backend applications retain business authorization responsibilities.
 
@@ -14,9 +15,10 @@ This is the target design for the phases in [plan.md](plan.md). Today `runtime`
 owns the stable dispatcher and process-level transport, while `gateway`
 constructs each router, service proxies, pools, and route middleware generation.
 The fixed global protocol guard and overall deadline are applied once by
-runtime. The initial route-level `buffer` policy, versioned routing reload, and
-TLS certificate-content rotation are implemented; other named policies,
-observation, admission, health, and admin remain planned.
+runtime. The initial route-level `buffer` policy, versioned routing reload, TLS
+certificate-content rotation, and protocol-scoped streaming routes are
+implemented; other named policies, observation, admission, health, and admin
+remain planned.
 
 The concrete multi-protocol and reload design is in
 [limen-runtime.md](limen-runtime.md). Limen owns protocol servers, runtime owns

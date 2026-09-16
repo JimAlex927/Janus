@@ -27,7 +27,7 @@ break at a protocol boundary and how to demonstrate correct behavior.
 | Exact host plus hostless route | The exact, case-insensitive host rule wins; the incoming port is ignored for matching. |
 | `GET /api/a%2Fb` | Routing uses Go's decoded `URL.Path`; the reverse proxy preserves the escaped path for the backend. |
 | Client-supplied `X-Forwarded-*`, `X-Real-IP`, or `Forwarded` | Removed or rewritten; v0 reports only the immediate connection peer. |
-| `CONNECT` or any `Upgrade` request | Rejected with 501; Janus does not create a tunnel. |
+| `CONNECT` or a non-WebSocket `Upgrade` request | Rejected with 501; Janus does not create a tunnel. |
 | No matching host/path | Returns 404 without contacting a backend. |
 | Overall deadline before response commitment | Returns 504 when the response socket remains writable. |
 | Overall deadline after response commitment | Stops the stream; it does not append a second 504 response. |
@@ -73,8 +73,10 @@ when that budget expires. `server.write_timeout` is an independent socket deadli
 and must exceed the overall budget by enough headroom to write a timeout response;
 it is not a replacement for context cancellation. Body-size enforcement and the
 remaining admission policy are still planned. Do not apply a short API timeout to
-WebSockets, gRPC streams or SSE.
-Streaming needs per-stream lifetime/idle policy and a separate shutdown contract.
+WebSockets, gRPC streams or SSE. Janus now skips the bounded API timeout for
+explicitly classified SSE/WebSocket requests, clears the finite response-write
+deadline, and lets Limen shutdown own the drain. Streaming still needs a
+production per-stream lifetime/idle policy.
 
 ## Retries and backend health
 
@@ -106,11 +108,13 @@ separately if required.
 
 gRPC requires a deliberate HTTP/2 path, trailer preservation, deadline and
 cancellation semantics, gRPC status visibility and streaming tests. HTTPS
-upstream HTTP/2 capability alone is not a gRPC support claim. WebSocket support
-also requires tracking upgraded connections: ordinary `Server.Shutdown` does not
-drain hijacked connections. The starter rejects upgrades to keep its drain contract
-bounded. SSE needs flushing and compatible duration limits; it is not currently
-a supported workload.
+upstream HTTP/2 capability alone is not a gRPC support claim. Janus supports SSE
+through the normal HTTP response path and proxies classic HTTP/1 WebSocket
+upgrades through `ReverseProxy`. WebSocket extended CONNECT over HTTP/2 is not
+enabled. WebSocket routes must be explicitly declared with
+`"protocols": ["websocket"]`; SSE routes use `"protocols": ["sse"]`. The
+route-level buffer policy bypasses both streaming modes so it cannot delay
+events or break the upgrade handshake.
 
 ## Reading list
 
