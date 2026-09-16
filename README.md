@@ -76,8 +76,9 @@ The original host is supplied as `X-Forwarded-Host`. Config updates require rest
 - No health-based removal: failed backends remain in round-robin rotation.
 - No application retry loop. Go's transport can still retry certain replayable
   requests on connection failures; see the protocol guide.
-- No request-body size limit, global concurrency limit, metrics, access log, or
-  separate readiness listener yet. Server deadlines are initial fixed constants.
+- No request-body size enforcement, global concurrency limit, metrics, access log,
+  or separate readiness listener yet. Server and backend deadlines are validated
+  settings; the overall request deadline actively cancels backend work.
 - The immediate peer determines `X-Forwarded-For` and `X-Forwarded-Proto`.
   Behind a TLS load balancer these describe that load balancer and the internal
   HTTP hop. Original client IP/HTTPS identity needs the planned trusted-proxy policy.

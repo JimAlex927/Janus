@@ -10,6 +10,16 @@ the load balancer. Backend apps retain their business authorization responsibili
 The scaffold establishes the boundaries and request flow. Production readiness
 is a set of verified behaviors for your environment, not a directory layout.
 
+The settings schema uses JSON duration strings accepted by Go's
+`time.ParseDuration`, such as `250ms`, `5s`, or `2m`. Omitted settings use the
+starter defaults; supplied values are validated against explicit minimum and
+maximum bounds before a listener opens. The overall request duration is an
+active deadline: it is attached to the request context so backend work is
+cancelled when that budget expires. `read_timeout` is the inbound request-read
+budget (including headers and body), while `read_header_timeout` remains its
+separate header-phase cap. Body size enforcement is the next task and must use
+the validated `max_body_bytes` setting.
+
 ## Decisions to record before sizing
 
 Specify deployment platform, peak and sustained requests/second, concurrency,

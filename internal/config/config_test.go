@@ -3,6 +3,7 @@ package config
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestLoad(t *testing.T) {
@@ -38,5 +39,47 @@ func TestDuplicateRouteMatch(t *testing.T) {
 	}}
 	if c.Validate() == nil {
 		t.Fatal("expected duplicate route rejection")
+	}
+}
+
+func TestSettingsDurationSyntaxAndDefaults(t *testing.T) {
+	valid := `{"listen":"127.0.0.1:8080","settings":{"request":{"normal_duration":"500ms","maximum_duration":"750ms"},"slo":{"acceptable_p99_latency":"100ms"}},"services":{"s":{"upstreams":["http://localhost:9000"]}},"routes":[{"name":"r","path_prefix":"/api","service":"s"}]}`
+	c, err := Load(strings.NewReader(valid))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := c.Settings.Request.MaximumDuration.Duration(); got != 750*time.Millisecond {
+		t.Fatalf("maximum duration = %s, want 750ms", got)
+	}
+	if got := c.Settings.Request.ReadTimeout.Duration(); got != 30*time.Second {
+		t.Fatalf("read timeout = %s, want 30s default", got)
+	}
+	if got := c.Settings.Backend.ConnectTimeout.Duration(); got != 3*time.Second {
+		t.Fatalf("connect timeout = %s, want 3s default", got)
+	}
+}
+
+func TestSettingsRejectInvalidBounds(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		edit func(*Settings)
+	}{
+		{"read timeout below minimum", func(s *Settings) {
+			s.Request.ReadTimeout = Duration(time.Microsecond)
+		}},
+		{"negative duration", func(s *Settings) {
+			s.Request.MaximumDuration = Duration(-time.Second)
+		}},
+		{"header bytes too large", func(s *Settings) {
+			s.Server.MaxHeaderBytes = MaxHeaderBytes + 1
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			settings := DefaultSettings()
+			tc.edit(&settings)
+			if err := settings.Validate(); err == nil {
+				t.Fatal("expected settings validation error")
+			}
+		})
 	}
 }

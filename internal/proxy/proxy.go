@@ -8,26 +8,32 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"strings"
-	"time"
 
+	"janus/internal/config"
 	"janus/internal/upstream"
 
 	"go.uber.org/zap"
 )
 
 // NewTransport is shared across services with identical trust/TLS policy.
-func NewTransport() *http.Transport {
+// The optional argument keeps callers using the starter defaults source-compatible.
+func NewTransport(values ...config.BackendSettings) *http.Transport {
+	settings := config.DefaultSettings().Backend
+	if len(values) > 0 {
+		settings = values[0]
+	}
+	settings = settings.WithDefaults()
 	t := http.DefaultTransport.(*http.Transport).Clone()
 	t.Proxy = nil // Backend connections must not inherit a workstation's HTTP_PROXY.
-	t.DialContext = (&net.Dialer{Timeout: 3 * time.Second, KeepAlive: 30 * time.Second}).DialContext
-	t.TLSHandshakeTimeout = 5 * time.Second
-	t.ResponseHeaderTimeout = 10 * time.Second
-	t.MaxResponseHeaderBytes = 64 << 10
-	t.MaxIdleConns = 256
-	t.MaxIdleConnsPerHost = 32
-	t.MaxConnsPerHost = 128
-	t.IdleConnTimeout = 90 * time.Second
-	t.DisableCompression = true // Leave content negotiation to the client/backend.
+	t.DialContext = (&net.Dialer{Timeout: settings.ConnectTimeout.Duration(), KeepAlive: settings.KeepAlive.Duration()}).DialContext
+	t.TLSHandshakeTimeout = settings.TLSHandshakeTimeout.Duration()
+	t.ResponseHeaderTimeout = settings.ResponseHeaderTimeout.Duration()
+	t.MaxResponseHeaderBytes = settings.MaxResponseHeaderBytes
+	t.MaxIdleConns = settings.MaxIdleConns
+	t.MaxIdleConnsPerHost = settings.MaxIdleConnsPerHost
+	t.MaxConnsPerHost = settings.MaxConnsPerHost
+	t.IdleConnTimeout = settings.IdleConnTimeout.Duration()
+	t.DisableCompression = settings.DisableCompression != nil && *settings.DisableCompression
 	return t
 }
 

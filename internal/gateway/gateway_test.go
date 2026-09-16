@@ -102,3 +102,53 @@ func TestUnsupportedTunnelAndUpgrade(t *testing.T) {
 		}
 	}
 }
+
+func TestOverallTimeoutCancelsBackend(t *testing.T) {
+	started, cancelled := make(chan struct{}), make(chan struct{})
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(started)
+		<-r.Context().Done()
+		close(cancelled)
+	}))
+	defer backend.Close()
+
+	settings := config.DefaultSettings()
+	settings.Request.NormalDuration = config.Duration(10 * time.Millisecond)
+	settings.Request.MaximumDuration = config.Duration(50 * time.Millisecond)
+	settings.SLO.AcceptableP99Latency = config.Duration(5 * time.Millisecond)
+	g, err := New(config.Config{
+		Listen:   "127.0.0.1:8080",
+		Settings: settings,
+		Services: map[string]config.Service{"s": {Upstreams: []string{backend.URL}}},
+		Routes:   []config.Route{{Name: "api", PathPrefix: "/api", Service: "s"}},
+	}, zap.NewNop())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer g.Close()
+
+	w := httptest.NewRecorder()
+	done := make(chan struct{})
+	go func() {
+		g.ServeHTTP(w, httptest.NewRequest("GET", "http://gateway/api", nil))
+		close(done)
+	}()
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("backend did not start")
+	}
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("overall timeout did not end request")
+	}
+	if w.Code != http.StatusGatewayTimeout {
+		t.Fatalf("status = %d, want 504", w.Code)
+	}
+	select {
+	case <-cancelled:
+	case <-time.After(2 * time.Second):
+		t.Fatal("overall timeout did not cancel backend")
+	}
+}

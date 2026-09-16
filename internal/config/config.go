@@ -13,6 +13,7 @@ import (
 
 type Config struct {
 	Listen   string             `json:"listen"`
+	Settings Settings           `json:"settings"`
 	Services map[string]Service `json:"services"`
 	Routes   []Route            `json:"routes"`
 }
@@ -38,10 +39,15 @@ func Load(r io.Reader) (Config, error) {
 	if err := d.Decode(new(any)); err != io.EOF {
 		return c, fmt.Errorf("config must contain exactly one JSON object")
 	}
+	c = c.WithDefaults()
 	return c, c.Validate()
 }
 
 func (c Config) Validate() error {
+	settings := c.Settings.WithDefaults()
+	if err := settings.Validate(); err != nil {
+		return err
+	}
 	_, port, err := net.SplitHostPort(c.Listen)
 	p, portErr := strconv.Atoi(port)
 	if err != nil || portErr != nil || p < 1 || p > 65535 {
@@ -91,6 +97,13 @@ func (c Config) Validate() error {
 		matches[key] = true
 	}
 	return nil
+}
+
+// WithDefaults returns a copy with omitted settings filled from the starter
+// profile. Explicit non-zero values are preserved for validation.
+func (c Config) WithDefaults() Config {
+	c.Settings = c.Settings.WithDefaults()
+	return c
 }
 
 // ParseUpstream accepts origins only. Path rewriting is a separate future policy.

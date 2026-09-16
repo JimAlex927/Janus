@@ -49,9 +49,10 @@ standard proxy's invalid-query handling just to preserve every input byte.
 | Server write timeout | Socket response-write deadline | Automatically canceling all handler work or returning a clean 504 |
 | Idle timeout | Waiting between keepalive requests | An active request's duration |
 
-The starter fixes these values as an API demonstration. A production implementation
-must make the budgets coherent and actively cancel work when its request budget
-expires. Do not apply a short API timeout to WebSockets, gRPC streams or SSE.
+The starter exposes these values as validated settings. Its overall API duration
+is an active request-context deadline, so outbound backend work observes cancellation
+when that budget expires. Body-size enforcement and the remaining admission policy
+are still planned. Do not apply a short API timeout to WebSockets, gRPC streams or SSE.
 Streaming needs per-stream lifetime/idle policy and a separate shutdown contract.
 
 ## Retries and backend health

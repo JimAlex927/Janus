@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"janus/internal/config"
+
 	"go.uber.org/zap"
 	"janus/internal/upstream"
 )
@@ -36,6 +38,29 @@ func TestErrorMapping(t *testing.T) {
 				t.Fatalf("got %d", w.Code)
 			}
 		})
+	}
+}
+
+func TestNewTransportUsesConfiguredSettings(t *testing.T) {
+	settings := config.DefaultSettings().Backend
+	settings.TLSHandshakeTimeout = config.Duration(1200 * time.Millisecond)
+	settings.ResponseHeaderTimeout = config.Duration(1800 * time.Millisecond)
+	settings.MaxResponseHeaderBytes = 96 << 10
+	settings.MaxIdleConns = 17
+	settings.MaxIdleConnsPerHost = 5
+	settings.MaxConnsPerHost = 9
+	settings.IdleConnTimeout = config.Duration(11 * time.Second)
+	disableCompression := false
+	settings.DisableCompression = &disableCompression
+
+	transport := NewTransport(settings)
+	defer transport.CloseIdleConnections()
+	if transport.TLSHandshakeTimeout != 1200*time.Millisecond ||
+		transport.ResponseHeaderTimeout != 1800*time.Millisecond ||
+		transport.MaxResponseHeaderBytes != 96<<10 || transport.MaxIdleConns != 17 ||
+		transport.MaxIdleConnsPerHost != 5 || transport.MaxConnsPerHost != 9 ||
+		transport.IdleConnTimeout != 11*time.Second || transport.DisableCompression {
+		t.Fatalf("transport settings were not applied: %+v", transport)
 	}
 }
 

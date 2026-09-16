@@ -65,7 +65,7 @@ func run(ctx context.Context, path string, check bool, logger *zap.Logger) error
 	}
 	defer gatewayWithinHandlers.Close()
 	//Start the server
-	srv := gateway.NewServer(c.Listen, gatewayWithinHandlers)
+	srv := gateway.NewServer(c.Listen, gatewayWithinHandlers, c.Settings)
 	//listen the specified network  and address.
 	ln, err := net.Listen("tcp", c.Listen)
 	if err != nil {
