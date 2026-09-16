@@ -337,16 +337,16 @@ in Phase 4 also need retirement/reload tests when introduced.
 2. Partially complete: coordinate TCP HTTPS and UDP/QUIC sockets, TLS identity,
    `Alt-Svc` advertisement and TCP fallback. The current adapter binds both
    sockets, disables 0-RTT, handles `:0` UDP advertisement, and cleans up
-   startup and serve-failure paths; coordinated fault and deployment tests
-   remain.
+   startup and serve-failure paths. A local injected UDP read failure also
+   stops the TCP fallback; broader coordinated fault and deployment tests remain.
 3. Partially complete: local H3 stream isolation, client cancellation, and
    forwarding pass on the supported development platform. The bounded H3
    bidirectional stream limit is now wired and configuration-tested; H3
    certificate rotation is also covered for existing and new connections.
    Reload across concurrent streams on an existing QUIC connection and
    coordinated bounded shutdown are covered by forced local-drain tests.
-   H3 buffer/stream response semantics, fault-injection, deployment and Linux
-   interop remain.
+   H3 buffer/stream response semantics, broader fault-injection, deployment and
+   Linux interop remain.
 4. Ship a minimal deployment artifact, verified CA roots, non-root execution,
    resource budgets, rollout/rollback instructions, and effective-config inspection
    that excludes secrets. Add per-service transport/TLS policy only when required.

@@ -5,6 +5,28 @@ repository commit. Add a new dated section before every future commit.
 
 ## 2026-09-16
 
+### Verify HTTP/3 failure stops TCP fallback
+
+Commit message: `test(protocol): verify HTTP/3 failure stops TCP fallback`
+
+Scope:
+
+- Added a real Limen integration test with an injectable `PacketConn` read
+  failure after TCP/UDP startup.
+- Verified that an H3 serve-loop failure causes the TCP fallback to stop
+  accepting new connections, while the existing lifecycle cleanup remains
+  bounded.
+- Updated the delivery evidence to separate this local failure class from
+  broader fault-injection, deployment and Linux interoperability qualification.
+
+Verification:
+
+- `gofmt` on the touched Go test
+- `go test -count=10 ./internal/limen -run TestLimenHTTP3FailureStopsTCPFallback`
+
+Scope note: this covers one injected UDP read-failure path only; it is not full
+H3 fault-injection or production qualification.
+
 ### Validate TLS certificate validity before publication
 
 Commit message: `fix(security): validate TLS certificate validity`

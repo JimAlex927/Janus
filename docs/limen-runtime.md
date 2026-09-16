@@ -233,7 +233,8 @@ cancellation. Runtime reload on an existing QUIC connection is locally covered:
 an in-flight old stream retains its old generation while a concurrent new stream
 uses the replacement generation. The Limen also closes its application-owned
 UDP socket and starts H3 force-close when either protocol serve loop fails.
-Fault-injection and public-port deployment tests remain.
+The local fault path additionally verifies that a UDP read failure stops the
+TCP fallback. Broader fault-injection and public-port deployment tests remain.
 
 Test negotiated H3, stream cancellation isolation, stream/connection flow-control
 limits, handshake/idle/drain budgets, TLS pair rotation, reload on existing QUIC

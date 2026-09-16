@@ -272,6 +272,80 @@ func TestLimenHTTP3ClientCancellationReachesHandler(t *testing.T) {
 	}
 }
 
+func TestLimenHTTP3FailureStopsTCPFallback(t *testing.T) {
+	certFile, keyFile, _ := writeTestCertificate(t)
+	l, err := NewBinding("public", config.LimenConfig{
+		Address:   "127.0.0.1:0",
+		Protocols: []string{config.ProtocolHTTP1, config.ProtocolHTTP3},
+		TLS:       &config.TLSSettings{CertFile: certFile, KeyFile: keyFile},
+	}, http.NotFoundHandler(), config.DefaultSettings())
+	if err != nil {
+		t.Fatal(err)
+	}
+	tcpListener, err := l.Listen()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := l.ListenPacket(); err != nil {
+		_ = tcpListener.Close()
+		t.Fatal(err)
+	}
+	l.packetMu.Lock()
+	actualPacket := l.packet
+	brokenPacket := &brokenPacketConn{PacketConn: actualPacket, broken: make(chan struct{}), err: errors.New("injected UDP failure")}
+	l.packet = brokenPacket
+	l.packetMu.Unlock()
+	serveDone := make(chan error, 1)
+	go func() { serveDone <- l.Serve(tcpListener) }()
+	t.Cleanup(func() {
+		_ = l.Close()
+	})
+
+	probe, err := net.DialTimeout("tcp", tcpListener.Addr().String(), time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = probe.Close()
+	brokenPacket.Break()
+	select {
+	case err := <-serveDone:
+		if err == nil {
+			t.Fatal("Limen returned nil after HTTP/3 failure")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Limen did not return after HTTP/3 packet failure")
+	}
+
+	probe, err = net.DialTimeout("tcp", tcpListener.Addr().String(), time.Second)
+	if err == nil {
+		_ = probe.Close()
+		t.Fatal("TCP fallback remained available after HTTP/3 failure")
+	}
+}
+
+type brokenPacketConn struct {
+	net.PacketConn
+	broken chan struct{}
+	err    error
+}
+
+func (c *brokenPacketConn) ReadFrom(p []byte) (int, net.Addr, error) {
+	n, addr, err := c.PacketConn.ReadFrom(p)
+	if err != nil {
+		select {
+		case <-c.broken:
+			return 0, nil, c.err
+		default:
+		}
+	}
+	return n, addr, err
+}
+
+func (c *brokenPacketConn) Break() {
+	close(c.broken)
+	_ = c.SetDeadline(time.Now())
+}
+
 func TestLimenHTTP3ShutdownHonorsDrainDeadline(t *testing.T) {
 	certFile, keyFile, roots := writeTestCertificate(t)
 	started, release := make(chan struct{}), make(chan struct{})
