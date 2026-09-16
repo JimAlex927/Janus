@@ -34,3 +34,30 @@ Verification:
 
 Scope note: `max_body_bytes` is now validated and documented, but request-body
 size enforcement remains the next implementation task in `docs/plan.md`.
+
+## 2026-09-16
+
+### Remove configuration without runtime consumers
+
+Commit message: `refactor(config): remove unused settings`
+
+Scope:
+
+- Removed body-limit, capacity-planning, SLO-planning, and trusted-proxy fields
+  that were declared but not consumed by the current runtime.
+- Kept only request/server/backend settings that currently configure HTTP server
+  deadlines or the outbound transport and connection pool.
+- Updated the sample configuration, configuration tests, and delivery plan to
+  match the reduced schema.
+- Added explanatory Mandarin notes for the current Go transport and server
+  timeout behavior.
+
+Verification:
+
+- `go test ./...`
+- `go vet ./...`
+- `go build -o bin/janus.exe ./cmd/janus`
+- `go run ./cmd/janus -check -config configs/janus.json`
+
+Design note: future middleware composition in the style of Traefik is recorded
+as a direction for a later change; this commit does not implement it.

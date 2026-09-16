@@ -43,7 +43,7 @@ func TestDuplicateRouteMatch(t *testing.T) {
 }
 
 func TestSettingsDurationSyntaxAndDefaults(t *testing.T) {
-	valid := `{"listen":"127.0.0.1:8080","settings":{"request":{"normal_duration":"500ms","maximum_duration":"750ms"},"slo":{"acceptable_p99_latency":"100ms"}},"services":{"s":{"upstreams":["http://localhost:9000"]}},"routes":[{"name":"r","path_prefix":"/api","service":"s"}]}`
+	valid := `{"listen":"127.0.0.1:8080","settings":{"request":{"maximum_duration":"750ms"}},"services":{"s":{"upstreams":["http://localhost:9000"]}},"routes":[{"name":"r","path_prefix":"/api","service":"s"}]}`
 	c, err := Load(strings.NewReader(valid))
 	if err != nil {
 		t.Fatal(err)

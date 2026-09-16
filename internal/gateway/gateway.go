@@ -94,10 +94,20 @@ func NewServer(address string, handler http.Handler, values ...config.Settings) 
 	settings = settings.WithDefaults()
 	return &http.Server{
 		Addr: address, Handler: handler,
+		//客户端最多可以花多久把 HTTP Request Header 发完整。
 		ReadHeaderTimeout: settings.Server.ReadHeaderTimeout.Duration(),
-		ReadTimeout:       settings.Request.ReadTimeout.Duration(),
-		WriteTimeout:      settings.Request.MaximumDuration.Duration(),
-		IdleTimeout:       settings.Server.IdleTimeout.Duration(),
-		MaxHeaderBytes:    int(settings.Server.MaxHeaderBytes),
+		//ReadTimeout 是读取整个 request，包括 body 的最大持续时间。 Go 的实现是在开始读取这个 request 时算。不是开始读取header的时候算。
+		ReadTimeout: settings.Request.ReadTimeout.Duration(),
+		//WriteTimeout 是 response 写操作超时的最大持续时间，并且每读取一个新 request header 后都会重置，读完client的header就开始计时了。
+		// 它是一个底层 connection 的 write deadline，通常在 request header 读取完成后就设置，
+		//所以 Handler 自己处理请求花掉的时间，也会消耗这个 write deadline。
+		// 如果业务逻辑处理超过这个时间了，不会把业务逻辑杀死。只是超时后，对response的写入无法成功，业务逻辑正常运行。
+		//不是设置30秒之后，查询数据库等操作都无法进行了，而是，30秒后无法写入response
+		WriteTimeout: settings.Request.MaximumDuration.Duration(),
+		//HTTP keep-alive 状态下，Server 最多等下一个 request 多久。用于http的 keep-alive的情况。
+		//现代http请求一般默认都是keep-alive 这样请求可以复用旧的connection
+		IdleTimeout: settings.Server.IdleTimeout.Duration(),
+		//Server 允许客户端 HTTP Request Header 有多大
+		MaxHeaderBytes: int(settings.Server.MaxHeaderBytes),
 	}
 }

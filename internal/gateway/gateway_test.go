@@ -113,9 +113,7 @@ func TestOverallTimeoutCancelsBackend(t *testing.T) {
 	defer backend.Close()
 
 	settings := config.DefaultSettings()
-	settings.Request.NormalDuration = config.Duration(10 * time.Millisecond)
 	settings.Request.MaximumDuration = config.Duration(50 * time.Millisecond)
-	settings.SLO.AcceptableP99Latency = config.Duration(5 * time.Millisecond)
 	g, err := New(config.Config{
 		Listen:   "127.0.0.1:8080",
 		Settings: settings,

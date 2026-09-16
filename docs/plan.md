@@ -18,7 +18,7 @@ active deadline: it is attached to the request context so backend work is
 cancelled when that budget expires. `read_timeout` is the inbound request-read
 budget (including headers and body), while `read_header_timeout` remains its
 separate header-phase cap. Body size enforcement is the next task and must use
-the validated `max_body_bytes` setting.
+an explicitly scoped, validated body-limit setting.
 
 ## Decisions to record before sizing
 
@@ -54,8 +54,9 @@ as a duplicate of the other. Start with health checks plus admission limits.
    duration syntax and min/max bounds. Separate connect, header, body and overall
    budgets. Decide whether an overall budget actively cancels backend work.
 2. Add request-body size enforcement for both known lengths and chunked input.
-   Reject oversized known bodies early. A streaming limit can reject only after
-   some bytes have reached the backend; document this and never retry those writes.
+   Add an explicitly scoped, validated body-limit setting, reject oversized
+   known bodies early, and document that a streaming limit can reject only after
+   some bytes have reached the backend. Never retry those writes.
 3. Add a global admission semaphore and per-service request caps. Reject saturation
    with 503, use 429 for a deliberate client quota, and keep queues bounded or absent.
 4. Add request IDs and access logs with route/service IDs, status, duration, bytes

@@ -2,8 +2,6 @@
   "listen": "127.0.0.1:8080",
   "settings": {
     "request": {
-      "max_body_bytes": 8388608,
-      "normal_duration": "5s",
       "read_timeout": "30s",
       "maximum_duration": "30s"
     },

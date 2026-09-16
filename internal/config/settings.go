@@ -3,22 +3,14 @@ package config
 import (
 	"encoding/json"
 	"fmt"
-	"net"
 	"time"
 )
 
 const (
-	TLSExternalLoadBalancer = "external_load_balancer"
+	MinHeaderBytes int64 = 1 << 10
+	MaxHeaderBytes int64 = 16 << 20
 
-	MinRequestBodyBytes int64 = 1 << 10
-	MaxRequestBodyBytes int64 = 1 << 30
-	MinHeaderBytes      int64 = 1 << 10
-	MaxHeaderBytes      int64 = 16 << 20
-
-	MinExpectedConcurrency = 1
-	MaxExpectedConcurrency = 1_000_000
-	MinExpectedRPS         = 1
-	MaxExpectedRPS         = 10_000_000
+	MaxBackendConnections = 1_000_000
 
 	MinSettingDuration = time.Millisecond
 	MaxSettingDuration = 24 * time.Hour
@@ -48,17 +40,12 @@ func (d *Duration) UnmarshalJSON(data []byte) error {
 }
 
 type Settings struct {
-	Request  RequestSettings  `json:"request"`
-	Server   ServerSettings   `json:"server"`
-	Capacity CapacitySettings `json:"capacity"`
-	Backend  BackendSettings  `json:"backend"`
-	SLO      SLOSettings      `json:"slo"`
-	Trust    TrustSettings    `json:"trust"`
+	Request RequestSettings `json:"request"`
+	Server  ServerSettings  `json:"server"`
+	Backend BackendSettings `json:"backend"`
 }
 
 type RequestSettings struct {
-	MaxBodyBytes    int64    `json:"max_body_bytes"`   // enforced by the body-limit middleware in phase 1
-	NormalDuration  Duration `json:"normal_duration"`  // planning budget for normal API calls
 	ReadTimeout     Duration `json:"read_timeout"`     // inbound request read budget, including headers and body
 	MaximumDuration Duration `json:"maximum_duration"` // active end-to-end request deadline
 }
@@ -67,11 +54,6 @@ type ServerSettings struct {
 	ReadHeaderTimeout Duration `json:"read_header_timeout"`
 	IdleTimeout       Duration `json:"idle_timeout"`
 	MaxHeaderBytes    int64    `json:"max_header_bytes"`
-}
-
-type CapacitySettings struct {
-	ExpectedConcurrency int `json:"expected_concurrency"`
-	ExpectedRPS         int `json:"expected_rps"`
 }
 
 type BackendSettings struct {
@@ -87,23 +69,11 @@ type BackendSettings struct {
 	DisableCompression     *bool    `json:"disable_compression"`
 }
 
-type SLOSettings struct {
-	AcceptableP99Latency Duration `json:"acceptable_p99_latency"`
-}
-
-type TrustSettings struct {
-	TLSLoadBalancerMode string   `json:"tls_load_balancer_mode"`
-	TrustedProxyCIDRs   []string `json:"trusted_proxy_cidrs"`
-}
-
-// DefaultSettings records the starter's initial deployment assumptions. The
-// expected capacity and p99 target are planning inputs, not admission limits.
+// DefaultSettings records the starter's initial deployment assumptions.
 func DefaultSettings() Settings {
 	disableCompression := true
 	return Settings{
 		Request: RequestSettings{
-			MaxBodyBytes:    8 << 20,
-			NormalDuration:  Duration(5 * time.Second),
 			ReadTimeout:     Duration(30 * time.Second),
 			MaximumDuration: Duration(30 * time.Second),
 		},
@@ -112,7 +82,6 @@ func DefaultSettings() Settings {
 			IdleTimeout:       Duration(60 * time.Second),
 			MaxHeaderBytes:    32 << 10,
 		},
-		Capacity: CapacitySettings{ExpectedConcurrency: 128, ExpectedRPS: 100},
 		Backend: BackendSettings{
 			ConnectTimeout:         Duration(3 * time.Second),
 			KeepAlive:              Duration(30 * time.Second),
@@ -125,8 +94,6 @@ func DefaultSettings() Settings {
 			IdleConnTimeout:        Duration(90 * time.Second),
 			DisableCompression:     &disableCompression,
 		},
-		SLO:   SLOSettings{AcceptableP99Latency: Duration(250 * time.Millisecond)},
-		Trust: TrustSettings{TLSLoadBalancerMode: TLSExternalLoadBalancer},
 	}
 }
 
@@ -134,12 +101,6 @@ func DefaultSettings() Settings {
 // valid while a new file can override any setting explicitly.
 func (s Settings) WithDefaults() Settings {
 	d := DefaultSettings()
-	if s.Request.MaxBodyBytes == 0 {
-		s.Request.MaxBodyBytes = d.Request.MaxBodyBytes
-	}
-	if s.Request.NormalDuration == 0 {
-		s.Request.NormalDuration = d.Request.NormalDuration
-	}
 	if s.Request.ReadTimeout == 0 {
 		s.Request.ReadTimeout = d.Request.ReadTimeout
 	}
@@ -155,19 +116,7 @@ func (s Settings) WithDefaults() Settings {
 	if s.Server.MaxHeaderBytes == 0 {
 		s.Server.MaxHeaderBytes = d.Server.MaxHeaderBytes
 	}
-	if s.Capacity.ExpectedConcurrency == 0 {
-		s.Capacity.ExpectedConcurrency = d.Capacity.ExpectedConcurrency
-	}
-	if s.Capacity.ExpectedRPS == 0 {
-		s.Capacity.ExpectedRPS = d.Capacity.ExpectedRPS
-	}
 	s.Backend = s.Backend.WithDefaults()
-	if s.SLO.AcceptableP99Latency == 0 {
-		s.SLO.AcceptableP99Latency = d.SLO.AcceptableP99Latency
-	}
-	if s.Trust.TLSLoadBalancerMode == "" {
-		s.Trust.TLSLoadBalancerMode = d.Trust.TLSLoadBalancerMode
-	}
 	return s
 }
 
@@ -208,22 +157,12 @@ func (s BackendSettings) WithDefaults() BackendSettings {
 
 func (s Settings) Validate() error {
 	s = s.WithDefaults()
-	if err := validateSize("request.max_body_bytes", s.Request.MaxBodyBytes, MinRequestBodyBytes, MaxRequestBodyBytes); err != nil {
-		return err
-	}
-	if err := validateDuration("request.normal_duration", s.Request.NormalDuration); err != nil {
-		return err
-	}
 	if err := validateDuration("request.read_timeout", s.Request.ReadTimeout); err != nil {
 		return err
 	}
 	if err := validateDuration("request.maximum_duration", s.Request.MaximumDuration); err != nil {
 		return err
 	}
-	if s.Request.MaximumDuration < s.Request.NormalDuration {
-		return fmt.Errorf("request.maximum_duration must be at least request.normal_duration")
-	}
-
 	if err := validateDuration("server.read_header_timeout", s.Server.ReadHeaderTimeout); err != nil {
 		return err
 	}
@@ -232,13 +171,6 @@ func (s Settings) Validate() error {
 	}
 	if err := validateSize("server.max_header_bytes", s.Server.MaxHeaderBytes, MinHeaderBytes, MaxHeaderBytes); err != nil {
 		return err
-	}
-
-	if s.Capacity.ExpectedConcurrency < MinExpectedConcurrency || s.Capacity.ExpectedConcurrency > MaxExpectedConcurrency {
-		return fmt.Errorf("capacity.expected_concurrency must be between %d and %d", MinExpectedConcurrency, MaxExpectedConcurrency)
-	}
-	if s.Capacity.ExpectedRPS < MinExpectedRPS || s.Capacity.ExpectedRPS > MaxExpectedRPS {
-		return fmt.Errorf("capacity.expected_rps must be between %d and %d", MinExpectedRPS, MaxExpectedRPS)
 	}
 
 	for name, value := range map[string]Duration{
@@ -260,27 +192,12 @@ func (s Settings) Validate() error {
 		"backend.max_idle_conns_per_host": s.Backend.MaxIdleConnsPerHost,
 		"backend.max_conns_per_host":      s.Backend.MaxConnsPerHost,
 	} {
-		if value < 1 || value > MaxExpectedConcurrency {
-			return fmt.Errorf("%s must be between 1 and %d", name, MaxExpectedConcurrency)
+		if value < 1 || value > MaxBackendConnections {
+			return fmt.Errorf("%s must be between 1 and %d", name, MaxBackendConnections)
 		}
 	}
 	if s.Backend.MaxIdleConnsPerHost > s.Backend.MaxConnsPerHost {
 		return fmt.Errorf("backend.max_idle_conns_per_host must not exceed backend.max_conns_per_host")
-	}
-	if err := validateDuration("slo.acceptable_p99_latency", s.SLO.AcceptableP99Latency); err != nil {
-		return err
-	}
-	if s.SLO.AcceptableP99Latency > s.Request.NormalDuration {
-		return fmt.Errorf("slo.acceptable_p99_latency must not exceed request.normal_duration")
-	}
-
-	if s.Trust.TLSLoadBalancerMode != TLSExternalLoadBalancer {
-		return fmt.Errorf("trust.tls_load_balancer_mode must be %q", TLSExternalLoadBalancer)
-	}
-	for _, raw := range s.Trust.TrustedProxyCIDRs {
-		if _, _, err := net.ParseCIDR(raw); err != nil {
-			return fmt.Errorf("trust.trusted_proxy_cidrs contains invalid CIDR %q: %w", raw, err)
-		}
 	}
 	return nil
 }
