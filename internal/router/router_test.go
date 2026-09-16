@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"janus/internal/protocol"
 )
 
 func TestPrecedenceAndPathBoundaries(t *testing.T) {
@@ -34,6 +36,32 @@ func TestPrecedenceAndPathBoundaries(t *testing.T) {
 			rt.ServeHTTP(w, r)
 			if w.Code != tc.status || w.Body.String() != tc.want {
 				t.Fatalf("got %d %q", w.Code, w.Body.String())
+			}
+		})
+	}
+}
+
+func TestLimenScopedRoutes(t *testing.T) {
+	rt := New([]Route{
+		{Limen: "public", PathPrefix: "/api", Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("public")) })},
+		{Limen: "admin", PathPrefix: "/api", Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("admin")) })},
+	})
+	for _, tc := range []struct {
+		name, want string
+	}{
+		{"public", "public"},
+		{"admin", "admin"},
+		{"unknown", "404 page not found\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := protocol.WithLimenID(httptest.NewRequest("GET", "http://gateway/api", nil), tc.name)
+			w := httptest.NewRecorder()
+			rt.ServeHTTP(w, r)
+			if w.Code != http.StatusOK && tc.name != "unknown" {
+				t.Fatalf("status = %d", w.Code)
+			}
+			if w.Body.String() != tc.want {
+				t.Fatalf("body = %q, want %q", w.Body.String(), tc.want)
 			}
 		})
 	}

@@ -1,9 +1,9 @@
 # Protocol Limen and dynamic configuration
 
 Status: implementation plan reviewed against the repository on 2026-09-16.
-Phase 1Q qualification, the Phase 2A HTTP/1 Limen extraction, and the Phase 2B
-stable runtime/generation core are shipped; native TLS/HTTP/2 and file reload
-APIs below are not shipped.
+Phase 1Q qualification, the Phase 2A HTTP/1 Limen extraction, the Phase 2B
+stable runtime/generation core, and the Phase 2C TLS/HTTP/2 startup path are
+shipped; file reload and certificate rotation APIs below are not shipped.
 The delivery sequence and exit gates are in [plan.md](plan.md).
 
 ## Scope
@@ -28,9 +28,10 @@ HTTP request. Enabling HTTP/2 alone does not establish gRPC support.
 | `internal/gateway` | Building a generation of routes, middleware and service handlers | Opening listeners or swapping the live generation |
 
 `cmd/janus` composes these components and handles process signals. `config`
-decodes and validates input; it does not build handlers. Begin with one file
-source implemented next to the runtime reload code. Docker/Kubernetes Providers
-and generic manager frameworks are unnecessary for this scope.
+decodes and validates input; it does not build handlers. Phase 2C keeps the
+versioned startup and routing data in one JSON document. Phase 2D can split the
+routing source when it adds file watching; Docker/Kubernetes Providers and
+generic manager frameworks are unnecessary for this scope.
 
 The following is the target request path; future policy nodes are added only
 when their implementation phase lands:
@@ -69,8 +70,9 @@ HTTP request remain within the observed HTTP chain.
    it owns. The runtime now keeps the process-owned transport alive across
    replacements; standalone `gateway.New` retains an owned transport for direct
    use and tests.
-4. Add TLS and HTTP/2 to Limen, then wire file changes to the runtime reload
-   transaction. Add HTTP/3 only after these contracts pass their tests.
+4. Add TLS and HTTP/2 to Limen. The native startup path is now complete; wire
+   routing-file changes and certificate rotation to the runtime transactions
+   in Phase 2D. Add HTTP/3 only after these contracts pass their tests.
 
 Limen depends on `http.Handler`, not the gateway builder. Runtime may call the
 gateway builder; gateway must not import runtime. Add files/packages only as
@@ -78,24 +80,25 @@ their functionality is implemented.
 
 ## Configuration boundaries and migration
 
-Retain the current single JSON document as legacy startup-only mode. Introduce
-an explicitly versioned format for the new deployment mode in Phase 2C, with:
+Retain the current single JSON document as legacy startup-only mode. The
+versioned format introduced in Phase 2C keeps startup and routing data in one
+document, with:
 
-- Startup document: named `limens`, fixed global settings, outbound transport
-  settings, drain budget, and the path to one routing document.
-- Routing document: the existing `routes`, `services`, and `middlewares` model;
-  route attachments may reference startup-defined Limen names.
+- Named `limens`, fixed global settings, outbound transport settings, and drain
+  budget.
+- The existing `routes`, `services`, and `middlewares` model in the same
+  document; route attachments may reference named Limens.
 - TLS identity: one configured certificate/key pair per TLS Limen initially.
   Multi-certificate SNI selection, mTLS policy reload, and ACME come later.
 
-Keep this as a schema design until the consumer is implemented; do not add
-unused keys to `configs/janus.json`. A migration example and strict parser tests
-must accompany the new format. Legacy `listen` normalizes to a single internal
-Limen. Mixed legacy/new syntax fails rather than silently choosing one source.
-Resolve file paths relative to the referencing configuration file. A route
-without Limen references uses the sole configured data Limen; with multiple
-Limens require explicit references. Reject missing/duplicate references and
-ambiguous host/path matches within overlapping Limen scopes before publication.
+The versioned startup schema and consumer are implemented in Phase 2C; the
+TLS example is [configs/janus-tls.example.json](../configs/janus-tls.example.json).
+Legacy `listen` normalizes to a single internal Limen. Mixed legacy/new syntax
+fails rather than silently choosing one source. TLS file paths resolve relative
+to the referencing configuration file. A route without a Limen reference uses
+the sole configured data Limen; with multiple Limens, routes require explicit
+references. Missing references and ambiguous host/path matches within one Limen
+scope are rejected before startup.
 
 | Setting | Update policy in the first implementation |
 | --- | --- |
@@ -155,33 +158,29 @@ active permit accounting. A lower limit rejects new acquisitions until usage
 falls. Counter lifetime is not definition lifetime. Health workers added later
 must have explicit generation ownership or reference-counted sharing.
 
-## HTTP/2 delivery
+## HTTP/2 delivery — complete
 
-Use Go `net/http` for HTTP/1.1 and HTTP/2, `crypto/tls` for TLS, and explicit
-protocol selection. First ship HTTPS with ALPN `h2`/`http/1.1`, local certificate
-files and a defined minimum TLS version. An HTTP/1-only plaintext listener
-remains useful behind an external TLS terminator. HTTP/2 need not inherently
-use TLS: Go 1.25 also exposes unencrypted HTTP/2, but that internal deployment
-mode is deferred to keep the first support matrix small.
+Go `net/http` handles HTTP/1.1 and HTTP/2, `crypto/tls` handles the Limen
+certificate, and the versioned startup schema selects the enabled protocols.
+TLS Limens advertise ALPN `h2` and `http/1.1`; a plaintext legacy HTTP/1 Limen
+remains available behind an external TLS terminator. Unencrypted HTTP/2 remains
+deferred. Inbound and outbound protocol selection are independent, and the
+outbound transport explicitly preserves HTTP/2 after installing its custom
+dialer. See [Go 1.25 HTTP protocol and server APIs](https://pkg.go.dev/net/http@go1.25.0).
 
-Inbound and outbound protocol selection are independent. Initially keep HTTP/1
-backends and negotiated HTTPS HTTP/2 backends. The current proxy clones
-`http.DefaultTransport`; do not assume its HTTP/2 support is disabled merely
-because it then sets `DialContext`. Assert the actual negotiated response version.
-See [Go 1.25 HTTP protocol and server APIs](https://pkg.go.dev/net/http@go1.25.0).
-
-Acceptance tests must demonstrate:
+The implemented 2C evidence demonstrates:
 
 - TLS certificate verification, actual negotiated `h2`, and HTTP/1.1 fallback.
 - Concurrent streams on one verified shared connection; cancellation, body
   failure or deadline in one stream leaves another stream functional.
-- H2 inbound to H1 backend, H1 inbound to H2 backend, and H2 on both sides.
-- Header/body/trailer forwarding, slow uploads/readers, buffer success/overflow/
-  timeout, and completed versus incomplete response semantics for both protocols.
-- Protocol-specific read/write/idle/handshake limits and concurrent-stream bounds.
-  Do not apply a raw connection deadline from one H2 request to its siblings.
-- Graceful drain/GOAWAY and force-close after budget. Routing reload alone sends
-  no GOAWAY and does not restart a listener.
+- H1/H2 selection on the inbound Limen, H2 negotiation on the outbound
+  transport, and route scoping by named Limen.
+- Bind-before-serve startup cleanup and the existing server deadline behavior.
+
+The full H1/H2 forwarding matrix, response-writer capability audit, protocol-
+specific stream limits, and graceful GOAWAY/force-close qualification remain
+follow-up coverage. Routing reload alone must send no GOAWAY and must not
+restart a listener when Phase 2D is implemented.
 
 Audit response wrappers as part of this work. Transparent observers should
 preserve supported controller operations. Buffering deliberately suppresses

@@ -5,6 +5,38 @@ repository commit. Add a new dated section before every future commit.
 
 ## 2026-09-16
 
+### Add native TLS and HTTP/2 Limens
+
+Commit message: `feat(limen): add TLS and HTTP/2 bindings`
+
+Scope:
+
+- Added versioned configuration with named Limen bindings, explicit HTTP/1 and
+  HTTP/2 protocol selection, TLS certificate/key loading, minimum TLS version,
+  and relative certificate-path resolution.
+- Extended Limen to serve plaintext HTTP/1 or TLS HTTP/1/HTTP2 with ALPN while
+  keeping the handler and runtime shared across bindings.
+- Added trusted Limen context scoping so routes can be attached to a specific
+  inbound binding without allowing clients to select a binding themselves.
+- Preserved outbound HTTP/2 when the custom transport dialer is configured and
+  added negotiation coverage for inbound and outbound TLS traffic.
+- Added multi-Limen startup cleanup, TLS-aware `-check`, a runnable TLS example,
+  and updated the protocol, architecture, runtime, plan, and README documents.
+
+Verification:
+
+- `gofmt` on touched Go files
+- `go test -count=3 ./internal/limen ./internal/proxy ./internal/router ./internal/config`
+- `go test ./...`
+- `go vet ./...`
+- `go build -o bin/janus.exe ./cmd/janus`
+- `go run ./cmd/janus -check -config configs/janus.json`
+
+Scope note: HTTP/3, unencrypted HTTP/2, long-lived protocol contracts, routing
+file reload, and certificate rotation remain future work.
+
+## 2026-09-16
+
 ### Add stable runtime generations
 
 Commit message: `feat(runtime): add stable generation dispatcher`

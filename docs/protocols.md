@@ -97,10 +97,12 @@ storms and synchronized probes can amplify a backend outage.
 
 ## HTTPS and protocol expansion
 
-The listener currently receives HTTP/1.x on a private interface. A load balancer
-can accept HTTPS or HTTP/2 from clients and forward HTTP/1.1 to Janus. Outbound TLS
-must verify certificates and hostnames; never ship `InsecureSkipVerify` to make a
-deployment work. Plan CA rotation and mTLS separately if required.
+The legacy listener receives HTTP/1.x on a private interface. Versioned startup
+configuration can also create a native TLS Limen with HTTP/1.1 and HTTP/2
+selected through ALPN. A load balancer can still terminate public TLS and forward
+HTTP/1.1 to Janus. Outbound TLS must verify certificates and hostnames; never ship
+`InsecureSkipVerify` to make a deployment work. Plan CA rotation and mTLS
+separately if required.
 
 gRPC requires a deliberate HTTP/2 path, trailer preservation, deadline and
 cancellation semantics, gRPC status visibility and streaming tests. HTTPS

@@ -3,6 +3,7 @@ package proxy
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -61,6 +62,33 @@ func TestNewTransportUsesConfiguredSettings(t *testing.T) {
 		transport.MaxIdleConnsPerHost != 5 || transport.MaxConnsPerHost != 9 ||
 		transport.IdleConnTimeout != 11*time.Second || transport.DisableCompression {
 		t.Fatalf("transport settings were not applied: %+v", transport)
+	}
+}
+
+func TestTransportNegotiatesHTTP2ToHTTPSBackend(t *testing.T) {
+	backend := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, r.Proto)
+	}))
+	backend.EnableHTTP2 = true
+	backend.StartTLS()
+	defer backend.Close()
+
+	transport := NewTransport()
+	transport.TLSClientConfig = backend.Client().Transport.(*http.Transport).TLSClientConfig.Clone()
+	defer transport.CloseIdleConnections()
+	u, err := url.Parse(backend.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pool, err := upstream.New([]*url.URL{u})
+	if err != nil {
+		t.Fatal(err)
+	}
+	proxyHandler := New(pool, transport, zap.NewNop())
+	w := httptest.NewRecorder()
+	proxyHandler.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "http://gateway/", nil))
+	if w.Code != http.StatusOK || w.Body.String() != "HTTP/2.0" {
+		t.Fatalf("backend response = %d %q, want negotiated HTTP/2", w.Code, w.Body.String())
 	}
 }
 

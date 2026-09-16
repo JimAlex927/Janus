@@ -6,9 +6,12 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+
+	"janus/internal/protocol"
 )
 
 type Route struct {
+	Limen      string
 	Host       string
 	PathPrefix string
 	Handler    http.Handler
@@ -43,6 +46,9 @@ func (rt *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	//Note: The core route loop
 	//这里是路由匹配循环
 	for _, route := range rt.routes {
+		if route.Limen != "" && route.Limen != protocol.LimenID(r) {
+			continue
+		}
 		//先匹配当前请求中的host
 		// 1、match the host to any host in the routes map first
 		if route.Host != "" && route.Host != host {

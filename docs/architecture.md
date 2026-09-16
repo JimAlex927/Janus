@@ -2,11 +2,10 @@
 
 ## Scope and implementation status
 
-Janus currently serves bounded-duration HTTP APIs through Protocol Limen on a
-private HTTP/1.x listener behind an existing TLS load balancer, forwarding to
-static HTTP/HTTPS origins. The next architecture adds native HTTPS/HTTP/2 and
-later HTTP/3, plus file-based runtime configuration reload. These are planned
-capabilities.
+Janus currently serves bounded-duration HTTP APIs through Protocol Limen on
+private HTTP/1.x or native TLS/HTTP/2 listeners, forwarding to static
+HTTP/HTTPS origins. File-based runtime configuration reload and HTTP/3 remain
+planned capabilities.
 SSE, WebSockets, gRPC and arbitrary TCP/UDP tunnels remain outside this scope.
 Use Go's `net/http`, `httputil.ReverseProxy`, and `http.Transport` as the protocol
 foundation. Backend applications retain business authorization responsibilities.
@@ -228,7 +227,7 @@ files below are responsibilities, not empty directories to scaffold immediately.
 | Package | Responsibility and likely files | First phase |
 | --- | --- | --- |
 | `cmd/janus` | CLI, process signals, invoke startup/drain | Existing |
-| `internal/limen` | Listener and protocol adapters, inbound TLS identity, coordinated server lifecycle | HTTP/1 lifecycle in 2A; H2 in 2C, H3 in 5 |
+| `internal/limen` | Listener and protocol adapters, inbound TLS identity, coordinated server lifecycle | HTTP/1 and TLS/H2 in 2A/2C; H3 in 5 |
 | `internal/config` | Settings, named policy schema, reference/scope validation | Existing; policy types in 2 |
 | `internal/gateway` | Builds route/service handler generations from validated config and injected runtime resources | 2B generation builder; server wiring moved to Limen in 2A |
 | `internal/middleware` | `chain.go`, `timeout.go`, then IDs, observation, body limits and admission | 1–3 |

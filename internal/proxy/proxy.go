@@ -26,6 +26,10 @@ func NewTransport(values ...config.BackendSettings) *http.Transport {
 	settings = settings.WithDefaults()
 	t := http.DefaultTransport.(*http.Transport).Clone()
 	t.Proxy = nil // Backend connections must not inherit a workstation's HTTP_PROXY.
+	// Keep HTTP/2 enabled after installing the custom DialContext below. The
+	// standard Transport disables automatic HTTP/2 in that case unless this is
+	// explicitly requested.
+	t.ForceAttemptHTTP2 = true
 	//这里两个用于transport创立连接的配置，如果连接已经存在于连接池中，就不会新建tcp或者udp连接。
 	//参数1 Timeout: 新建连接的总超时时间
 	//参数2 KeepAlive: 不是http的 Keep-Alive。

@@ -72,6 +72,44 @@ func TestRouteMiddlewareConfigRejectsBadReferences(t *testing.T) {
 	}
 }
 
+func TestVersionedLimenConfig(t *testing.T) {
+	body := `{"version":1,"limens":{"public":{"address":"127.0.0.1:8443","protocols":["http1","http2"],"tls":{"cert_file":"server.crt","key_file":"server.key","min_version":"1.3"}}},"services":{"s":{"upstreams":["http://localhost:9000"]}},"routes":[{"name":"r","limen":"public","path_prefix":"/api","service":"s"}]}`
+	c, err := Load(strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	binding := c.LimenBindings()["public"]
+	if binding.Address != "127.0.0.1:8443" || len(binding.Protocols) != 2 || binding.TLS == nil || binding.TLS.MinVersion != "1.3" {
+		t.Fatalf("versioned limen was not loaded: %+v", binding)
+	}
+}
+
+func TestVersionedLimenConfigRejectsInvalidBindings(t *testing.T) {
+	base := `{"version":1,"limens":{"public":{"address":"127.0.0.1:8443","protocols":["http1"]}},"services":{"s":{"upstreams":["http://localhost:9000"]}},"routes":[{"name":"r","limen":"public","path_prefix":"/api","service":"s"}]}`
+	for _, tc := range []struct {
+		name string
+		body string
+	}{
+		{"http2 without tls", strings.Replace(base, `["http1"]`, `["http2"]`, 1)},
+		{"unknown protocol", strings.Replace(base, `["http1"]`, `["http3"]`, 1)},
+		{"mixed legacy syntax", strings.Replace(base, `{"version":1`, `{"version":1,"listen":"127.0.0.1:8080"`, 1)},
+		{"missing route limen with multiple bindings", strings.Replace(base, `"limen":"public"`, `"limen":"missing"`, 1)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := Load(strings.NewReader(tc.body)); err == nil {
+				t.Fatal("expected configuration validation error")
+			}
+		})
+	}
+}
+
+func TestVersionedSingleLimenTreatsOmittedBindingAsDefaultScope(t *testing.T) {
+	body := `{"version":1,"limens":{"public":{"address":"127.0.0.1:8443","protocols":["http1"]}},"services":{"s":{"upstreams":["http://localhost:9000"]}},"routes":[{"name":"a","path_prefix":"/api","service":"s"},{"name":"b","limen":"public","path_prefix":"/api","service":"s"}]}`
+	if _, err := Load(strings.NewReader(body)); err == nil {
+		t.Fatal("expected duplicate route rejection")
+	}
+}
+
 func TestSettingsDurationSyntaxAndDefaults(t *testing.T) {
 	valid := `{"listen":"127.0.0.1:8080","settings":{"request":{"maximum_duration":"750ms"}},"services":{"s":{"upstreams":["http://localhost:9000"]}},"routes":[{"name":"r","path_prefix":"/api","service":"s"}]}`
 	c, err := Load(strings.NewReader(valid))

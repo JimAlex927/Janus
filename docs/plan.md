@@ -3,10 +3,10 @@
 ## Objective
 
 A small, auditable HTTP API reverse proxy that an individual can maintain.
-The current deployment profile is a private HTTP/1.x listener behind a TLS load
-balancer. Protocol Limen now owns that HTTP/1 lifecycle; later deliveries add
-native HTTPS/HTTP/2, a stable runtime dispatcher for file-based routing reload,
-and HTTP/3. Backend apps retain their business authorization responsibility.
+The current deployment profile supports private HTTP/1.x or native HTTPS/HTTP/2
+listeners through Protocol Limen. Later deliveries add a stable runtime
+dispatcher for file-based routing reload and HTTP/3. Backend apps retain their
+business authorization responsibility.
 Support remains scoped to bounded-duration HTTP APIs; adding an HTTP version does
 not add streaming RPC or tunnel support. Concrete ownership and update rules are in
 [limen-runtime.md](limen-runtime.md).
@@ -28,8 +28,8 @@ broader middleware policy types and service attachments remain future work.
 As of 2026-09-16, the baseline has host/path routing, round-robin services,
 streaming reverse proxying, HTTPS certificate verification, typed server and
 transport settings, a startup-built middleware chain, request-context
-cancellation, and an `internal/limen` HTTP/1 lifecycle. Shutdown exists, with a
-fixed 35-second drain budget. Body limits,
+cancellation, the `internal/limen` HTTP/1 lifecycle, and native TLS/HTTP/2
+bindings. Shutdown exists, with a fixed 35-second drain budget. Body limits,
 admission, access observation, admin endpoints, health checks, and reload are
 not implemented.
 
@@ -71,7 +71,7 @@ not just configuration types. Size effort after each phase's exit review.
 | 1Q: deadline qualification | Correct slow-upload/reader and parent-deadline evidence | Complete: isolated deadlines, cancellation and response outcomes verified |
 | 2A: Protocol Limen | Extract existing HTTP/1 listener and lifecycle | Complete: legacy config/forwarding retained; Limen owns bind, serve and drain |
 | 2B: runtime generations | Stable dispatcher and explicit resource ownership | Complete: old requests retain old handlers; new requests use new handlers; retirement is bounded and race-safe |
-| 2C: HTTPS and HTTP/2 | TLS Limens, protocol configuration, response capability audit | Actual H2 negotiation, sibling-stream isolation, H1 fallback and drain tests pass |
+| 2C: HTTPS and HTTP/2 | TLS Limens, protocol configuration, response capability audit | Complete: actual H2 negotiation, sibling-stream isolation, H1 fallback and TLS startup checks pass |
 | 2D: dynamic files and certificates | Serialized validated routing reload; independent certificate rotation | Invalid updates preserve last-good state; keepalive/H2 traffic survives updates; resource use remains bounded |
 | 2E: usable request policies | Named body-limit policies, request IDs, access observation | Policies compose in order; early rejection, upload limits, trailers, and incomplete responses covered on H1/H2 |
 | 3: bounded operation | Global/service admission, admin readiness, configurable drain | Overload rejects promptly; shared service limits hold across routes; shutdown meets its budget |
@@ -79,16 +79,18 @@ not just configuration types. Size effort after each phase's exit review.
 | 5: HTTP/3 and deployment lifecycle | QUIC adapter reusing runtime; deployment artifacts | H3 forwarding, reload, cancellation, TLS rotation, UDP failure/fallback and coordinated drain tests pass |
 | 6: production qualification | Linux CI, security review, realistic load/soak tests, canary | All release gates pass for a named build and environment |
 
-Completed order is 1Q -> 2A -> 2B. Next delivery order is 2C -> 2D -> 2E -> 3 -> 4 -> 5 -> 6.
-Phase 2D delivers the first native H1/H2 plus dynamic-file development milestone.
+Completed order is 1Q -> 2A -> 2B -> 2C. Next delivery order is 2D -> 2E -> 3 -> 4 -> 5 -> 6.
+Phase 2C delivers the first native H1/H2 milestone; Phase 2D adds dynamic-file
+updates and certificate rotation.
 Phase 5 adds H3. All production claims still require Phase 6 qualification for
 the enabled protocol set; neither development milestone is production certification.
 
 ## Phase 0 decisions — complete
 
 The initial HTTP/1 baseline contract is recorded below. The expanded target
-uses the Limen and reload contracts in [limen-runtime.md](limen-runtime.md);
-native TLS/H2/H3 remain planned, not current capabilities.
+uses the Limen and reload contracts in [limen-runtime.md](limen-runtime.md).
+The deployment boundary and workload decisions below describe the original
+Phase 0 profile; Phase 2C now adds native TLS/H2 startup support.
 
 | Area | Decision |
 | --- | --- |
@@ -162,9 +164,9 @@ lifecycle. `cmd/janus` constructs it, binds through `Limen.Listen`, serves
 through `Limen.Serve`, and drains through `Limen.Shutdown`. `gateway.Gateway`
 remains an `http.Handler` and no longer constructs or owns the inbound server.
 The legacy JSON configuration, route middleware assembly, forwarding behavior,
-and fixed 35-second process drain budget are unchanged. Native TLS/HTTP/2,
-runtime generations, and reload remain in later phases; no placeholder protocol
-adapters were added.
+and fixed 35-second process drain budget are unchanged. Native TLS/HTTP/2 is
+now delivered by Phase 2C; runtime generations are delivered by Phase 2B and
+file reload remains in Phase 2D.
 
 ## Phase 2B: stable runtime and generations — complete
 
@@ -182,18 +184,18 @@ panic paths release references; and eight concurrently retired generations are
 bounded. Listener/server settings remain startup-owned, and file watching is
 still deferred to Phase 2D.
 
-## Phase 2C: HTTPS and HTTP/2
+## Phase 2C: HTTPS and HTTP/2 — complete
 
-Introduce the versioned startup/routing split described in
-[limen-runtime.md](limen-runtime.md), initially loaded only at startup. Add named
-Limen bindings, certificate/key files and explicit H1/H2 protocol selection.
-Serve TLS through Go `net/http`; retain plaintext H1 as an alternative listener.
-Unencrypted H2 is technically possible but deferred. Verify both inbound and
-outbound negotiated versions independently, concurrent streams on one connection,
-cancellation isolation, read/write budgets and graceful drain. Audit streaming
-and buffer writer semantics including trailers, 1xx and controller operations;
-do not blindly unwrap a buffer and bypass its flush policy. Reuse the same
-router and middleware implementations, subject to those protocol tests.
+Versioned startup configuration now supports named Limen bindings with explicit
+`http1`/`http2` selection and certificate/key files. TLS Limens use Go
+`net/http` with ALPN `h2` and `http/1.1`; plaintext legacy HTTP/1 remains
+available, while unencrypted H2 is deferred. Runtime and Gateway are shared by
+all bindings, and route references can scope a route to a named Limen.
+
+The implementation verifies certificate loading, real H2 negotiation, HTTP/1.1
+fallback, concurrent stream isolation, named route scope, graceful startup
+cleanup, and outbound HTTP/2 enablement. Long-lived protocols still require a
+separate timeout, buffering, upgrade, and drain contract.
 
 ## Phase 2D: file reload and certificate rotation
 

@@ -5,9 +5,11 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"sort"
 	"syscall"
 	"time"
 
@@ -43,18 +45,19 @@ func main() {
 }
 
 func run(ctx context.Context, path string, check bool, logger *zap.Logger) error {
-	//open the janus json config file
-	f, err := os.Open(path)
-	if err != nil {
-		return err
-	}
-	c, err := config.Load(f)
-	f.Close()
+	// Open and validate the Janus configuration. Versioned TLS paths are
+	// resolved relative to this file by LoadFile.
+	c, err := config.LoadFile(path)
 	if err != nil {
 		return err
 	}
 	//check is used for what? TODO
 	if check {
+		for name, binding := range c.LimenBindings() {
+			if _, err := limen.NewBinding(name, binding, http.NotFoundHandler(), c.Settings); err != nil {
+				return err
+			}
+		}
 		logger.Info("configuration valid")
 		return nil
 	}
@@ -64,20 +67,38 @@ func run(ctx context.Context, path string, check bool, logger *zap.Logger) error
 		return err
 	}
 	defer requestRuntime.Close()
-	//Start the server
-	protocolLimen := limen.New(c.Listen, requestRuntime, c.Settings)
-	// Bind the configured address before starting the serving goroutine so
-	// startup failures are returned synchronously.
-	ln, err := protocolLimen.Listen()
-	if err != nil {
-		return err
+	bindings := c.LimenBindings()
+	names := make([]string, 0, len(bindings))
+	for name := range bindings {
+		names = append(names, name)
 	}
-	logger.Info("janus listening", zap.String("address", ln.Addr().String()))
-	done := make(chan error, 1)
-	//bind the server to the net listening
-	go func() { done <- protocolLimen.Serve(ln) }()
+	sort.Strings(names)
+	servers := make([]*limen.Limen, 0, len(names))
+	listeners := make([]net.Listener, 0, len(names))
+	for _, name := range names {
+		protocolLimen, err := limen.NewBinding(name, bindings[name], requestRuntime, c.Settings)
+		if err != nil {
+			closeListeners(listeners)
+			closeServers(servers)
+			return err
+		}
+		ln, err := protocolLimen.Listen()
+		if err != nil {
+			closeListeners(listeners)
+			closeServers(servers)
+			return fmt.Errorf("limen %q: %w", name, err)
+		}
+		servers = append(servers, protocolLimen)
+		listeners = append(listeners, ln)
+		logger.Info("janus listening", zap.String("limen", name), zap.String("address", ln.Addr().String()))
+	}
+	done := make(chan error, len(servers))
+	for i, server := range servers {
+		go func(i int, server *limen.Limen) { done <- server.Serve(listeners[i]) }(i, server)
+	}
 	select {
 	case err := <-done:
+		closeServers(servers)
 		if errors.Is(err, http.ErrServerClosed) {
 			return nil
 		}
@@ -87,10 +108,28 @@ func run(ctx context.Context, path string, check bool, logger *zap.Logger) error
 		// Do not derive this from the already-cancelled signal context.
 		drain, cancel := context.WithTimeout(context.Background(), 35*time.Second)
 		defer cancel()
-		if err := protocolLimen.Shutdown(drain); err != nil {
-			protocolLimen.Close()
-			return fmt.Errorf("drain: %w", err)
+		drainErrors := make(chan error, len(servers))
+		for _, server := range servers {
+			go func(server *limen.Limen) { drainErrors <- server.Shutdown(drain) }(server)
+		}
+		for range servers {
+			if err := <-drainErrors; err != nil {
+				closeServers(servers)
+				return fmt.Errorf("drain: %w", err)
+			}
 		}
 		return nil
+	}
+}
+
+func closeListeners(listeners []net.Listener) {
+	for _, listener := range listeners {
+		_ = listener.Close()
+	}
+}
+
+func closeServers(servers []*limen.Limen) {
+	for _, server := range servers {
+		_ = server.Close()
 	}
 }

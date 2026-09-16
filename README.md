@@ -5,13 +5,14 @@ A small Go HTTP gateway foundation, designed to remain easy to understand and mo
 **Status: runnable architecture starter, not production-ready.** The production roadmap is
 in [docs/plan.md](docs/plan.md). Start with [docs/architecture.md](docs/architecture.md)
 for the design and [docs/protocols.md](docs/protocols.md) for the mechanisms to learn.
-The Protocol Limen layer currently owns the HTTP/1 listener lifecycle. Native
-HTTP/2/HTTP/3 support and file-based configuration reload are described as later
-work; the stable runtime generation core is now in place. See
+The Protocol Limen layer currently owns HTTP/1 and native TLS/HTTP/2 listener
+lifecycle. HTTP/3 and file-based configuration reload are described as later
+work; the stable runtime generation core is in place. See
 [docs/limen-runtime.md](docs/limen-runtime.md).
 
 The first release targets ordinary HTTP APIs behind an existing TLS load balancer.
-Janus accepts plaintext HTTP/1.x and forwards to configured HTTP or HTTPS origins.
+Janus accepts plaintext HTTP/1.x, and versioned startup configuration can enable
+native TLS/HTTP/2, forwarding to configured HTTP or HTTPS origins.
 HTTPS upstreams use normal certificate verification and may negotiate HTTP/2.
 Public TLS termination, gRPC, WebSockets, SSE, TCP/UDP, and HTTP/3 are outside this starter's contract.
 

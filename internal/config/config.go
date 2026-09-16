@@ -7,16 +7,40 @@ import (
 	"io"
 	"net"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 )
 
 type Config struct {
-	Listen      string                `json:"listen"`
-	Settings    Settings              `json:"settings"`
-	Middlewares map[string]Middleware `json:"middlewares"`
-	Services    map[string]Service    `json:"services"`
-	Routes      []Route               `json:"routes"`
+	Version     int                    `json:"version,omitempty"`
+	Listen      string                 `json:"listen"`
+	Limens      map[string]LimenConfig `json:"limens,omitempty"`
+	Settings    Settings               `json:"settings"`
+	Middlewares map[string]Middleware  `json:"middlewares"`
+	Services    map[string]Service     `json:"services"`
+	Routes      []Route                `json:"routes"`
+}
+
+const (
+	CurrentConfigVersion = 1
+	ProtocolHTTP1        = "http1"
+	ProtocolHTTP2        = "http2"
+)
+
+// LimenConfig describes one inbound protocol binding. HTTP/2 is enabled only
+// over TLS in the first native multi-protocol profile.
+type LimenConfig struct {
+	Address   string       `json:"address"`
+	Protocols []string     `json:"protocols"`
+	TLS       *TLSSettings `json:"tls,omitempty"`
+}
+
+type TLSSettings struct {
+	CertFile   string `json:"cert_file"`
+	KeyFile    string `json:"key_file"`
+	MinVersion string `json:"min_version,omitempty"`
 }
 
 // Middleware is a named, typed route middleware definition.
@@ -35,6 +59,7 @@ type Service struct {
 
 type Route struct {
 	Name        string   `json:"name"`
+	Limen       string   `json:"limen,omitempty"`
 	Host        string   `json:"host"`
 	PathPrefix  string   `json:"path_prefix"`
 	Service     string   `json:"service"`
@@ -55,15 +80,42 @@ func Load(r io.Reader) (Config, error) {
 	return c, c.Validate()
 }
 
+// LoadFile loads a configuration and resolves relative TLS asset paths against
+// the configuration file directory.
+func LoadFile(path string) (Config, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return Config{}, err
+	}
+	defer f.Close()
+	c, err := Load(f)
+	if err != nil {
+		return c, err
+	}
+	base := filepath.Dir(path)
+	for name, binding := range c.Limens {
+		if binding.TLS == nil {
+			continue
+		}
+		if !filepath.IsAbs(binding.TLS.CertFile) {
+			binding.TLS.CertFile = filepath.Join(base, binding.TLS.CertFile)
+		}
+		if !filepath.IsAbs(binding.TLS.KeyFile) {
+			binding.TLS.KeyFile = filepath.Join(base, binding.TLS.KeyFile)
+		}
+		c.Limens[name] = binding
+	}
+	return c, nil
+}
+
 func (c Config) Validate() error {
+	bindings, err := c.validateLimenBindings()
+	if err != nil {
+		return err
+	}
 	settings := c.Settings.WithDefaults()
 	if err := settings.Validate(); err != nil {
 		return err
-	}
-	_, port, err := net.SplitHostPort(c.Listen)
-	p, portErr := strconv.Atoi(port)
-	if err != nil || portErr != nil || p < 1 || p > 65535 {
-		return fmt.Errorf("listen must be host:port with port 1..65535")
 	}
 	if len(c.Services) == 0 || len(c.Routes) == 0 {
 		return fmt.Errorf("at least one service and route are required")
@@ -92,6 +144,13 @@ func (c Config) Validate() error {
 		if _, ok := c.Services[r.Service]; !ok {
 			return fmt.Errorf("route %q references missing service %q", r.Name, r.Service)
 		}
+		if r.Limen == "" {
+			if len(bindings) > 1 {
+				return fmt.Errorf("route %q must reference a limen when multiple limens are configured", r.Name)
+			}
+		} else if _, ok := bindings[r.Limen]; !ok {
+			return fmt.Errorf("route %q references missing limen %q", r.Name, r.Limen)
+		}
 		seenMiddlewares := map[string]bool{}
 		for _, middlewareName := range r.Middlewares {
 			if middlewareName == "" {
@@ -115,7 +174,13 @@ func (c Config) Validate() error {
 		if strings.ContainsAny(r.Host, ":/*?#@\\ \t\r\n") {
 			return fmt.Errorf("route %q host must be an exact hostname without port", r.Name)
 		}
-		key := strings.ToLower(r.Host) + "\x00" + r.PathPrefix
+		scope := r.Limen
+		if scope == "" && len(bindings) == 1 {
+			for name := range bindings {
+				scope = name
+			}
+		}
+		key := scope + "\x00" + strings.ToLower(r.Host) + "\x00" + r.PathPrefix
 		if matches[key] {
 			return fmt.Errorf("duplicate host/path match on route %q", r.Name)
 		}
@@ -131,6 +196,87 @@ func (c Config) Validate() error {
 		if definition.Buffer.MaxResponseBodyBytes < 1 || definition.Buffer.MaxResponseBodyBytes > MaxBufferedResponseBytes {
 			return fmt.Errorf("middleware %q buffer.max_response_body_bytes must be between 1 and %d bytes", name, MaxBufferedResponseBytes)
 		}
+	}
+	return nil
+}
+
+// LimenBindings returns the validated inbound bindings. Legacy configurations
+// are normalized to one plaintext HTTP/1 binding named "default".
+func (c Config) LimenBindings() map[string]LimenConfig {
+	bindings, _ := c.validateLimenBindings()
+	return bindings
+}
+
+func (c Config) validateLimenBindings() (map[string]LimenConfig, error) {
+	if c.Version == 0 && len(c.Limens) == 0 {
+		if err := validateListenAddress(c.Listen); err != nil {
+			return nil, err
+		}
+		return map[string]LimenConfig{
+			"default": {Address: c.Listen, Protocols: []string{ProtocolHTTP1}},
+		}, nil
+	}
+	if c.Version != CurrentConfigVersion {
+		return nil, fmt.Errorf("unsupported config version %d", c.Version)
+	}
+	if c.Listen != "" {
+		return nil, fmt.Errorf("listen cannot be combined with versioned limens")
+	}
+	if len(c.Limens) == 0 {
+		return nil, fmt.Errorf("at least one limen is required")
+	}
+	bindings := make(map[string]LimenConfig, len(c.Limens))
+	for name, binding := range c.Limens {
+		if name == "" {
+			return nil, fmt.Errorf("limen names must be nonempty")
+		}
+		if err := validateListenAddress(binding.Address); err != nil {
+			return nil, fmt.Errorf("limen %q: %w", name, err)
+		}
+		if len(binding.Protocols) == 0 {
+			return nil, fmt.Errorf("limen %q must enable at least one protocol", name)
+		}
+		seen := map[string]bool{}
+		for _, protocol := range binding.Protocols {
+			if protocol != ProtocolHTTP1 && protocol != ProtocolHTTP2 {
+				return nil, fmt.Errorf("limen %q has unsupported protocol %q", name, protocol)
+			}
+			if seen[protocol] {
+				return nil, fmt.Errorf("limen %q enables protocol %q more than once", name, protocol)
+			}
+			seen[protocol] = true
+		}
+		if seen[ProtocolHTTP2] && binding.TLS == nil {
+			return nil, fmt.Errorf("limen %q: HTTP/2 requires TLS", name)
+		}
+		if err := validateTLSSettings(name, binding.TLS); err != nil {
+			return nil, err
+		}
+		binding.Protocols = append([]string(nil), binding.Protocols...)
+		bindings[name] = binding
+	}
+	return bindings, nil
+}
+
+func validateListenAddress(address string) error {
+	_, port, err := net.SplitHostPort(address)
+	p, portErr := strconv.Atoi(port)
+	if err != nil || portErr != nil || p < 1 || p > 65535 {
+		return fmt.Errorf("address must be host:port with port 1..65535")
+	}
+	return nil
+}
+
+func validateTLSSettings(name string, settings *TLSSettings) error {
+	if settings == nil {
+		return nil
+	}
+	if strings.TrimSpace(settings.CertFile) == "" || strings.TrimSpace(settings.KeyFile) == "" {
+		return fmt.Errorf("limen %q TLS requires cert_file and key_file", name)
+	}
+	if settings.MinVersion != "" && settings.MinVersion != "1.2" && settings.MinVersion != "1.3" &&
+		settings.MinVersion != "TLS1.2" && settings.MinVersion != "TLS1.3" {
+		return fmt.Errorf("limen %q TLS min_version must be 1.2 or 1.3", name)
 	}
 	return nil
 }

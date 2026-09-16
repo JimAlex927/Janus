@@ -75,7 +75,7 @@ func NewWithTransport(c config.Config, logger *zap.Logger, transport http.RoundT
 			}
 		}
 		routeHandler := middleware.Chain(services[r.Service], routeMiddlewares...)
-		routes = append(routes, router.Route{Host: r.Host, PathPrefix: r.PathPrefix, Handler: routeHandler})
+		routes = append(routes, router.Route{Limen: r.Limen, Host: r.Host, PathPrefix: r.PathPrefix, Handler: routeHandler})
 	}
 	//http.Handler is an interface.
 	// Router itself is a loop of match. It contains
