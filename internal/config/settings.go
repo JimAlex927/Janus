@@ -10,10 +10,14 @@ const (
 	MinHeaderBytes int64 = 1 << 10
 	MaxHeaderBytes int64 = 16 << 20
 
-	MaxBackendConnections = 1_000_000
+	MaxBackendConnections          = 1_000_000
+	MaxBufferedResponseBytes int64 = 64 << 20
 
 	MinSettingDuration = time.Millisecond
 	MaxSettingDuration = 24 * time.Hour
+
+	DefaultResponseWriteHeadroom = 5 * time.Second
+	MaxServerWriteTimeout        = MaxSettingDuration + DefaultResponseWriteHeadroom
 )
 
 // Duration is a time.Duration encoded as a human-readable JSON string such as
@@ -52,6 +56,7 @@ type RequestSettings struct {
 
 type ServerSettings struct {
 	ReadHeaderTimeout Duration `json:"read_header_timeout"`
+	WriteTimeout      Duration `json:"write_timeout"` // socket response-write budget, greater than request.maximum_duration
 	IdleTimeout       Duration `json:"idle_timeout"`
 	MaxHeaderBytes    int64    `json:"max_header_bytes"`
 }
@@ -79,6 +84,7 @@ func DefaultSettings() Settings {
 		},
 		Server: ServerSettings{
 			ReadHeaderTimeout: Duration(5 * time.Second),
+			WriteTimeout:      Duration(35 * time.Second),
 			IdleTimeout:       Duration(60 * time.Second),
 			MaxHeaderBytes:    32 << 10,
 		},
@@ -109,6 +115,10 @@ func (s Settings) WithDefaults() Settings {
 	}
 	if s.Server.ReadHeaderTimeout == 0 {
 		s.Server.ReadHeaderTimeout = d.Server.ReadHeaderTimeout
+	}
+	if s.Server.WriteTimeout == 0 {
+		// Keep the legacy omission safe when maximum_duration is customized.
+		s.Server.WriteTimeout = Duration(s.Request.MaximumDuration.Duration() + DefaultResponseWriteHeadroom)
 	}
 	if s.Server.IdleTimeout == 0 {
 		s.Server.IdleTimeout = d.Server.IdleTimeout
@@ -166,6 +176,12 @@ func (s Settings) Validate() error {
 	if err := validateDuration("server.read_header_timeout", s.Server.ReadHeaderTimeout); err != nil {
 		return err
 	}
+	if err := validateDurationBound("server.write_timeout", s.Server.WriteTimeout, MaxServerWriteTimeout); err != nil {
+		return err
+	}
+	if s.Server.WriteTimeout <= s.Request.MaximumDuration {
+		return fmt.Errorf("server.write_timeout must exceed request.maximum_duration")
+	}
 	if err := validateDuration("server.idle_timeout", s.Server.IdleTimeout); err != nil {
 		return err
 	}
@@ -203,9 +219,13 @@ func (s Settings) Validate() error {
 }
 
 func validateDuration(name string, value Duration) error {
+	return validateDurationBound(name, value, MaxSettingDuration)
+}
+
+func validateDurationBound(name string, value Duration, maximum time.Duration) error {
 	d := value.Duration()
-	if d < MinSettingDuration || d > MaxSettingDuration {
-		return fmt.Errorf("%s must be between %s and %s", name, MinSettingDuration, MaxSettingDuration)
+	if d < MinSettingDuration || d > maximum {
+		return fmt.Errorf("%s must be between %s and %s", name, MinSettingDuration, maximum)
 	}
 	return nil
 }

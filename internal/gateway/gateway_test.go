@@ -1,7 +1,10 @@
 package gateway
 
 import (
+	"context"
+	"errors"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -12,9 +15,41 @@ import (
 	"janus/internal/config"
 )
 
-func testGateway(t *testing.T, upstream string) *Gateway {
+func serveTestGateway(t *testing.T, g *Gateway, settings config.Settings) string {
 	t.Helper()
-	g, err := New(config.Config{Listen: "127.0.0.1:8080", Services: map[string]config.Service{"s": {Upstreams: []string{upstream}}}, Routes: []config.Route{{Name: "api", PathPrefix: "/api", Service: "s"}}}, zap.NewNop())
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := NewServer(ln.Addr().String(), g, settings)
+	serveDone := make(chan error, 1)
+	go func() { serveDone <- srv.Serve(ln) }()
+	t.Cleanup(func() {
+		_ = srv.Close()
+		g.Close()
+		if err := <-serveDone; err != nil && !errors.Is(err, http.ErrServerClosed) {
+			t.Errorf("test server stopped: %v", err)
+		}
+	})
+	return "http://" + ln.Addr().String()
+}
+
+func testGateway(t *testing.T, upstream string) *Gateway {
+	return testGatewayWithSettings(t, upstream, config.DefaultSettings())
+}
+
+func testGatewayWithSettings(t *testing.T, upstream string, settings config.Settings) *Gateway {
+	return testGatewayWithConfig(t, config.Config{
+		Listen:   "127.0.0.1:8080",
+		Settings: settings,
+		Services: map[string]config.Service{"s": {Upstreams: []string{upstream}}},
+		Routes:   []config.Route{{Name: "api", PathPrefix: "/api", Service: "s"}},
+	})
+}
+
+func testGatewayWithConfig(t *testing.T, c config.Config) *Gateway {
+	t.Helper()
+	g, err := New(c, zap.NewNop())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -148,5 +183,202 @@ func TestOverallTimeoutCancelsBackend(t *testing.T) {
 	case <-cancelled:
 	case <-time.After(2 * time.Second):
 		t.Fatal("overall timeout did not cancel backend")
+	}
+}
+
+func TestOverallTimeoutReturns504OverRealConnection(t *testing.T) {
+	started := make(chan struct{})
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(started)
+		<-r.Context().Done()
+	}))
+	defer backend.Close()
+
+	settings := config.DefaultSettings()
+	settings.Request.MaximumDuration = config.Duration(50 * time.Millisecond)
+	settings.Server.WriteTimeout = config.Duration(500 * time.Millisecond)
+	g := testGatewayWithSettings(t, backend.URL, settings)
+	front := serveTestGateway(t, g, settings)
+
+	client := &http.Client{Timeout: 2 * time.Second}
+	resp, err := client.Get(front + "/api")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusGatewayTimeout {
+		t.Fatalf("status = %d, want 504", resp.StatusCode)
+	}
+}
+
+func TestOverallTimeoutTerminatesAfterResponseCommitment(t *testing.T) {
+	started := make(chan struct{})
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(started)
+		w.WriteHeader(http.StatusOK)
+		if flusher, ok := w.(http.Flusher); ok {
+			_, _ = io.WriteString(w, "prefix")
+			flusher.Flush()
+		}
+		<-r.Context().Done()
+	}))
+	defer backend.Close()
+
+	settings := config.DefaultSettings()
+	settings.Request.MaximumDuration = config.Duration(75 * time.Millisecond)
+	settings.Server.WriteTimeout = config.Duration(500 * time.Millisecond)
+	g := testGatewayWithSettings(t, backend.URL, settings)
+	front := serveTestGateway(t, g, settings)
+
+	conn, err := net.DialTimeout("tcp", strings.TrimPrefix(front, "http://"), 2*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	if _, err := io.WriteString(conn, "GET /api HTTP/1.1\r\nHost: gateway\r\nConnection: close\r\n\r\n"); err != nil {
+		t.Fatal(err)
+	}
+	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	raw, err := io.ReadAll(conn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response := string(raw)
+	if !strings.HasPrefix(response, "HTTP/1.1 200 OK\r\n") || !strings.Contains(response, "prefix") || strings.Contains(response, "0\r\n\r\n") || strings.Contains(response, "504 Gateway Timeout") {
+		t.Fatalf("committed response = %q; want incomplete 200 response without 504", response)
+	}
+}
+
+func TestClientCancellationReachesBackendOverRealConnection(t *testing.T) {
+	started, cancelled := make(chan struct{}), make(chan struct{})
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(started)
+		<-r.Context().Done()
+		close(cancelled)
+	}))
+	defer backend.Close()
+
+	g := testGateway(t, backend.URL)
+	front := serveTestGateway(t, g, config.DefaultSettings())
+	ctx, cancel := context.WithCancel(context.Background())
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, front+"/api", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := make(chan error, 1)
+	go func() {
+		_, err := (&http.Client{Timeout: 2 * time.Second}).Do(req)
+		result <- err
+	}()
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("backend did not start")
+	}
+	cancel()
+	select {
+	case <-cancelled:
+	case <-time.After(2 * time.Second):
+		t.Fatal("client cancellation did not reach backend")
+	}
+	select {
+	case err := <-result:
+		if err == nil {
+			t.Fatal("client request unexpectedly succeeded")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("client request did not finish after cancellation")
+	}
+}
+
+func TestBufferedRouteCommitsOnlyAfterBackendCompletes(t *testing.T) {
+	prefixWritten, release := make(chan struct{}), make(chan struct{})
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, "prefix")
+		if flusher, ok := w.(http.Flusher); ok {
+			flusher.Flush()
+		}
+		close(prefixWritten)
+		<-release
+		_, _ = io.WriteString(w, "suffix")
+	}))
+	defer backend.Close()
+
+	c := config.Config{
+		Listen: "127.0.0.1:8080",
+		Middlewares: map[string]config.Middleware{
+			"buffered": {Buffer: &config.BufferSettings{MaxResponseBodyBytes: 64}},
+		},
+		Services: map[string]config.Service{"s": {Upstreams: []string{backend.URL}}},
+		Routes:   []config.Route{{Name: "api", PathPrefix: "/api", Service: "s", Middlewares: []string{"buffered"}}},
+	}
+	g := testGatewayWithConfig(t, c)
+	front := serveTestGateway(t, g, config.DefaultSettings())
+	conn, err := net.DialTimeout("tcp", strings.TrimPrefix(front, "http://"), 2*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	if _, err := io.WriteString(conn, "GET /api HTTP/1.1\r\nHost: gateway\r\nConnection: close\r\n\r\n"); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-prefixWritten:
+	case <-time.After(2 * time.Second):
+		t.Fatal("backend did not write its first response chunk")
+	}
+	_ = conn.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
+	first := make([]byte, 1)
+	if n, err := conn.Read(first); err == nil || n != 0 {
+		t.Fatalf("buffer released response before backend completed: bytes=%d, err=%v", n, err)
+	} else {
+		var netErr net.Error
+		if !errors.As(err, &netErr) || !netErr.Timeout() {
+			t.Fatalf("buffer read failed for an unexpected reason: %v", err)
+		}
+	}
+	close(release)
+	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	raw, err := io.ReadAll(conn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response := string(raw)
+	if !strings.HasPrefix(response, "HTTP/1.1 200 OK\r\n") || !strings.Contains(response, "prefix") || !strings.Contains(response, "suffix") {
+		t.Fatalf("buffered response = %q", response)
+	}
+}
+
+func TestBufferedRouteReturns504BeforeCommitment(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, "prefix")
+		if flusher, ok := w.(http.Flusher); ok {
+			flusher.Flush()
+		}
+		<-r.Context().Done()
+	}))
+	defer backend.Close()
+
+	settings := config.DefaultSettings()
+	settings.Request.MaximumDuration = config.Duration(75 * time.Millisecond)
+	settings.Server.WriteTimeout = config.Duration(500 * time.Millisecond)
+	g := testGatewayWithConfig(t, config.Config{
+		Listen: "127.0.0.1:8080", Settings: settings,
+		Middlewares: map[string]config.Middleware{
+			"buffered": {Buffer: &config.BufferSettings{MaxResponseBodyBytes: 64}},
+		},
+		Services: map[string]config.Service{"s": {Upstreams: []string{backend.URL}}},
+		Routes:   []config.Route{{Name: "api", PathPrefix: "/api", Service: "s", Middlewares: []string{"buffered"}}},
+	})
+	front := serveTestGateway(t, g, settings)
+	resp, err := (&http.Client{Timeout: 2 * time.Second}).Get(front + "/api")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusGatewayTimeout {
+		t.Fatalf("status = %d, want 504", resp.StatusCode)
 	}
 }

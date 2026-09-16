@@ -5,6 +5,41 @@ repository commit. Add a new dated section before every future commit.
 
 ## 2026-09-16
 
+### Add route-level response buffering
+
+Commit message: `feat(middleware): add route-level response buffering`
+
+Scope:
+
+- Added the reusable middleware chain and the global context-based timeout
+  middleware. Routes without an extra policy continue to stream responses.
+- Separated the HTTP server `write_timeout` from the overall request deadline,
+  preserving write headroom so a timeout response can be emitted before the
+  server write budget expires.
+- Added named route-level `buffer` middleware with a bounded in-memory
+  response body. A buffered route commits its status and body only after the
+  backend handler returns; a timed-out backend response becomes `504` before
+  commitment.
+- Added configuration validation, an example `/buffered` route, unit tests,
+  and real-listener tests for streaming, cancellation, partial committed
+  responses, and buffered timeout behavior.
+- Updated the architecture, protocol, plan, and README documentation.
+
+Verification:
+
+- `go test ./...`
+- `go test -count=5 ./internal/gateway ./internal/middleware`
+- `go vet ./...`
+- `go build -o bin/janus.exe ./cmd/janus`
+- `go run ./cmd/janus -check -config configs/janus.json`
+
+Scope note: slow-upload, slow-response-reader, and shorter-parent-deadline
+qualification tests remain in Phase 1. Service-level middleware, body-limit
+middleware, and full response-writer capability preservation remain planned
+for Phase 2.
+
+## 2026-09-16
+
 ### Make server and transport budgets configurable
 
 Commit message: `feat(config): make server and transport budgets configurable`

@@ -51,6 +51,7 @@ The race detector needs a supported C toolchain. On Windows, build to
 cmd/janus/             flags, signals, startup, shutdown
 internal/config/       JSON model, strict field decoding, validation
 internal/gateway/      composition root and HTTP server profile
+internal/middleware/   global timeout and optional route response policies
 internal/router/       immutable host and path matching
 internal/upstream/     concurrent round-robin selection
 internal/proxy/        reverse proxy and shared outbound transport
@@ -78,7 +79,10 @@ The original host is supplied as `X-Forwarded-Host`. Config updates require rest
   requests on connection failures; see the protocol guide.
 - No request-body size enforcement, global concurrency limit, metrics, access log,
   or separate readiness listener yet. Server and backend deadlines are validated
-  settings; the overall request deadline actively cancels backend work.
+  settings; `server.write_timeout` is independent from the overall request
+  deadline, which actively cancels backend work. Routes stream responses by
+  default; an optional route-level `buffer` middleware can hold finite responses
+  up to its configured maximum before committing them.
 - The immediate peer determines `X-Forwarded-For` and `X-Forwarded-Proto`.
   Behind a TLS load balancer these describe that load balancer and the internal
   HTTP hop. Original client IP/HTTPS identity needs the planned trusted-proxy policy.

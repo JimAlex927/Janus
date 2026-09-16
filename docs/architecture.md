@@ -1,135 +1,280 @@
-# Architecture and ownership
+# Middleware architecture and ownership
 
-## Scope and design choices
+## Scope and implementation status
 
-Build a Layer 7 reverse proxy for APIs with a static file configuration first.
-Use Go's `net/http` server, `http.Transport`, and `httputil.ReverseProxy` as the
-protocol foundation. Own routing, service policy, configuration, and operations.
-Avoid writing HTTP framing, TLS, or a custom event loop.
+Janus targets bounded-duration HTTP APIs on a private HTTP/1.x listener behind
+an existing TLS load balancer, forwarding to static HTTP/HTTPS origins. Public
+TLS termination, SSE, WebSockets, gRPC, HTTP/3, and TCP/UDP tunnels are deferred.
+Use Go's `net/http`, `httputil.ReverseProxy`, and `http.Transport` as the protocol
+foundation. Backend applications retain business authorization responsibilities.
 
-Traefik offers a useful separation between entrypoints, routers, middleware, and
-services ([official overview](https://doc.traefik.io/traefik/v3.2/routing/overview/)).
-Janus borrows those responsibilities without adding providers or plugins initially.
+This is the target design for the phases in [plan.md](plan.md). Today `gateway`
+constructs the router, service proxies, pools, and one shared transport. It now
+builds the generic middleware chain and applies the overall deadline through
+that chain. The initial route-level `buffer` policy is implemented; other named
+policies, observation, admission, health, admin, and reload below are planned,
+not available configuration features.
 
-NGINX uses an event-driven architecture; Go supplies its own runtime network
-polling and goroutine model. Copying NGINX's C worker structure is not a goal.
-Its operational lessons about connection reuse and resource limits are relevant
-([NGINX development guide](https://nginx.org/en/docs/dev/development_guide.html)).
-Neither architecture makes one product inherently faster for every workload.
+We adopt named built-in policies and ordered composition inspired by
+[Traefik's middleware model](https://doc.traefik.io/traefik/reference/routing-configuration/http/middlewares/overview/).
+Traefik supports router and service attachments, with router middleware executing
+first. Janus adds its own fixed global protections and explicit state ownership.
+Configuration names and supported policy types are Janus-specific.
 
-## Request path
+## Target request path
 
 ```mermaid
-flowchart LR
-    C[Client] --> E[Existing TLS load balancer]
-    E --> L[HTTP listener]
-    L --> A[Admission limits: planned]
+flowchart TD
+    LB[Existing TLS load balancer] --> H[HTTP server socket deadlines]
+    H --> ID[Request ID and request observation state]
+    ID --> O[Access observation]
+    O --> T[Overall context deadline]
+    T --> G[Protocol and draining guards]
+    G --> I[Validated forwarding identity]
+    I --> A[Global admission]
     A --> R[Host and path router]
-    R --> M[Route policies: planned]
-    M --> S[Service / backend selection]
-    S --> P[ReverseProxy]
-    P --> T[Shared HTTP transport]
-    T --> B[Backend]
+    R --> M[Matched route metadata and ordered route middleware]
+    M --> S[Shared service handler and ordered service middleware]
+    S --> P[ReverseProxy and healthy target selection]
+    P --> TR[Shared outbound transport]
+    TR --> B[Backend]
+    R --> N[404 when unmatched]
 ```
 
-Configuration is a separate path:
+The diagram is the completed target; add each node in its delivery phase.
+Global protections have a fixed order and cannot be bypassed by omitting a route
+reference. Named route middleware runs after matching and cannot cause rerouting.
+Named service middleware runs after route middleware and before target selection.
+The admin listener is separate and does not pass through this data-path chain.
 
-```text
-file -> decode -> validate -> build handlers and pools -> serve
+Access observation wraps downstream guards and policies so it sees early exits.
+Requests rejected before routing have an explicit unmatched route/service value.
+Malformed requests rejected by `net/http` before handler entry need server-level
+error reporting; middleware cannot observe every parser-level rejection.
+
+## Composition contract
+
+The initial API is deliberately small:
+
+```go
+type Middleware func(http.Handler) http.Handler
+
+// Proposed API: declaration order is request-entry order.
+func Chain(final http.Handler, middlewares ...Middleware) http.Handler
 ```
 
-Only the first path executes on each request. Do not parse configuration, compile
-patterns, read files, perform service discovery, or construct transports there.
+`Chain(proxy, a, b)` constructs `a(b(proxy))`: entry is `a -> b -> proxy`, and
+post-processing unwinds in reverse order. An empty chain returns the final
+handler. Build by wrapping in reverse order once, at startup or reload.
 
-## Package boundaries
+Each middleware calls its next handler at most once, or short-circuits with a
+response. It may inspect or modify the request before calling next. It must not
+change status or headers after commitment, retain the writer after return, or
+launch a goroutine that continues writing after the handler has returned.
+Cleanup such as cancellation and permit release uses `defer`.
 
-| Package | Owns | Must not own |
+Concurrent requests share constructed handlers. Per-request state belongs to the
+request; shared counters require synchronization. Middleware constructors take
+typed options and explicit dependencies. Constructors can fail before publication;
+ordinary runtime errors use HTTP responses and the request observation outcome.
+Do not introduce a new handler error signature or a dependency-injection container.
+
+The overall timeout middleware uses a child context and calls next synchronously.
+It preserves an earlier parent deadline and cancels outbound work. It does not
+buffer responses or forcibly terminate arbitrary code. Socket deadlines remain
+necessary for blocked client reads/writes. Before response commitment a timeout
+can become 504 if the socket is writable; afterwards terminate incomplete output.
+An abort panic must retain standard server abort behavior, not become a second
+response through a generic panic-recovery wrapper.
+
+## Configuration ownership and scopes
+
+| Configuration | Owner and scope | Planned introduction |
 | --- | --- | --- |
-| `cmd/janus` | CLI, signal context, process exit | Routing algorithms or retry rules |
-| `config` | External schema and semantic validation | Network calls or runtime mutation |
-| `gateway` | Wiring dependencies, server settings | New HTTP protocol implementations |
-| `router` | Deterministic host/path selection | Backend availability or dialing |
-| `upstream` | Target selection and, later, health state | Request rewriting |
-| `proxy` | Forwarding, outbound transport, error mapping | Config discovery or business authentication |
+| Address, header/read/write/idle deadlines, header size | HTTP server; one listener | `server.write_timeout` implemented in Phase 1 |
+| Overall request deadline | Fixed global timeout middleware using `request.maximum_duration` | Implemented in Phase 1 |
+| Connect/TLS/header timeouts, TCP keepalive, pool limits | Shared outbound `http.Transport` | Already implemented |
+| Request ID and access observation | Fixed global middleware; options only when consumed | Phase 2 |
+| `middlewares` definitions | Named, typed, reusable configuration; `buffer` is implemented first | Phase 1/2 |
+| `routes[].middlewares` | Ordered policies for the matched route; route-level `buffer` is implemented first | Phase 1/2 |
+| `services.<name>.middlewares` | Ordered policies on the shared service handler | Phase 2 |
+| Global admission, drain and admin settings | Process/listener lifecycle | Phase 3 |
+| Health probes | Per-service resource lifecycle | Phase 4 |
+| Trusted proxy CIDRs and identity rules | Listener trust policy with proxy rewrite integration | Phase 4 |
 
-Dependencies run from `cmd` to `gateway`, then to the leaf packages. `proxy` depends
-on `upstream`; `router` only knows `http.Handler`. Keep this direction acyclic.
-The round-robin counter is atomic; the target list and routes are immutable after
-construction. Do not edit config slices while serving requests.
+Keep server and transport settings outside the named middleware catalog. The
+existing `backend.keep_alive` means TCP keepalive, not HTTP idle-pool duration.
+The initial `request.read_timeout` includes headers and body; it is not an idle
+timeout between body chunks. Request byte limits are a separate policy.
 
-Prefer concrete types until two real implementations justify an interface.
-`http.Handler` and `http.RoundTripper` already supply the main extension seams.
-Avoid `utils`, generic repositories, a dependency injection framework, an event bus,
-and a plugin ABI. They add concepts before the gateway needs them.
+Only expose fields whose implementation exists. Phase 1 preserves existing keys
+while extracting timeout behavior; it introduces a consumed `server.write_timeout`
+with documented fallback and bounded error-write headroom. Test both explicit and
+omitted values. Current numeric zero means default, not disabled; changing that
+requires an explicit schema migration. General duration bounds are 1ms–24h;
+`server.write_timeout` may reach 24h + 5s so the required headroom remains
+possible at the overall timeout maximum.
 
-## Growth points: add when implementing the capability
+### Proposed named policy example
 
-Do not create empty directories for every possible feature. The next packages can be:
+This example includes future Phase 2 policy types and service attachments. It is
+not accepted by the current binary; the current accepted route-level `buffer`
+example is in `configs/janus.json`.
 
-| Package | When it becomes useful |
-| --- | --- |
-| `internal/middleware` | Global admission, per-route body limits, IDs, access logging |
-| `internal/health` | Bounded active probes, state transitions and recovery hysteresis |
-| `internal/admin` | Separate liveness, readiness, metrics and authenticated administration |
-| `internal/runtime` | Versioned immutable routing snapshots and reload lifecycle |
-| `internal/telemetry` | Metrics/tracing setup and consistent low-cardinality attributes |
-| `test/integration` | Cross-package protocol, drain and failure scenarios |
-| `test/load` | Reproducible load scenarios and comparative results |
-| `deploy` | Hardened image and deployment manifests for the actual target platform |
+```json
+{
+  "listen": "127.0.0.1:8080",
+  "middlewares": {
+    "small-upload": {
+      "body_limit": { "max_bytes": 1048576 }
+    },
+    "service-body-cap": {
+      "body_limit": { "max_bytes": 8388608 }
+    }
+  },
+  "routes": [
+    {
+      "name": "example-api",
+      "host": "",
+      "path_prefix": "/api",
+      "middlewares": ["small-upload"],
+      "service": "example"
+    }
+  ],
+  "services": {
+    "example": {
+      "upstreams": ["http://127.0.0.1:9000"],
+      "middlewares": ["service-body-cap"]
+    }
+  }
+}
+```
 
-Use a middleware signature `func(http.Handler) http.Handler`. Specify ordering:
-request ID/access observation -> global admission -> routing -> route policy ->
-backend selection -> forwarding. Avoid wrappers that accidentally remove flushing
-or other response capabilities. Add `Unwrap` and test `ResponseController` behavior
-when implementing response observation.
+Names reference built-in typed definitions, not arbitrary executable plugins.
+Each definition has exactly one supported type. A small typed factory/switch in
+`gateway` builds implementations; `config` validates data and references without
+constructing handlers. Preserve strict unknown-field checking inside each type.
+Validate unused definitions too, and reject missing references, wrong scopes,
+duplicate references within one list, and incompatible policy combinations.
+Definitions in a JSON object have no execution order; attachment arrays do.
 
-## Transport and resource ownership
+The first configurable policy is `body_limit` (route or service scope). Multiple
+applicable body limits compose by the minimum. The example therefore allows at
+most 1 MiB on `/api`. Phase 3 adds `in_flight` at service scope only; global
+admission remains fixed infrastructure. Requests must pass both active caps.
+No route-level timeout override or arbitrary global policy list is needed initially.
 
-One reused transport serves all current services because their TLS and trust
-settings are identical. Later, cache transports by an explicit policy key when
-services need different CA bundles, client certificates, or timeout settings.
-Never mutate a live transport; publish a replacement and retire the old one.
+Initially use flat attachment arrays. A reusable named `chain` can be added when
+repetition warrants it; it then requires startup flattening, cycle detection,
+and bounded expansion. Traefik's [Chain middleware](https://doc.traefik.io/traefik/reference/routing-configuration/http/middlewares/chain/)
+is a reference for that later convenience, not a Phase 1 dependency.
 
-Idle connection capacity and maximum active connections are different controls.
-A pool cap alone can turn excess work into a waiting queue. Apply a bounded
-in-flight request limit with fast 503 rejection before adding larger pools.
-An HTTP/2 connection can carry many streams, so connection limits are not request
-concurrency limits. Round-robin here selects per request, not per TCP connection.
+## State and resource ownership
 
-Bodies are streamed using the standard reverse proxy. Janus does not buffer entire
-responses or spool them to disk. NGINX's optional response buffering is a different
-behavior with different latency and backpressure tradeoffs
-([proxy buffering](https://nginx.org/en/docs/http/ngx_http_proxy_module.html#proxy_buffering)).
-A slow reader can therefore hold resources upstream; deadlines and admission must
-be designed together. Add buffer pooling only after profiles show allocation cost.
+| Object | Runtime ownership | Sharing rule |
+| --- | --- | --- |
+| Middleware definition | Immutable configuration | Reusable by name without automatically sharing state |
+| Route chain | One instance per route attachment | Route policies keep route-local state |
+| Service handler and limiter | One instance per service | Every route targeting that service uses the same instance |
+| Global admission | One process-wide instance | All data requests share permits, including across reloads |
+| Request observation | One object per request | Outer observer and inner route/proxy stages share metadata |
+| Transport | One reused instance for current trust/TLS policy | Services share pools; never mutate a live transport |
+| Probe workers and backend health | Per service, managed by runtime owner | Start/stop outside the request path |
 
-## Planned reload transaction
+For example, routes A and B targeting service S must compete for the same S
+permits. Services S and T referencing the same named `in_flight` definition get
+separate counters. Rebuilding a chain for every route must not silently multiply
+service capacity. Connection limits also cannot substitute for request limits:
+HTTP/2 can multiplex many requests on one connection.
 
-1. Read one bounded, complete configuration document from a trusted source.
-2. Validate all references, overlaps, limits, TLS files and policy combinations.
-3. Build a complete candidate snapshot off the request path.
-4. Publish it with `atomic.Pointer` after all construction succeeds.
-5. New requests capture one snapshot. Existing requests retain the old snapshot.
-6. Retire old probes and transports after readers finish; close idle connections.
-7. On any error, retain the last good snapshot and emit a reload failure metric.
+The access observer creates request state before routing. A small wrapper around
+each matched route's handler records route/service IDs before route policies run;
+`router` stays independent of telemetry. Inner proxy stages record error class and
+completion in the same state so the outer observer can report them after return.
+Define synchronization for any concurrent callbacks; do not assume a child context
+value set inside a route can be read back from the outer request.
 
-Atomic pointer replacement alone does not solve resource cleanup. Track snapshot
-ownership and serialize reloads. Keep listener addresses and process-wide settings
-restart-only at first; reload routes/services only. No distributed control plane
-is needed for a file-configured single process.
+Response wrappers provide `Unwrap` and preserve flushing and trailers. If they
+expose `ReaderFrom`, it must update byte counts rather than bypass observation.
+Do not pretend unsupported `Hijacker` or other interfaces exist. Test behavior
+through the actual proxy/server, including informational responses and body errors.
 
-## Initial behavior decisions
+## Code layout and dependencies
 
-- Host-specific routes precede hostless routes; longest segment prefix then wins.
-- Duplicate matches are invalid. No regex rules or implicit route priorities.
-- Backend URL controls the outbound Host and TLS server name.
-- Invalid config stops startup before the listening socket opens.
-- Unmatched requests return 404; upstream connection failures return 502; upstream
-  timeout errors return 504 if no response headers have been sent.
-- Once a response starts, a body failure cannot be replaced with a clean 502/504.
-  The connection/stream can terminate and telemetry must record the incomplete response.
-- No application retries, cache, JWT validation, or rate-limiting dependencies in v0.
-- Configuration is trusted operator input; client requests cannot choose arbitrary destinations.
+Introduce packages/files only when their implementation phase starts. Proposed
+files below are responsibilities, not empty directories to scaffold immediately.
 
-These choices keep the first implementation readable. They are not substitutes for
-the resource, security and operational gates in the delivery plan.
+| Package | Responsibility and likely files | First phase |
+| --- | --- | --- |
+| `cmd/janus` | CLI, process signals, invoke startup/drain | Existing |
+| `internal/config` | Settings, named policy schema, reference/scope validation | Existing; policy types in 2 |
+| `internal/gateway` | Composition root; `build.go` resolves policies and assembles services/routes; server wiring | 1 |
+| `internal/middleware` | `chain.go`, `timeout.go`, then IDs, observation, body limits and admission | 1–3 |
+| `internal/router` | Immutable host/path matching against prebuilt `http.Handler` | Existing |
+| `internal/proxy` | ReverseProxy, outbound transport, trusted-header rewrite, error mapping | Existing |
+| `internal/upstream` | Concurrent target selection; later health-based eligibility | Existing; health in 4 |
+| `internal/telemetry` | Request outcome type and access logging; later metrics exporters | 2 and 4 |
+| `internal/admin` | Private liveness/readiness handlers; later metrics endpoint | 3 |
+| `internal/health` | Bounded scheduled probes and recovery state transitions | 4 |
+| `internal/runtime` | Snapshot publication, drain references, owned resource retirement | 5 |
+| `test/integration`, `test/load`, `deploy` | Cross-package scenarios, load evidence, deployment artifacts | As scenarios arrive |
+
+Dependencies flow from `cmd` to `gateway`, then to leaf packages. `gateway` owns
+the mapping from config to middleware constructors. Middleware implementations
+do not import `gateway` or route tables. `router` only dispatches handlers.
+`proxy` depends on target selection and, when added, neutral observation/identity
+types; `telemetry` must not import gateway or middleware. Health workers update a
+bounded health store; selection reads it without initiating network probes.
+
+Later `runtime` may call the gateway builder; gateway must not import runtime.
+Avoid a separate service abstraction/package until service lifecycle complexity
+requires it. `http.Handler` and `http.RoundTripper` remain the extension seams.
+Outbound attempt observation can wrap RoundTripper. Retry needs its own reviewed
+replay/body/attempt semantics before implementation and is not enabled by Chain.
+
+## Startup and reload
+
+Startup: decode and validate -> create transport/pools -> build each service once
+-> attach route policies -> build router -> apply fixed global middleware -> bind
+listeners. Close created resources if construction fails. Do not resolve policy
+names, read configuration, or allocate connection pools on each request.
+
+Phase 5 reload is a transaction:
+
+1. Read one bounded complete document; reject malformed/duplicate keys and invalid
+   references. Reject changes to restart-only listener/global/transport settings.
+2. Build a complete candidate with rollback cleanup. Prepare healthy-target state
+   and candidate probes under explicit lifecycle ownership before publication.
+3. Publish the snapshot atomically. Each accepted request acquires a generation
+   reference and releases it on every exit. Acquisition and retirement must be
+   synchronized; loading a pointer and incrementing an unprotected counter races.
+4. Preserve process-global admission. Reuse service admission state by stable
+   service identity across generations, including remove/re-add while requests
+   drain. Lowered limits reject new work until existing usage drops below the cap.
+5. Retire old snapshot resources after its references drain. Stop obsolete probes,
+   close idle connections only on transports no longer shared, and record outcome.
+6. Any failed build retains the old routing snapshot and releases candidate resources.
+
+Live configuration is immutable; counters and health stores are synchronized runtime
+state. Removing routes must not invalidate handlers serving accepted requests.
+
+## Preserved forwarding contract and failure behavior
+
+- Exact hosts precede hostless routes; longest segment prefix wins. Duplicate
+  matches are invalid. Preserve escaped-path forwarding and existing path rules.
+- Backend URL controls outbound Host and TLS server name. Normal certificate
+  verification stays enabled; per-service CA/mTLS policy is introduced on demand.
+- Body data streams through ReverseProxy. Known oversized lengths can be rejected
+  before contacting the backend; unknown lengths may fail after partial upload.
+- Unmatched routes return 404; rejected protocols 501; body limits 413; admission,
+  draining guards, and all-unhealthy services 503; upstream failure 502; upstream
+  timeout 504 when response commitment/socket state permits. Client quota 429 is
+  reserved for a future quota policy, not global overload.
+- Once headers are committed, record incomplete output and abort on body failure.
+  Cancellation cannot undo a backend write that already happened.
+- No new application retries. Go transport's existing automatic retry behavior for
+  eligible requests remains documented in [protocols.md](protocols.md).
+- Keep public/admin listeners separate. Readiness drops before drain; health of
+  one service is distinct from process liveness/readiness.
+
+The release gates and load methodology in [plan.md](plan.md) qualify these behaviors.

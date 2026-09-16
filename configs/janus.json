@@ -7,6 +7,7 @@
     },
     "server": {
       "read_header_timeout": "5s",
+      "write_timeout": "35s",
       "idle_timeout": "60s",
       "max_header_bytes": 32768
     },
@@ -23,8 +24,16 @@
       "disable_compression": true
     }
   },
+  "middlewares": {
+    "buffered-api": {
+      "buffer": {
+        "max_response_body_bytes": 8388608
+      }
+    }
+  },
   "routes": [
-    { "name": "example-api", "host": "", "path_prefix": "/api", "service": "example" }
+    { "name": "example-api", "host": "", "path_prefix": "/api", "service": "example" },
+    { "name": "example-buffered-api", "host": "", "path_prefix": "/buffered", "service": "example", "middlewares": ["buffered-api"] }
   ],
   "services": {
     "example": { "upstreams": ["http://127.0.0.1:9000"] }

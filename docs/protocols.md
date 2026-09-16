@@ -51,8 +51,11 @@ standard proxy's invalid-query handling just to preserve every input byte.
 
 The starter exposes these values as validated settings. Its overall API duration
 is an active request-context deadline, so outbound backend work observes cancellation
-when that budget expires. Body-size enforcement and the remaining admission policy
-are still planned. Do not apply a short API timeout to WebSockets, gRPC streams or SSE.
+when that budget expires. `server.write_timeout` is an independent socket deadline
+and must exceed the overall budget by enough headroom to write a timeout response;
+it is not a replacement for context cancellation. Body-size enforcement and the
+remaining admission policy are still planned. Do not apply a short API timeout to
+WebSockets, gRPC streams or SSE.
 Streaming needs per-stream lifetime/idle policy and a separate shutdown contract.
 
 ## Retries and backend health

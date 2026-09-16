@@ -2,12 +2,11 @@
 package gateway
 
 import (
-	"context"
 	"net/http"
 	"net/url"
-	"time"
 
 	"janus/internal/config"
+	"janus/internal/middleware"
 	"janus/internal/proxy"
 	"janus/internal/router"
 	"janus/internal/upstream"
@@ -16,9 +15,8 @@ import (
 )
 
 type Gateway struct {
-	handler        http.Handler
-	transport      *http.Transport
-	overallTimeout time.Duration
+	handler   http.Handler
+	transport *http.Transport
 }
 
 func New(c config.Config, logger *zap.Logger) (*Gateway, error) {
@@ -55,16 +53,26 @@ func New(c config.Config, logger *zap.Logger) (*Gateway, error) {
 	}
 	routes := make([]router.Route, 0, len(c.Routes))
 	for _, r := range c.Routes {
-		routes = append(routes, router.Route{Host: r.Host, PathPrefix: r.PathPrefix, Handler: services[r.Service]})
+		routeMiddlewares := make([]middleware.Middleware, 0, len(r.Middlewares))
+		for _, name := range r.Middlewares {
+			definition := c.Middlewares[name]
+			if definition.Buffer != nil {
+				routeMiddlewares = append(routeMiddlewares, middleware.Buffer(definition.Buffer.MaxResponseBodyBytes))
+			}
+		}
+		routeHandler := middleware.Chain(services[r.Service], routeMiddlewares...)
+		routes = append(routes, router.Route{Host: r.Host, PathPrefix: r.PathPrefix, Handler: routeHandler})
 	}
 	//http.Handler is an interface.
 	// Router itself is a loop of match. It contains
 	// Every Route has a handler . So if the request has matched a route, the handler corresponding to the route will handler the request.
 	// And will only use the shared transport
 	return &Gateway{
-		handler:        router.New(routes),
-		transport:      sharedTransportLayer,
-		overallTimeout: c.Settings.Request.MaximumDuration.Duration(),
+		handler: middleware.Chain(
+			router.New(routes),
+			middleware.Timeout(c.Settings.Request.MaximumDuration.Duration()),
+		),
+		transport: sharedTransportLayer,
 	}, nil
 }
 
@@ -73,11 +81,6 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodConnect || r.Header.Get("Upgrade") != "" {
 		http.Error(w, "protocol upgrades are not supported", http.StatusNotImplemented)
 		return
-	}
-	if g.overallTimeout > 0 {
-		ctx, cancel := context.WithTimeout(r.Context(), g.overallTimeout)
-		defer cancel()
-		r = r.WithContext(ctx)
 	}
 	g.handler.ServeHTTP(w, r)
 }
@@ -98,12 +101,11 @@ func NewServer(address string, handler http.Handler, values ...config.Settings) 
 		ReadHeaderTimeout: settings.Server.ReadHeaderTimeout.Duration(),
 		//ReadTimeout 是读取整个 request，包括 body 的最大持续时间。 Go 的实现是在开始读取这个 request 时算。不是开始读取header的时候算。
 		ReadTimeout: settings.Request.ReadTimeout.Duration(),
-		//WriteTimeout 是 response 写操作超时的最大持续时间，并且每读取一个新 request header 后都会重置，读完client的header就开始计时了。
-		// 它是一个底层 connection 的 write deadline，通常在 request header 读取完成后就设置，
-		//所以 Handler 自己处理请求花掉的时间，也会消耗这个 write deadline。
-		// 如果业务逻辑处理超过这个时间了，不会把业务逻辑杀死。只是超时后，对response的写入无法成功，业务逻辑正常运行。
-		//不是设置30秒之后，查询数据库等操作都无法进行了，而是，30秒后无法写入response
-		WriteTimeout: settings.Request.MaximumDuration.Duration(),
+		// WriteTimeout 是 response 写操作的底层 socket deadline；它通常在
+		// request header 读取完成后开始计时，也会覆盖 Handler 的处理时间。
+		// 它独立于 overall context deadline，配置校验要求它更长，以便超时后
+		// 仍有余量写入 504；它不会强制停止任意业务代码。
+		WriteTimeout: settings.Server.WriteTimeout.Duration(),
 		//HTTP keep-alive 状态下，Server 最多等下一个 request 多久。用于http的 keep-alive的情况。
 		//现代http请求一般默认都是keep-alive 这样请求可以复用旧的connection
 		IdleTimeout: settings.Server.IdleTimeout.Duration(),

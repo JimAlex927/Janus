@@ -12,10 +12,21 @@ import (
 )
 
 type Config struct {
-	Listen   string             `json:"listen"`
-	Settings Settings           `json:"settings"`
-	Services map[string]Service `json:"services"`
-	Routes   []Route            `json:"routes"`
+	Listen      string                `json:"listen"`
+	Settings    Settings              `json:"settings"`
+	Middlewares map[string]Middleware `json:"middlewares"`
+	Services    map[string]Service    `json:"services"`
+	Routes      []Route               `json:"routes"`
+}
+
+// Middleware is a named, typed route middleware definition.
+// Exactly one policy is currently supported per definition.
+type Middleware struct {
+	Buffer *BufferSettings `json:"buffer,omitempty"`
+}
+
+type BufferSettings struct {
+	MaxResponseBodyBytes int64 `json:"max_response_body_bytes"`
 }
 
 type Service struct {
@@ -23,10 +34,11 @@ type Service struct {
 }
 
 type Route struct {
-	Name       string `json:"name"`
-	Host       string `json:"host"`
-	PathPrefix string `json:"path_prefix"`
-	Service    string `json:"service"`
+	Name        string   `json:"name"`
+	Host        string   `json:"host"`
+	PathPrefix  string   `json:"path_prefix"`
+	Service     string   `json:"service"`
+	Middlewares []string `json:"middlewares"`
 }
 
 func Load(r io.Reader) (Config, error) {
@@ -80,6 +92,19 @@ func (c Config) Validate() error {
 		if _, ok := c.Services[r.Service]; !ok {
 			return fmt.Errorf("route %q references missing service %q", r.Name, r.Service)
 		}
+		seenMiddlewares := map[string]bool{}
+		for _, middlewareName := range r.Middlewares {
+			if middlewareName == "" {
+				return fmt.Errorf("route %q has an empty middleware reference", r.Name)
+			}
+			if seenMiddlewares[middlewareName] {
+				return fmt.Errorf("route %q references middleware %q more than once", r.Name, middlewareName)
+			}
+			seenMiddlewares[middlewareName] = true
+			if _, ok := c.Middlewares[middlewareName]; !ok {
+				return fmt.Errorf("route %q references missing middleware %q", r.Name, middlewareName)
+			}
+		}
 		if !strings.HasPrefix(r.PathPrefix, "/") || strings.ContainsAny(r.PathPrefix, "?#%\\ \t\r\n") {
 			return fmt.Errorf("route %q needs an unescaped absolute path prefix", r.Name)
 		}
@@ -95,6 +120,17 @@ func (c Config) Validate() error {
 			return fmt.Errorf("duplicate host/path match on route %q", r.Name)
 		}
 		matches[key] = true
+	}
+	for name, definition := range c.Middlewares {
+		if name == "" {
+			return fmt.Errorf("middleware names must be nonempty")
+		}
+		if definition.Buffer == nil {
+			return fmt.Errorf("middleware %q must define buffer", name)
+		}
+		if definition.Buffer.MaxResponseBodyBytes < 1 || definition.Buffer.MaxResponseBodyBytes > MaxBufferedResponseBytes {
+			return fmt.Errorf("middleware %q buffer.max_response_body_bytes must be between 1 and %d bytes", name, MaxBufferedResponseBytes)
+		}
 	}
 	return nil
 }
