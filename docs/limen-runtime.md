@@ -222,8 +222,10 @@ numeric port. The current adapter binds both before readiness, advertises the
 actual UDP port (including `:0`), shares the certificate rotation callback,
 keeps HTTP/1.1 and HTTP/2 available for fallback, and leaves 0-RTT disabled.
 The validated `http3.max_concurrent_streams` setting bounds bidirectional
-request streams per QUIC connection. Startup cleanup and coordinated drain are
-implemented; fault-injection and public-port deployment tests remain.
+request streams per QUIC connection. Certificate rotation is covered locally:
+existing QUIC connections remain usable and a new handshake observes the new
+certificate. Startup cleanup and coordinated drain are implemented;
+fault-injection and public-port deployment tests remain.
 
 Test negotiated H3, stream cancellation isolation, stream/connection flow-control
 limits, handshake/idle/drain budgets, TLS pair rotation, reload on existing QUIC

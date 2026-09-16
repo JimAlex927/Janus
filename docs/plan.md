@@ -339,9 +339,10 @@ in Phase 4 also need retirement/reload tests when introduced.
    startup failures; coordinated fault and deployment tests remain.
 3. Partially complete: local H3 stream isolation, client cancellation, and
    forwarding pass on the supported development platform. The bounded H3
-   bidirectional stream limit is now wired and configuration-tested; H3 limits,
-   buffer/stream response semantics, reload on existing connections,
-   certificate rotation, coordinated bounded shutdown and Linux interop remain.
+   bidirectional stream limit is now wired and configuration-tested; H3
+   certificate rotation is also covered for existing and new connections.
+   H3 buffer/stream response semantics, reload on existing connections,
+   coordinated bounded shutdown and Linux interop remain.
 4. Ship a minimal deployment artifact, verified CA roots, non-root execution,
    resource budgets, rollout/rollback instructions, and effective-config inspection
    that excludes secrets. Add per-service transport/TLS policy only when required.

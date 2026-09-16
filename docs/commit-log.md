@@ -5,6 +5,27 @@ repository commit. Add a new dated section before every future commit.
 
 ## 2026-09-17
 
+### Verify HTTP/3 certificate rotation
+
+Commit message: `test(protocol): verify HTTP/3 certificate rotation`
+
+Scope:
+
+- Added real UDP HTTP/3 coverage proving an established QUIC connection remains
+  usable after certificate replacement.
+- Added a new-client handshake check using only the replacement certificate's
+  trust root, proving future H3 handshakes observe the rotated TLS identity.
+- Updated the Phase 5 delivery evidence without marking Linux interop or
+  production qualification complete.
+
+Verification:
+
+- `gofmt` on touched Go files
+- `go test -count=3 ./internal/limen -run 'HTTP3CertificateRotation|CertificateReloader'`
+
+Scope note: local certificate-rotation evidence only; H3 reload, fault,
+interop, load/soak and deployment gates remain.
+
 ### Bound HTTP/3 bidirectional streams
 
 Commit message: `feat(protocol): bound HTTP/3 concurrent streams`
