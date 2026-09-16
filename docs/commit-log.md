@@ -5,6 +5,29 @@ repository commit. Add a new dated section before every future commit.
 
 ## 2026-09-16
 
+### Close HTTP/3 packet on Limen serve failure
+
+Commit message: `fix(lifecycle): close HTTP/3 packet on serve failure`
+
+Scope:
+
+- Protected the application-owned UDP packet connection reference with a
+  lifecycle mutex and made packet release idempotent across all Limen shutdown
+  paths.
+- Closed the HTTP/3 packet and initiated asynchronous H3 force-close when the
+  TCP or H3 serve loop exits unexpectedly, preventing leaked sockets or active
+  QUIC connections for direct Limen users.
+- Added a real port-rebind regression test and documented the remaining
+  fault-injection and deployment qualification scope.
+
+Verification:
+
+- `gofmt` on touched Go files
+- `go test -count=5 ./internal/limen -run TestLimenServeFailureClosesHTTP3Packet`
+
+Scope note: this proves local serve-failure cleanup; it is not a substitute for
+Linux interop, deployment, load/soak or production lifecycle qualification.
+
 ### Reject duplicate JSON configuration keys
 
 Commit message: `fix(config): reject duplicate JSON keys`

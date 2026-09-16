@@ -125,9 +125,9 @@ still require restart. Legacy configurations remain startup-only.
 - HTTP/3 uses a separately bound UDP socket, advertises `Alt-Svc` from the TCP
   path, disables 0-RTT, reuses the rotated TLS identity, and applies the
   bounded `limen.http3.max_concurrent_streams` setting (default 100). H3
-  forwarding and local UDP behavior are tested; Linux interop, load/soak, and
-  deployment qualification remain outstanding. A forced drain closes the H3
-  network lifecycle within its context budget; arbitrary handlers still need
+  forwarding, local UDP behavior and serve-failure cleanup are tested; Linux
+  interop, load/soak, and deployment qualification remain outstanding. A forced
+  drain closes the H3 network lifecycle within its context budget; arbitrary handlers still need
   to observe request cancellation to terminate their own work.
 - Unknown JSON fields, duplicate JSON object keys and duplicate route matches
   fail validation. Configuration input is bounded to 1 MiB before parsing.

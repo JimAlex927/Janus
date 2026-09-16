@@ -336,7 +336,8 @@ in Phase 4 also need retirement/reload tests when introduced.
 2. Partially complete: coordinate TCP HTTPS and UDP/QUIC sockets, TLS identity,
    `Alt-Svc` advertisement and TCP fallback. The current adapter binds both
    sockets, disables 0-RTT, handles `:0` UDP advertisement, and cleans up
-   startup failures; coordinated fault and deployment tests remain.
+   startup and serve-failure paths; coordinated fault and deployment tests
+   remain.
 3. Partially complete: local H3 stream isolation, client cancellation, and
    forwarding pass on the supported development platform. The bounded H3
    bidirectional stream limit is now wired and configuration-tested; H3

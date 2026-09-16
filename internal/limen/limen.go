@@ -23,13 +23,14 @@ import (
 // accepts an http.Handler so the protocol layer remains independent from
 // routing, middleware, and service construction.
 type Limen struct {
-	address string
-	server  *http.Server
-	tls     *tls.Config
-	cert    *atomic.Pointer[tls.Certificate]
-	http3   *http3.Server
-	packet  net.PacketConn
-	h3Close sync.Once
+	address  string
+	server   *http.Server
+	tls      *tls.Config
+	cert     *atomic.Pointer[tls.Certificate]
+	http3    *http3.Server
+	packetMu sync.Mutex
+	packet   net.PacketConn
+	h3Close  sync.Once
 
 	hijackedMu    sync.Mutex
 	hijacked      map[net.Conn]struct{}
@@ -236,6 +237,8 @@ func (l *Limen) ListenPacket() (net.PacketConn, error) {
 	if !l.HTTP3Enabled() {
 		return nil, fmt.Errorf("limen does not enable HTTP/3")
 	}
+	l.packetMu.Lock()
+	defer l.packetMu.Unlock()
 	if l.packet != nil {
 		return nil, fmt.Errorf("limen HTTP/3 packet listener already bound")
 	}
@@ -263,19 +266,25 @@ func (l *Limen) Serve(listener net.Listener) error {
 	if l.http3 == nil {
 		return l.server.Serve(listener)
 	}
-	if l.packet == nil {
+	l.packetMu.Lock()
+	packet := l.packet
+	l.packetMu.Unlock()
+	if packet == nil {
 		return fmt.Errorf("limen HTTP/3 packet listener is not bound")
 	}
 	tcpDone := make(chan error, 1)
 	h3Done := make(chan error, 1)
 	go func() { tcpDone <- l.server.Serve(listener) }()
-	go func() { h3Done <- l.http3.Serve(l.packet) }()
+	go func() { h3Done <- l.http3.Serve(packet) }()
 	select {
 	case err := <-tcpDone:
+		l.closePacket()
 		l.startHTTP3Close()
 		return err
 	case err := <-h3Done:
 		_ = l.server.Close()
+		l.closePacket()
+		l.startHTTP3Close()
 		return err
 	}
 }
@@ -292,9 +301,7 @@ func (l *Limen) Shutdown(ctx context.Context) error {
 	if l.http3 != nil {
 		go func() {
 			err := l.shutdownHTTP3(ctx)
-			if l.packet != nil {
-				_ = l.packet.Close()
-			}
+			l.closePacket()
 			h3Done <- err
 		}()
 	} else {
@@ -329,9 +336,7 @@ func (l *Limen) Close() error {
 	l.shuttingDown = true
 	l.hijackedMu.Unlock()
 	err := l.server.Close()
-	if l.packet != nil {
-		_ = l.packet.Close()
-	}
+	l.closePacket()
 	l.startHTTP3Close()
 	l.closeHijacked()
 	return err
@@ -363,6 +368,18 @@ func (l *Limen) startHTTP3Close() {
 	l.h3Close.Do(func() {
 		go func() { _ = l.http3.Close() }()
 	})
+}
+
+// closePacket releases the application-owned UDP socket passed to the HTTP/3
+// server. It is safe to call concurrently and repeatedly from lifecycle paths.
+func (l *Limen) closePacket() {
+	l.packetMu.Lock()
+	packet := l.packet
+	l.packet = nil
+	l.packetMu.Unlock()
+	if packet != nil {
+		_ = packet.Close()
+	}
 }
 
 func (l *Limen) trackHijacked(conn net.Conn, state http.ConnState) {

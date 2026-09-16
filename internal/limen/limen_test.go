@@ -43,6 +43,52 @@ func TestLimenListenReportsBindFailure(t *testing.T) {
 	}
 }
 
+func TestLimenServeFailureClosesHTTP3Packet(t *testing.T) {
+	certFile, keyFile, _ := writeTestCertificate(t)
+	reserved, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	address := reserved.LocalAddr().String()
+	_ = reserved.Close()
+
+	l, err := NewBinding("public", config.LimenConfig{
+		Address:   address,
+		Protocols: []string{config.ProtocolHTTP1, config.ProtocolHTTP3},
+		TLS:       &config.TLSSettings{CertFile: certFile, KeyFile: keyFile},
+	}, http.NotFoundHandler(), config.DefaultSettings())
+	if err != nil {
+		t.Fatal(err)
+	}
+	tcpListener, err := l.Listen()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := l.ListenPacket(); err != nil {
+		_ = tcpListener.Close()
+		t.Fatal(err)
+	}
+	serveDone := make(chan error, 1)
+	go func() { serveDone <- l.Serve(tcpListener) }()
+	if err := tcpListener.Close(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-serveDone:
+	case <-time.After(2 * time.Second):
+		_ = l.Close()
+		t.Fatal("Limen did not return after TCP listener failure")
+	}
+
+	replacement, err := net.ListenPacket("udp", address)
+	if err != nil {
+		_ = l.Close()
+		t.Fatalf("HTTP/3 UDP socket remained bound after Serve failure: %v", err)
+	}
+	_ = replacement.Close()
+	_ = l.Close()
+}
+
 func TestLimenSlowUploadTerminatesAtReadDeadline(t *testing.T) {
 	type readResult struct {
 		n   int64
