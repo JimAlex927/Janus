@@ -177,6 +177,32 @@ func TestVersionedLimenConfig(t *testing.T) {
 	}
 }
 
+func TestTrustedProxyConfigIsPerLimenAndCanonicalized(t *testing.T) {
+	body := `{"version":1,"limens":{"public":{"address":"127.0.0.1:8443","protocols":["http1"],"trusted_proxies":["10.0.0.0/8","2001:db8::/32"]}},"services":{"s":{"upstreams":["http://localhost:9000"]}},"routes":[{"name":"r","limen":"public","path_prefix":"/api","service":"s"}]}`
+	c, err := Load(strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := c.LimenBindings()["public"].TrustedProxies
+	if len(got) != 2 || got[0] != "10.0.0.0/8" || got[1] != "2001:db8::/32" {
+		t.Fatalf("trusted proxy CIDRs = %#v", got)
+	}
+	legacy := `{"listen":"127.0.0.1:8080","trusted_proxies":["127.0.0.0/8"],"services":{"s":{"upstreams":["http://localhost:9000"]}},"routes":[{"name":"r","path_prefix":"/api","service":"s"}]}`
+	if _, err := Load(strings.NewReader(legacy)); err != nil {
+		t.Fatalf("legacy trusted proxy config rejected: %v", err)
+	}
+
+	for _, bad := range []string{
+		strings.Replace(body, `"10.0.0.0/8","2001:db8::/32"`, `"10.0.0.1"`, 1),
+		strings.Replace(body, `"10.0.0.0/8","2001:db8::/32"`, `"10.0.0.0/8","10.0.0.0/8"`, 1),
+		strings.Replace(body, `"limen":"public"`, `"limen":"missing"`, 1),
+	} {
+		if _, err := Load(strings.NewReader(bad)); err == nil {
+			t.Fatal("expected invalid trusted proxy configuration")
+		}
+	}
+}
+
 func TestVersionedLimenConfigRejectsInvalidBindings(t *testing.T) {
 	base := `{"version":1,"limens":{"public":{"address":"127.0.0.1:8443","protocols":["http1"]}},"services":{"s":{"upstreams":["http://localhost:9000"]}},"routes":[{"name":"r","limen":"public","path_prefix":"/api","service":"s"}]}`
 	for _, tc := range []struct {

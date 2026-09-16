@@ -72,6 +72,43 @@ func TestRuntimeKeepsStableHandlerAcrossReplacement(t *testing.T) {
 	}
 }
 
+func TestRuntimeRejectsTrustedProxyChangeDuringReplacement(t *testing.T) {
+	c := config.Config{
+		Version: 1,
+		Limens: map[string]config.LimenConfig{
+			"public": {
+				Address:        "127.0.0.1:8443",
+				Protocols:      []string{config.ProtocolHTTP1},
+				TrustedProxies: []string{"10.0.0.0/8"},
+			},
+		},
+		Services: map[string]config.Service{"service": {Upstreams: []string{"http://127.0.0.1:9000"}}},
+		Routes:   []config.Route{{Name: "route", Limen: "public", PathPrefix: "/", Service: "service"}},
+	}
+	builder := func(_ config.Config, _ http.RoundTripper, _ *zap.Logger, _ map[string]*middleware.Limiter) (Generation, error) {
+		return &testGeneration{
+			handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }),
+			closed:  make(chan struct{}),
+		}, nil
+	}
+	r, err := NewWithBuilder(c, zap.NewNop(), builder)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	replacement := c
+	replacement.Limens = map[string]config.LimenConfig{
+		"public": {
+			Address:        "127.0.0.1:8443",
+			Protocols:      []string{config.ProtocolHTTP1},
+			TrustedProxies: []string{"192.0.2.0/24"},
+		},
+	}
+	if err := r.Replace(replacement); !errors.Is(err, ErrStartupConfigChanged) {
+		t.Fatalf("trusted proxy replacement error = %v, want %v", err, ErrStartupConfigChanged)
+	}
+}
+
 func TestRuntimeReplacementRollbackClosesCandidate(t *testing.T) {
 	oldClosed := make(chan struct{})
 	candidateClosed := make(chan struct{})

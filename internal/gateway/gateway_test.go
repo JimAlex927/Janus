@@ -60,11 +60,11 @@ func testGatewayWithConfig(t *testing.T, c config.Config) *Gateway {
 }
 
 func TestForwardingOverRealConnections(t *testing.T) {
-	type observed struct{ uri, host, body, xff, proto, originalHost, forwarded, realIP, forwardedPort, hop string }
+	type observed struct{ uri, host, body, xff, proto, originalHost, forwarded, realIP, forwardedPort, scheme, hop string }
 	seen := make(chan observed, 1)
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
-		seen <- observed{r.RequestURI, r.Host, string(body), r.Header.Get("X-Forwarded-For"), r.Header.Get("X-Forwarded-Proto"), r.Header.Get("X-Forwarded-Host"), r.Header.Get("Forwarded"), r.Header.Get("X-Real-IP"), r.Header.Get("X-Forwarded-Port"), r.Header.Get("X-Hop")}
+		seen <- observed{r.RequestURI, r.Host, string(body), r.Header.Get("X-Forwarded-For"), r.Header.Get("X-Forwarded-Proto"), r.Header.Get("X-Forwarded-Host"), r.Header.Get("Forwarded"), r.Header.Get("X-Real-IP"), r.Header.Get("X-Forwarded-Port"), r.Header.Get("X-Scheme"), r.Header.Get("X-Hop")}
 		w.Header().Set("Trailer", "X-Checksum")
 		w.Header().Set("Connection", "X-Backend-Hop")
 		w.Header().Set("X-Backend-Hop", "private")
@@ -80,7 +80,7 @@ func TestForwardingOverRealConnections(t *testing.T) {
 		t.Fatal(err)
 	}
 	r.Host = "client.example"
-	for k, v := range map[string]string{"Connection": "X-Hop", "X-Hop": "private", "X-Forwarded-For": "203.0.113.99", "X-Forwarded-Proto": "https", "X-Forwarded-Host": "spoof.example", "X-Forwarded-Port": "443", "Forwarded": "for=spoof", "X-Real-IP": "spoof"} {
+	for k, v := range map[string]string{"Connection": "X-Hop", "X-Hop": "private", "X-Forwarded-For": "203.0.113.99", "X-Forwarded-Proto": "https", "X-Forwarded-Host": "spoof.example", "X-Forwarded-Port": "443", "Forwarded": "for=spoof", "X-Real-IP": "spoof", "X-Scheme": "https"} {
 		r.Header.Set(k, v)
 	}
 	client := &http.Client{Timeout: 5 * time.Second}
@@ -100,8 +100,43 @@ func TestForwardingOverRealConnections(t *testing.T) {
 	if got.uri != "/api/a%2Fb?x=1&x=2" || got.body != "payload" || got.host != strings.TrimPrefix(backend.URL, "http://") {
 		t.Fatalf("bad forwarded request: %+v", got)
 	}
-	if got.xff != "127.0.0.1" || got.proto != "http" || got.originalHost != "client.example" || got.forwarded != "" || got.realIP != "" || got.forwardedPort != "" || got.hop != "" {
+	if got.xff != "127.0.0.1" || got.proto != "http" || got.originalHost != "client.example" || got.forwarded != "" || got.realIP != "" || got.forwardedPort != "" || got.scheme != "" || got.hop != "" {
 		t.Fatalf("untrusted headers propagated: %+v", got)
+	}
+}
+
+func TestTrustedForwardingOverRealConnection(t *testing.T) {
+	seen := make(chan [3]string, 1)
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen <- [3]string{r.Header.Get("X-Forwarded-For"), r.Header.Get("X-Forwarded-Proto"), r.Header.Get("X-Forwarded-Host")}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer backend.Close()
+	g := testGatewayWithConfig(t, config.Config{
+		Listen:         "127.0.0.1:8080",
+		TrustedProxies: []string{"127.0.0.0/8"},
+		Services:       map[string]config.Service{"s": {Upstreams: []string{backend.URL}}},
+		Routes:         []config.Route{{Name: "api", PathPrefix: "/api", Service: "s"}},
+	})
+	front := serveTestGateway(t, g, config.DefaultSettings())
+	req, err := http.NewRequest(http.MethodGet, front+"/api", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("X-Forwarded-For", "203.0.113.9, 127.0.0.2")
+	req.Header.Set("X-Forwarded-Proto", "https")
+	req.Header.Set("X-Forwarded-Host", "public.example:443")
+	resp, err := (&http.Client{Timeout: 2 * time.Second}).Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204", resp.StatusCode)
+	}
+	got := <-seen
+	if got != [3]string{"203.0.113.9, 127.0.0.2, 127.0.0.1", "https", "public.example:443"} {
+		t.Fatalf("forwarded identity = %#v", got)
 	}
 }
 

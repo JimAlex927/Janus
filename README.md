@@ -60,8 +60,10 @@ internal/config/       JSON model, strict field decoding, validation
 internal/gateway/      composition root and HTTP server profile
 internal/middleware/   global timeout and optional route response policies
 internal/router/       immutable host and path matching
-internal/upstream/     concurrent round-robin selection
+internal/upstream/     concurrent selection with optional health eligibility
 internal/proxy/        reverse proxy and shared outbound transport
+internal/forwarding/   trusted proxy CIDRs and canonical identity headers
+internal/health/       bounded active upstream probes
 internal/runtime/      stable generations and versioned file reload
 configs/janus.json     local example configuration
 configs/janus-streaming.example.json  SSE/WebSocket route example
@@ -107,9 +109,10 @@ still require restart. Legacy configurations remain startup-only.
   consumes the same total shutdown budget. Routes stream responses by
   default; an optional route-level `buffer` middleware can hold finite responses
   up to its configured maximum before committing them.
-- The immediate peer determines `X-Forwarded-For` and `X-Forwarded-Proto`.
-  Behind a TLS load balancer these describe that load balancer and the internal
-  HTTP hop. Original client IP/HTTPS identity needs the planned trusted-proxy policy.
+- The immediate peer determines forwarding identity by default. A versioned
+  limen may explicitly configure `trusted_proxies` CIDRs; only then are valid
+  X-Forwarded-For hops and trusted HTTPS scheme/host headers retained. There is
+  no trust-all mode, and malformed or untrusted input falls back to the peer.
 - CONNECT and non-WebSocket Upgrade requests receive 501. SSE routes stream
   `text/event-stream` responses; WebSocket routes proxy RFC 6455 upgrades over
   HTTP/1. Existing upgraded connections are tracked for bounded Limen drain.

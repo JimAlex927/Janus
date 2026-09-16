@@ -20,13 +20,14 @@ import (
 const MaxConfigBytes = 1 << 20
 
 type Config struct {
-	Version     int                    `json:"version,omitempty"`
-	Listen      string                 `json:"listen"`
-	Limens      map[string]LimenConfig `json:"limens,omitempty"`
-	Settings    Settings               `json:"settings"`
-	Middlewares map[string]Middleware  `json:"middlewares"`
-	Services    map[string]Service     `json:"services"`
-	Routes      []Route                `json:"routes"`
+	Version        int                    `json:"version,omitempty"`
+	Listen         string                 `json:"listen"`
+	TrustedProxies []string               `json:"trusted_proxies,omitempty"`
+	Limens         map[string]LimenConfig `json:"limens,omitempty"`
+	Settings       Settings               `json:"settings"`
+	Middlewares    map[string]Middleware  `json:"middlewares"`
+	Services       map[string]Service     `json:"services"`
+	Routes         []Route                `json:"routes"`
 }
 
 const (
@@ -36,14 +37,16 @@ const (
 	RouteProtocolHTTP      = "http"
 	RouteProtocolSSE       = "sse"
 	RouteProtocolWebSocket = "websocket"
+	MaxTrustedProxyCIDRs   = 128
 )
 
 // LimenConfig describes one inbound protocol binding. HTTP/2 is enabled only
 // over TLS in the first native multi-protocol profile.
 type LimenConfig struct {
-	Address   string       `json:"address"`
-	Protocols []string     `json:"protocols"`
-	TLS       *TLSSettings `json:"tls,omitempty"`
+	Address        string       `json:"address"`
+	Protocols      []string     `json:"protocols"`
+	TrustedProxies []string     `json:"trusted_proxies,omitempty"`
+	TLS            *TLSSettings `json:"tls,omitempty"`
 }
 
 type TLSSettings struct {
@@ -392,8 +395,12 @@ func (c Config) validateLimenBindings() (map[string]LimenConfig, error) {
 		if err := validateListenAddress(c.Listen); err != nil {
 			return nil, err
 		}
+		trusted, err := normalizeTrustedProxies("default", c.TrustedProxies)
+		if err != nil {
+			return nil, err
+		}
 		return map[string]LimenConfig{
-			"default": {Address: c.Listen, Protocols: []string{ProtocolHTTP1}},
+			"default": {Address: c.Listen, Protocols: []string{ProtocolHTTP1}, TrustedProxies: trusted},
 		}, nil
 	}
 	if c.Version != CurrentConfigVersion {
@@ -401,6 +408,9 @@ func (c Config) validateLimenBindings() (map[string]LimenConfig, error) {
 	}
 	if c.Listen != "" {
 		return nil, fmt.Errorf("listen cannot be combined with versioned limens")
+	}
+	if len(c.TrustedProxies) != 0 {
+		return nil, fmt.Errorf("trusted_proxies must be configured on a versioned limen")
 	}
 	if len(c.Limens) == 0 {
 		return nil, fmt.Errorf("at least one limen is required")
@@ -432,10 +442,40 @@ func (c Config) validateLimenBindings() (map[string]LimenConfig, error) {
 		if err := validateTLSSettings(name, binding.TLS); err != nil {
 			return nil, err
 		}
+		trusted, err := normalizeTrustedProxies(name, binding.TrustedProxies)
+		if err != nil {
+			return nil, err
+		}
 		binding.Protocols = append([]string(nil), binding.Protocols...)
+		binding.TrustedProxies = trusted
 		bindings[name] = binding
 	}
 	return bindings, nil
+}
+
+func normalizeTrustedProxies(limenName string, values []string) ([]string, error) {
+	if len(values) == 0 {
+		return nil, nil
+	}
+	if len(values) > MaxTrustedProxyCIDRs {
+		return nil, fmt.Errorf("limen %q has more than %d trusted proxy CIDRs", limenName, MaxTrustedProxyCIDRs)
+	}
+	result := make([]string, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for _, raw := range values {
+		value := strings.TrimSpace(raw)
+		_, network, err := net.ParseCIDR(value)
+		if err != nil {
+			return nil, fmt.Errorf("limen %q trusted_proxies entry %q is not a CIDR", limenName, raw)
+		}
+		canonical := network.String()
+		if _, ok := seen[canonical]; ok {
+			return nil, fmt.Errorf("limen %q has duplicate trusted proxy CIDR %q", limenName, canonical)
+		}
+		seen[canonical] = struct{}{}
+		result = append(result, canonical)
+	}
+	return result, nil
 }
 
 func validateListenAddress(address string) error {

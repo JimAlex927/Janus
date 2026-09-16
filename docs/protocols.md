@@ -26,15 +26,15 @@ break at a protocol boundary and how to demonstrate correct behavior.
 | `GET /apix` | Does not match `/api`; returns 404 unless another route matches. |
 | Exact host plus hostless route | The exact, case-insensitive host rule wins; the incoming port is ignored for matching. |
 | `GET /api/a%2Fb` | Routing uses Go's decoded `URL.Path`; the reverse proxy preserves the escaped path for the backend. |
-| Client-supplied `X-Forwarded-*`, `X-Real-IP`, or `Forwarded` | Removed or rewritten; v0 reports only the immediate connection peer. |
+| Client-supplied `X-Forwarded-*`, `X-Real-IP`, or `Forwarded` | Removed or rewritten; forwarded identity is trusted only when the immediate peer matches the limen's explicit CIDRs. |
 | `CONNECT` or a non-WebSocket `Upgrade` request | Rejected with 501; Janus does not create a tunnel. |
 | No matching host/path | Returns 404 without contacting a backend. |
 | Overall deadline before response commitment | Returns 504 when the response socket remains writable. |
 | Overall deadline after response commitment | Stops the stream; it does not append a second 504 response. |
 
-This matrix is the Phase 0 protocol boundary. Body-size rejection is now an
-explicit named request policy; admission, trusted multi-hop forwarding identity,
-and additional protocol modes remain later policies, not implicit behavior.
+This matrix is the Phase 0 protocol boundary. Body-size rejection, admission and
+trusted multi-hop forwarding identity are explicit policies; additional protocol
+modes remain later policies, not implicit behavior.
 
 ## Request body limits
 
@@ -51,7 +51,7 @@ bytes, not upload duration; use the server read deadline and the fixed/service
 admission policies for those separate concerns.
 
 The fixed global observer adds a fresh `X-Request-ID` to each request and response,
-overwriting client input until a trusted-proxy policy exists. Its access record
+overwriting client input. Its access record
 contains only the method, path without query, route/service names, status, duration,
 request/response byte counts and a bounded error class. It does not log headers,
 cookies, bodies or raw queries. Route metadata is written into request-local shared
@@ -61,13 +61,19 @@ Let the standard library parse and serialize HTTP. Never concatenate raw request
 headers or implement chunk decoding yourself. Go's reverse proxy handles
 hop-by-hop removal; its `Rewrite` API clears standard forwarding headers before
 you supply new ones. The starter derives them from the direct connection and
-also removes alternate `X-Forwarded-*` and `X-Real-IP` hints. Backends should trust
-only the documented identity headers emitted by Janus.
+also removes alternate `X-Forwarded-*`, `X-Real-IP` and `Forwarded` hints. With an
+explicit limen `trusted_proxies` policy, Janus validates an IP-only XFF chain from
+the trusted immediate peer, walks it from right to left, and emits the sanitized
+chain plus the current peer. XFP accepts only `http` or `https`; XFH accepts only
+a validated host. Backends should trust only the documented identity headers
+emitted by Janus.
 
-An existing TLS terminator is a separate trust hop. Do not simply copy client
-`X-Forwarded-For` or `X-Forwarded-Proto` into a backend request. Verify the immediate
-peer against an allowlist and specify how to process a multi-hop chain. Until that
-policy exists, the scaffold reports only the immediate HTTP hop.
+An existing TLS terminator is a separate trust hop. Janus does not copy client
+forwarding headers merely because they exist: an untrusted immediate peer is
+reported as the client, while a trusted peer must pass the CIDR and syntax checks.
+The policy is per limen and has no insecure “trust all” mode. The inbound
+`X-Forwarded-Proto: https` value is therefore available to backend applications
+for HTTPS-aware redirects only when it came through a trusted peer.
 
 URI normalization is another boundary: routing uses decoded `URL.Path`, while
 backends may handle escapes, repeated slashes and dot segments differently.

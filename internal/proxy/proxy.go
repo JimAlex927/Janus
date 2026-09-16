@@ -11,6 +11,8 @@ import (
 	"strings"
 
 	"janus/internal/config"
+	"janus/internal/forwarding"
+	"janus/internal/protocol"
 	"janus/internal/telemetry"
 	"janus/internal/upstream"
 
@@ -65,6 +67,12 @@ func NewTransport(values ...config.BackendSettings) *http.Transport {
 }
 
 func New(pool *upstream.Pool, transport http.RoundTripper, logger *zap.Logger) http.Handler {
+	return NewWithForwarding(pool, transport, logger, forwarding.NewPolicies())
+}
+
+// NewWithForwarding builds a proxy that derives canonical forwarding headers
+// from the request's trusted Limen policy before contacting the backend.
+func NewWithForwarding(pool *upstream.Pool, transport http.RoundTripper, logger *zap.Logger, policies forwarding.Policies) http.Handler {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
@@ -87,8 +95,18 @@ func New(pool *upstream.Pool, transport http.RoundTripper, logger *zap.Logger) h
 				}
 			}
 			r.Out.Header.Del("X-Real-Ip")
-			//Note: Set new Header
-			r.SetXForwarded()
+			r.Out.Header.Del("X-Scheme")
+			r.Out.Header.Del("Forwarded")
+			identity := policies.For(protocol.LimenID(r.In)).Resolve(r.In)
+			if identity.ForwardedFor != "" {
+				r.Out.Header.Set("X-Forwarded-For", identity.ForwardedFor)
+			}
+			if identity.ForwardedProto != "" {
+				r.Out.Header.Set("X-Forwarded-Proto", identity.ForwardedProto)
+			}
+			if identity.ForwardedHost != "" {
+				r.Out.Header.Set("X-Forwarded-Host", identity.ForwardedHost)
+			}
 		},
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
 			if errors.Is(err, context.Canceled) {

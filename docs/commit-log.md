@@ -5,6 +5,35 @@ repository commit. Add a new dated section before every future commit.
 
 ## 2026-09-16
 
+### Add per-limen trusted forwarded identity
+
+Commit message: `feat(security): add trusted proxy identity policy`
+
+Scope:
+
+- Added strict per-limen `trusted_proxies` CIDR configuration, including legacy
+  single-limen compatibility, canonicalization, duplicate rejection and a
+  bounded CIDR count.
+- Added right-to-left multi-hop validation from the immediate peer. Untrusted
+  peers and malformed chains fall back to the peer; trusted requests emit only
+  canonical X-Forwarded-For, X-Forwarded-Proto and X-Forwarded-Host values.
+- Kept the policy explicit and secure by default: no trust-all mode, no PROXY
+  protocol, no raw forwarding-header pass-through. Trusted HTTPS scheme/host
+  propagation supports backend HTTPS-aware redirects.
+- Added forwarding unit tests, real-connection integration coverage, config
+  validation and runtime reload protection for listener trust policy changes.
+
+Verification:
+
+- `gofmt` on touched Go files
+- `go test ./...`
+- `go vet ./...`
+- `go build -o bin/janus.exe ./cmd/janus`
+- `go run ./cmd/janus -check` for the runnable configuration examples
+- `git diff --check`
+
+Scope note: metrics and overall production qualification remain future work.
+
 ### Add service active health probes
 
 Commit message: `feat(health): add active service upstream checks`

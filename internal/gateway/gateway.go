@@ -7,6 +7,7 @@ import (
 	"net/url"
 
 	"janus/internal/config"
+	"janus/internal/forwarding"
 	"janus/internal/health"
 	"janus/internal/middleware"
 	"janus/internal/proxy"
@@ -69,6 +70,14 @@ func NewWithTransportAndLimiters(c config.Config, logger *zap.Logger, transport 
 		}
 	}()
 	services := make(map[string]http.Handler, len(c.Services))
+	forwardingPolicies := forwarding.NewPolicies()
+	for name, binding := range c.LimenBindings() {
+		policy, err := forwarding.NewPolicy(binding.TrustedProxies)
+		if err != nil {
+			return nil, fmt.Errorf("limen %q trusted proxy policy: %w", name, err)
+		}
+		forwardingPolicies.Set(name, policy)
+	}
 	for name, service := range c.Services {
 		targets := make([]*url.URL, 0, len(service.Upstreams))
 		//Notice that here is upstreams, consisting of multiple upstream.
@@ -113,7 +122,7 @@ func NewWithTransportAndLimiters(c config.Config, logger *zap.Logger, transport 
 		if err != nil {
 			return nil, err
 		}
-		serviceHandler := proxy.New(pool, transport, logger.With(zap.String("service", name)))
+		serviceHandler := proxy.NewWithForwarding(pool, transport, logger.With(zap.String("service", name)), forwardingPolicies)
 		serviceLimiter := serviceLimiters[name]
 		if serviceLimiter == nil {
 			if limit, ok := configuredServiceLimit(c, service); ok {

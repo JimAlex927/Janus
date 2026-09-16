@@ -20,8 +20,8 @@ The composition contract, package ownership, and proposed configuration are in
 They do not imply configuration compatibility with Traefik.
 
 This document separates implemented work from future phases. The accepted
-configuration now includes consumed timeout, admission, admin, named middleware
-and service health-check fields; remaining phases add trusted identity, metrics
+configuration now includes consumed timeout, admission, admin, named middleware,
+service health-check and trusted-proxy fields; remaining phases add metrics and deployment
 qualification rather than speculative unused settings.
 
 ## Current baseline and the original item1
@@ -32,7 +32,7 @@ transport settings, a startup-built middleware chain, request-context
 cancellation, the `internal/limen` HTTP/1 lifecycle, and native TLS/HTTP/2
 bindings. Shutdown uses a validated configurable drain budget. Body limits,
 admission, access observation, optional admin endpoints and service-owned active
-health checks are implemented; trusted forwarding and metrics are not. Versioned
+health checks and trusted forwarding are implemented; metrics are not. Versioned
 routing reload and TLS certificate rotation are
 now implemented; legacy single-file mode remains startup-only.
 
@@ -79,11 +79,11 @@ not just configuration types. Size effort after each phase's exit review.
 | 2E: long-lived HTTP protocols | Explicit SSE and classic HTTP/1 WebSocket route modes | Complete: event flush, upgrade/frame forwarding, timeout bypass, and bounded upgraded-connection drain pass |
 | 2F: usable request policies | Named body-limit policies, request IDs, access observation | Policies compose in order; early rejection, upload limits, trailers, and incomplete responses covered on H1/H2 |
 | 3: bounded operation | Global/service admission, admin readiness, configurable drain | Complete: overload, shared service limits, readiness-first stop-admission, bounded removal delay and total shutdown budget |
-| 4: backend and trust policy | Active health checks, trusted forwarding identity, metrics | Backend failure/recovery and spoofing tests pass; telemetry explains each failure |
+| 4: backend and trust policy | Active health checks, trusted forwarding identity, metrics | In progress: health and trust are complete; metrics and telemetry export remain |
 | 5: HTTP/3 and deployment lifecycle | QUIC adapter reusing runtime; deployment artifacts | H3 forwarding, reload, cancellation, TLS rotation, UDP failure/fallback and coordinated drain tests pass |
 | 6: production qualification | Linux CI, security review, realistic load/soak tests, canary | All release gates pass for a named build and environment |
 
-Completed order is 1Q -> 2A -> 2B -> 2C -> 2D -> 2E -> 2F -> 3. Next delivery order is 4 -> 5 -> 6.
+Completed order is 1Q -> 2A -> 2B -> 2C -> 2D -> 2E -> 2F -> 3. Phase 4 health/trust is complete in part; next delivery is metrics, then Phase 5 -> 6.
 Phase 2C delivers the first native H1/H2 milestone; Phase 2D adds dynamic-file
 updates and certificate rotation.
 Phase 5 adds H3. All production claims still require Phase 6 qualification for
@@ -100,7 +100,7 @@ Phase 0 profile; Phase 2C now adds native TLS/H2 startup support.
 | --- | --- |
 | Deployment boundary | Janus listens on a private HTTP/1.x interface behind an existing TLS load balancer; public TLS termination is outside Janus. |
 | Workload | Ordinary bounded-duration HTTP APIs; streaming is the default response behavior, while SSE, WebSocket, gRPC, HTTP/2 listener mode, HTTP/3, and TCP/UDP tunnels are outside this contract. |
-| Identity and authorization | The backend owns business authorization. Until a trusted-proxy policy exists, Janus trusts only the immediate peer and rewrites forwarding headers from that hop. |
+| Identity and authorization | The backend owns business authorization. Forwarded identity is trusted only from per-limen CIDRs and a validated multi-hop chain; otherwise Janus rewrites headers from the immediate peer. |
 | Routing | Exact case-insensitive host rules without ports take precedence over hostless rules; the longest segment-bounded path prefix wins. No prefix stripping or path normalization is performed. |
 | Time budgets | The starter profile uses 5s header read, 30s request read, 30s overall context, 35s server write, and 10s backend response-header budgets. `server.write_timeout` stays greater than the overall budget. |
 | Size and overload | Header/body size bounds, fixed/service admission and active health-based removal are implemented; drain is configurable and bounded. |
@@ -309,10 +309,11 @@ gateway for production; Phase 6 qualification remains required.
    Response bodies are closed after a bounded drain, worker count is capped,
    and probe lifecycle is independent of requests. Candidate generations start
    probes before publication and stop them when their resources retire.
-2. Add trusted-proxy CIDRs with a reviewed multi-hop identity policy. Derive
-   identity from the immediate peer and validated headers, then let proxy rewrite
-   emit canonical headers. Test untrusted spoofing, malformed chains, and HTTPS
-   redirects. Keep the existing immediate-peer-only behavior until implemented.
+2. Complete: trusted-proxy CIDRs are configured per limen with no insecure
+   trust-all mode. Identity is derived from the immediate peer and a validated
+   right-to-left multi-hop chain; proxy rewrite emits canonical XFF/XFP/XFH.
+   Untrusted spoofing, malformed chains, trusted HTTPS scheme propagation and
+   reload-safe limen policy comparisons are covered.
 3. Add `/metrics` to the admin listener: requests, errors, duration, in-flight,
    rejections, backend health, drain duration, and the Phase 2D reload outcomes.
    Labels use bounded route/service/error identifiers; never raw paths, hosts,

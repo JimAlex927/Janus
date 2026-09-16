@@ -196,6 +196,7 @@ func cloneLimens(source map[string]config.LimenConfig) map[string]config.LimenCo
 	clone := make(map[string]config.LimenConfig, len(source))
 	for name, binding := range source {
 		binding.Protocols = append([]string(nil), binding.Protocols...)
+		binding.TrustedProxies = append([]string(nil), binding.TrustedProxies...)
 		if binding.TLS != nil {
 			tls := *binding.TLS
 			binding.TLS = &tls
