@@ -341,9 +341,9 @@ in Phase 4 also need retirement/reload tests when introduced.
    forwarding pass on the supported development platform. The bounded H3
    bidirectional stream limit is now wired and configuration-tested; H3
    certificate rotation is also covered for existing and new connections.
-   H3 buffer/stream response semantics, reload on existing connections,
-   coordinated bounded shutdown is covered for a forced local drain;
-   H3 buffer/stream semantics, reload on existing connections and Linux
+   Reload across concurrent streams on an existing QUIC connection and
+   coordinated bounded shutdown are covered by forced local-drain tests.
+   H3 buffer/stream response semantics, fault-injection, deployment and Linux
    interop remain.
 4. Ship a minimal deployment artifact, verified CA roots, non-root execution,
    resource budgets, rollout/rollback instructions, and effective-config inspection

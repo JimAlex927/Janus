@@ -5,6 +5,28 @@ repository commit. Add a new dated section before every future commit.
 
 ## 2026-09-17
 
+### Verify HTTP/3 generation reload
+
+Commit message: `test(runtime): verify HTTP/3 generation reload`
+
+Scope:
+
+- Added a real local UDP HTTP/3 integration test through the stable Runtime
+  handler.
+- Verified that a stream already using the old generation completes with the
+  old route after reload, while a concurrent stream on the same QUIC connection
+  uses the replacement route.
+- Updated the Phase 5 evidence to distinguish this local reload guarantee from
+  the remaining fault-injection, deployment and Linux interop gates.
+
+Verification:
+
+- `gofmt` on the new Go test
+- `go test -count=3 ./internal/runtime -run TestHTTP3ReloadKeepsOldStreamOnOldGeneration`
+
+Scope note: this proves local runtime/generation behavior over HTTP/3; it is not
+production certification or Linux interoperability qualification.
+
 ### Bound HTTP/3 forced shutdown
 
 Commit message: `fix(lifecycle): bound HTTP/3 forced shutdown`

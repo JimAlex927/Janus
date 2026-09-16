@@ -227,7 +227,10 @@ existing QUIC connections remain usable and a new handshake observes the new
 certificate. Startup cleanup and coordinated drain are implemented;
 the forced-drain path returns within its caller context even when a handler is
 not cooperative, while that handler may continue until it observes request
-cancellation. Fault-injection and public-port deployment tests remain.
+cancellation. Runtime reload on an existing QUIC connection is locally covered:
+an in-flight old stream retains its old generation while a concurrent new stream
+uses the replacement generation. Fault-injection and public-port deployment
+tests remain.
 
 Test negotiated H3, stream cancellation isolation, stream/connection flow-control
 limits, handshake/idle/drain budgets, TLS pair rotation, reload on existing QUIC
