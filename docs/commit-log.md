@@ -5,6 +5,28 @@ repository commit. Add a new dated section before every future commit.
 
 ## 2026-09-17
 
+### Bound HTTP/3 forced shutdown
+
+Commit message: `fix(lifecycle): bound HTTP/3 forced shutdown`
+
+Scope:
+
+- Fixed Limen shutdown being able to wait indefinitely in quic-go after the
+  caller's drain context expired while an H3 handler remained active.
+- Added a context-bounded H3 shutdown wrapper and asynchronous force-close
+  initiation; packet resources are still released and active handler code is
+  not falsely claimed to be forcibly stoppable.
+- Added a real local UDP regression test with a non-cooperative handler and
+  documented the handler-cancellation boundary.
+
+Verification:
+
+- `gofmt` on touched Go files
+- `go test -count=3 ./internal/limen -run TestLimenHTTP3ShutdownHonorsDrainDeadline`
+
+Scope note: this proves the local Limen return/network-stop budget, not process
+orchestrator behavior, Linux interop, load/soak or deployment qualification.
+
 ### Verify HTTP/3 certificate rotation
 
 Commit message: `test(protocol): verify HTTP/3 certificate rotation`

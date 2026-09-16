@@ -126,7 +126,9 @@ still require restart. Legacy configurations remain startup-only.
   path, disables 0-RTT, reuses the rotated TLS identity, and applies the
   bounded `limen.http3.max_concurrent_streams` setting (default 100). H3
   forwarding and local UDP behavior are tested; Linux interop, load/soak, and
-  deployment qualification remain outstanding.
+  deployment qualification remain outstanding. A forced drain closes the H3
+  network lifecycle within its context budget; arbitrary handlers still need
+  to observe request cancellation to terminate their own work.
 - Unknown JSON fields and duplicate route matches fail validation. Go's JSON
   decoder still accepts duplicate object keys using its normal semantics; a
   stricter duplicate-key policy is a production configuration task.

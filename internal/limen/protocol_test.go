@@ -272,6 +272,78 @@ func TestLimenHTTP3ClientCancellationReachesHandler(t *testing.T) {
 	}
 }
 
+func TestLimenHTTP3ShutdownHonorsDrainDeadline(t *testing.T) {
+	certFile, keyFile, roots := writeTestCertificate(t)
+	started, release := make(chan struct{}), make(chan struct{})
+	l, err := NewBinding("public", config.LimenConfig{
+		Address:   "127.0.0.1:0",
+		Protocols: []string{config.ProtocolHTTP1, config.ProtocolHTTP3},
+		TLS:       &config.TLSSettings{CertFile: certFile, KeyFile: keyFile},
+	}, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		close(started)
+		<-release
+		w.WriteHeader(http.StatusNoContent)
+	}), config.DefaultSettings())
+	if err != nil {
+		t.Fatal(err)
+	}
+	tcpListener, err := l.Listen()
+	if err != nil {
+		t.Fatal(err)
+	}
+	udpListener, err := l.ListenPacket()
+	if err != nil {
+		_ = tcpListener.Close()
+		t.Fatal(err)
+	}
+	serveDone := make(chan error, 1)
+	go func() { serveDone <- l.Serve(tcpListener) }()
+	transport := &http3.Transport{
+		TLSClientConfig: &tls.Config{RootCAs: roots, ServerName: "localhost"},
+		QUICConfig:      &quic.Config{Allow0RTT: false},
+	}
+	defer transport.Close()
+	go func() {
+		response, requestErr := (&http.Client{Transport: transport}).Get("https://" + udpListener.LocalAddr().String() + "/drain")
+		if response != nil {
+			response.Body.Close()
+		}
+		_ = requestErr
+	}()
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		close(release)
+		_ = l.Close()
+		t.Fatal("HTTP/3 drain handler did not start")
+	}
+
+	shutdownDone := make(chan error, 1)
+	shutdownContext, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	go func() { shutdownDone <- l.Shutdown(shutdownContext) }()
+	select {
+	case shutdownErr := <-shutdownDone:
+		if !errors.Is(shutdownErr, context.DeadlineExceeded) {
+			t.Fatalf("HTTP/3 shutdown error = %v, want deadline exceeded", shutdownErr)
+		}
+	case <-time.After(time.Second):
+		close(release)
+		_ = l.Close()
+		t.Fatal("HTTP/3 shutdown exceeded its context deadline")
+	}
+	close(release)
+	_ = l.Close()
+	select {
+	case err := <-serveDone:
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			t.Errorf("limen stopped: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("HTTP/3 server did not stop after forced shutdown")
+	}
+}
+
 func TestLimenNegotiatesHTTP2AndHTTP1Fallback(t *testing.T) {
 	certFile, keyFile, roots := writeTestCertificate(t)
 	binding := config.LimenConfig{

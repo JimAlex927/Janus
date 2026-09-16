@@ -29,6 +29,7 @@ type Limen struct {
 	cert    *atomic.Pointer[tls.Certificate]
 	http3   *http3.Server
 	packet  net.PacketConn
+	h3Close sync.Once
 
 	hijackedMu    sync.Mutex
 	hijacked      map[net.Conn]struct{}
@@ -271,7 +272,7 @@ func (l *Limen) Serve(listener net.Listener) error {
 	go func() { h3Done <- l.http3.Serve(l.packet) }()
 	select {
 	case err := <-tcpDone:
-		_ = l.http3.Close()
+		l.startHTTP3Close()
 		return err
 	case err := <-h3Done:
 		_ = l.server.Close()
@@ -290,9 +291,7 @@ func (l *Limen) Shutdown(ctx context.Context) error {
 	h3Done := make(chan error, 1)
 	if l.http3 != nil {
 		go func() {
-			// HTTP/3 Shutdown closes its QUIC listener and sends GOAWAY to
-			// active connections before the raw packet socket is released.
-			err := l.http3.Shutdown(ctx)
+			err := l.shutdownHTTP3(ctx)
 			if l.packet != nil {
 				_ = l.packet.Close()
 			}
@@ -303,12 +302,12 @@ func (l *Limen) Shutdown(ctx context.Context) error {
 	}
 	if err := <-serverDone; err != nil {
 		l.closeHijacked()
-		_ = l.http3Close()
+		l.startHTTP3Close()
 		return err
 	}
 	if err := <-h3Done; err != nil {
 		l.closeHijacked()
-		_ = l.http3Close()
+		l.startHTTP3Close()
 		return err
 	}
 	l.hijackedMu.Lock()
@@ -319,7 +318,7 @@ func (l *Limen) Shutdown(ctx context.Context) error {
 		return nil
 	case <-ctx.Done():
 		l.closeHijacked()
-		_ = l.http3Close()
+		l.startHTTP3Close()
 		return ctx.Err()
 	}
 }
@@ -333,18 +332,37 @@ func (l *Limen) Close() error {
 	if l.packet != nil {
 		_ = l.packet.Close()
 	}
-	if h3Err := l.http3Close(); err == nil {
-		err = h3Err
-	}
+	l.startHTTP3Close()
 	l.closeHijacked()
 	return err
 }
 
-func (l *Limen) http3Close() error {
+// shutdownHTTP3 gives the library a chance to send GOAWAY, but does not allow
+// a non-cooperative handler to extend Limen's caller-owned drain budget. The
+// force-close path starts the library's connection termination asynchronously;
+// request handlers still need to observe their own request context.
+func (l *Limen) shutdownHTTP3(ctx context.Context) error {
 	if l.http3 == nil {
 		return nil
 	}
-	return l.http3.Close()
+	done := make(chan error, 1)
+	go func() { done <- l.http3.Shutdown(ctx) }()
+	select {
+	case err := <-done:
+		return err
+	case <-ctx.Done():
+		l.startHTTP3Close()
+		return ctx.Err()
+	}
+}
+
+func (l *Limen) startHTTP3Close() {
+	if l.http3 == nil {
+		return
+	}
+	l.h3Close.Do(func() {
+		go func() { _ = l.http3.Close() }()
+	})
 }
 
 func (l *Limen) trackHijacked(conn net.Conn, state http.ConnState) {
