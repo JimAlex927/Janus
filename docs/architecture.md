@@ -4,8 +4,8 @@
 
 Janus currently serves bounded-duration HTTP APIs through Protocol Limen on
 private HTTP/1.x or native TLS/HTTP/2 listeners, forwarding to static
-HTTP/HTTPS origins. File-based runtime configuration reload and HTTP/3 remain
-planned capabilities.
+HTTP/HTTPS origins. Versioned file-based routing reload and TLS certificate
+content rotation are implemented; HTTP/3 remains a planned capability.
 SSE, WebSockets, gRPC and arbitrary TCP/UDP tunnels remain outside this scope.
 Use Go's `net/http`, `httputil.ReverseProxy`, and `http.Transport` as the protocol
 foundation. Backend applications retain business authorization responsibilities.
@@ -14,9 +14,9 @@ This is the target design for the phases in [plan.md](plan.md). Today `runtime`
 owns the stable dispatcher and process-level transport, while `gateway`
 constructs each router, service proxies, pools, and route middleware generation.
 The fixed global protocol guard and overall deadline are applied once by
-runtime. The initial route-level `buffer` policy is implemented; other named
-policies, observation, admission, health, admin, and reload below are planned,
-not available configuration features.
+runtime. The initial route-level `buffer` policy, versioned routing reload, and
+TLS certificate-content rotation are implemented; other named policies,
+observation, admission, health, and admin remain planned.
 
 The concrete multi-protocol and reload design is in
 [limen-runtime.md](limen-runtime.md). Limen owns protocol servers, runtime owns
@@ -237,7 +237,7 @@ files below are responsibilities, not empty directories to scaffold immediately.
 | `internal/telemetry` | Request outcome type and access logging; later metrics exporters | 2 and 4 |
 | `internal/admin` | Private liveness/readiness handlers; later metrics endpoint | 3 |
 | `internal/health` | Bounded scheduled probes and recovery state transitions | 4 |
-| `internal/runtime` | Stable dispatcher, generation publication, request references, file reload and resource retirement | 2B complete; file reload in 2D |
+| `internal/runtime` | Stable dispatcher, generation publication, request references, file reload and resource retirement | 2D complete |
 | `test/integration`, `test/load`, `deploy` | Cross-package scenarios, load evidence, deployment artifacts | As scenarios arrive |
 
 Dependencies flow from `cmd` to `gateway`, then to leaf packages. `gateway` owns
@@ -257,12 +257,14 @@ replay/body/attempt semantics before implementation and is not enabled by Chain.
 ## Startup and reload
 
 Current startup: decode and validate -> build gateway handler -> bind and serve
-the HTTP/1 Limen. Target startup: decode and validate -> create process-owned transport -> build
+the configured Limen listeners. Target startup: decode and validate -> create process-owned transport -> build
 initial route/service generation -> create stable dispatcher and global chain
 -> bind Limen listeners -> serve. Close created resources if construction fails. Do not resolve policy
 names, read configuration, or allocate connection pools on each request.
 
-Phase 2B/2D routing reload is a transaction:
+Phase 2B/2D routing reload is a transaction. The current poller watches a
+versioned JSON file, hashes complete reads, and invokes this transaction only
+when content changes:
 
 1. Read one bounded complete document; reject malformed/duplicate keys and invalid
    references. Listener/global/transport settings are in startup config and

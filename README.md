@@ -6,8 +6,8 @@ A small Go HTTP gateway foundation, designed to remain easy to understand and mo
 in [docs/plan.md](docs/plan.md). Start with [docs/architecture.md](docs/architecture.md)
 for the design and [docs/protocols.md](docs/protocols.md) for the mechanisms to learn.
 The Protocol Limen layer currently owns HTTP/1 and native TLS/HTTP/2 listener
-lifecycle. HTTP/3 and file-based configuration reload are described as later
-work; the stable runtime generation core is in place. See
+lifecycle. Versioned configurations support polled routing reload and TLS
+certificate-content rotation; HTTP/3 remains later work. See
 [docs/limen-runtime.md](docs/limen-runtime.md).
 
 The first release targets ordinary HTTP APIs behind an existing TLS load balancer.
@@ -75,7 +75,9 @@ specified and tested against your backend framework.
 
 Upstreams are origins such as `https://service.example:8443` without a trailing
 slash, credentials, or a base path. The outbound Host is the selected origin's host.
-The original host is supplied as `X-Forwarded-Host`. Config updates require restart.
+The original host is supplied as `X-Forwarded-Host`. Versioned configurations
+reload routes and services by polling; listener/protocol/TLS-policy changes
+still require restart. Legacy configurations remain startup-only.
 
 ## Current limits
 

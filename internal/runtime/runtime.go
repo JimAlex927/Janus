@@ -47,7 +47,8 @@ type Runtime struct {
 	retired map[*generationRef]struct{}
 	closed  bool
 
-	listen    string
+	version   int
+	limens    map[string]config.LimenConfig
 	settings  config.Settings
 	builder   Builder
 	logger    *zap.Logger
@@ -93,7 +94,8 @@ func NewWithBuilder(c config.Config, logger *zap.Logger, builder Builder) (*Runt
 	r := &Runtime{
 		active:    initial,
 		retired:   make(map[*generationRef]struct{}),
-		listen:    c.Listen,
+		version:   c.Version,
+		limens:    cloneLimens(c.LimenBindings()),
 		settings:  c.Settings,
 		builder:   builder,
 		logger:    logger,
@@ -134,7 +136,7 @@ func (r *Runtime) Replace(c config.Config) error {
 	if err := c.Validate(); err != nil {
 		return err
 	}
-	if c.Listen != r.listen || !reflect.DeepEqual(c.Settings, r.settings) {
+	if c.Version != r.version || !reflect.DeepEqual(c.LimenBindings(), r.limens) || !reflect.DeepEqual(c.Settings, r.settings) {
 		return ErrStartupConfigChanged
 	}
 
@@ -168,6 +170,19 @@ func (r *Runtime) Replace(c config.Config) error {
 		old.generation.Close()
 	}
 	return nil
+}
+
+func cloneLimens(source map[string]config.LimenConfig) map[string]config.LimenConfig {
+	clone := make(map[string]config.LimenConfig, len(source))
+	for name, binding := range source {
+		binding.Protocols = append([]string(nil), binding.Protocols...)
+		if binding.TLS != nil {
+			tls := *binding.TLS
+			binding.TLS = &tls
+		}
+		clone[name] = binding
+	}
+	return clone
 }
 
 // Close retires the active generation and closes the process-owned transport.

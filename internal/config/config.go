@@ -2,6 +2,8 @@
 package config
 
 import (
+	"bytes"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -12,6 +14,8 @@ import (
 	"strconv"
 	"strings"
 )
+
+const MaxConfigBytes = 1 << 20
 
 type Config struct {
 	Version     int                    `json:"version,omitempty"`
@@ -88,7 +92,43 @@ func LoadFile(path string) (Config, error) {
 		return Config{}, err
 	}
 	defer f.Close()
-	c, err := Load(f)
+	data, err := io.ReadAll(io.LimitReader(f, MaxConfigBytes+1))
+	if err != nil {
+		return Config{}, fmt.Errorf("read config: %w", err)
+	}
+	if len(data) > MaxConfigBytes {
+		return Config{}, fmt.Errorf("config exceeds %d bytes", MaxConfigBytes)
+	}
+	return LoadFileBytes(path, data)
+}
+
+// LoadFileSnapshot reads and validates one bounded configuration file and
+// returns a content hash for polling deduplication. The hash is returned even
+// when validation fails, allowing a watcher to suppress repeated errors until
+// the file changes again.
+func LoadFileSnapshot(path string) (Config, [sha256.Size]byte, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return Config{}, [sha256.Size]byte{}, err
+	}
+	defer f.Close()
+	data, err := io.ReadAll(io.LimitReader(f, MaxConfigBytes+1))
+	if err != nil {
+		return Config{}, [sha256.Size]byte{}, fmt.Errorf("read config: %w", err)
+	}
+	hash := sha256.Sum256(data)
+	if len(data) > MaxConfigBytes {
+		return Config{}, hash, fmt.Errorf("config exceeds %d bytes", MaxConfigBytes)
+	}
+	c, err := LoadFileBytes(path, data)
+	return c, hash, err
+}
+
+// LoadFileBytes parses configuration bytes and resolves relative TLS asset
+// paths against the supplied configuration file path. It is used by the
+// watcher so parsing and hashing operate on the same atomic-replacement read.
+func LoadFileBytes(path string, data []byte) (Config, error) {
+	c, err := Load(bytes.NewReader(data))
 	if err != nil {
 		return c, err
 	}

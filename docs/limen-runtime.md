@@ -3,7 +3,8 @@
 Status: implementation plan reviewed against the repository on 2026-09-16.
 Phase 1Q qualification, the Phase 2A HTTP/1 Limen extraction, the Phase 2B
 stable runtime/generation core, and the Phase 2C TLS/HTTP/2 startup path are
-shipped; file reload and certificate rotation APIs below are not shipped.
+shipped; the Phase 2D routing file reload and certificate rotation path is also
+shipped. HTTP/3 and long-lived protocol contracts remain future work.
 The delivery sequence and exit gates are in [plan.md](plan.md).
 
 ## Scope

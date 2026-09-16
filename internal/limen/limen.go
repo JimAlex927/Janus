@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"sync/atomic"
 
 	"janus/internal/config"
 	"janus/internal/protocol"
@@ -21,6 +22,7 @@ type Limen struct {
 	address string
 	server  *http.Server
 	tls     *tls.Config
+	cert    *atomic.Pointer[tls.Certificate]
 }
 
 // New creates a Limen using the server budgets from settings. The caller must
@@ -45,7 +47,7 @@ func NewBinding(name string, binding config.LimenConfig, handler http.Handler, s
 	if err != nil {
 		return nil, err
 	}
-	tlsConfig, err := serverTLSConfig(binding, protocols)
+	tlsConfig, certificates, err := serverTLSConfig(binding, protocols)
 	if err != nil {
 		return nil, err
 	}
@@ -58,6 +60,7 @@ func NewBinding(name string, binding config.LimenConfig, handler http.Handler, s
 	return &Limen{
 		address: binding.Address,
 		tls:     tlsConfig,
+		cert:    certificates,
 		server: &http.Server{
 			Addr: binding.Address, Handler: handler,
 			Protocols:         protocols,
@@ -96,13 +99,13 @@ func serverProtocols(binding config.LimenConfig) (*http.Protocols, error) {
 	return protocols, nil
 }
 
-func serverTLSConfig(binding config.LimenConfig, protocols *http.Protocols) (*tls.Config, error) {
+func serverTLSConfig(binding config.LimenConfig, protocols *http.Protocols) (*tls.Config, *atomic.Pointer[tls.Certificate], error) {
 	if binding.TLS == nil {
-		return nil, nil
+		return nil, nil, nil
 	}
 	cert, err := tls.LoadX509KeyPair(binding.TLS.CertFile, binding.TLS.KeyFile)
 	if err != nil {
-		return nil, fmt.Errorf("load limen TLS certificate: %w", err)
+		return nil, nil, fmt.Errorf("load limen TLS certificate: %w", err)
 	}
 	minVersion := uint16(tls.VersionTLS12)
 	if binding.TLS.MinVersion == "1.3" || binding.TLS.MinVersion == "TLS1.3" {
@@ -115,7 +118,34 @@ func serverTLSConfig(binding config.LimenConfig, protocols *http.Protocols) (*tl
 	if protocols.HTTP1() {
 		nextProtos = append(nextProtos, "http/1.1")
 	}
-	return &tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: minVersion, NextProtos: nextProtos}, nil
+	certificates := new(atomic.Pointer[tls.Certificate])
+	certificates.Store(&cert)
+	return &tls.Config{
+		MinVersion: minVersion,
+		NextProtos: nextProtos,
+		GetCertificate: func(*tls.ClientHelloInfo) (*tls.Certificate, error) {
+			current := certificates.Load()
+			if current == nil {
+				return nil, fmt.Errorf("limen TLS certificate is unavailable")
+			}
+			return current, nil
+		},
+	}, certificates, nil
+}
+
+// RotateCertificate validates and atomically publishes a new certificate/key
+// pair. Existing TLS connections keep their negotiated identity; only future
+// handshakes observe the replacement.
+func (l *Limen) RotateCertificate(certFile, keyFile string) error {
+	if l.cert == nil {
+		return fmt.Errorf("limen does not use TLS")
+	}
+	cert, err := tls.LoadX509KeyPair(certFile, keyFile)
+	if err != nil {
+		return fmt.Errorf("load rotated limen TLS certificate: %w", err)
+	}
+	l.cert.Store(&cert)
+	return nil
 }
 
 // Listen binds the configured TCP address. The caller should pass the returned

@@ -26,6 +26,7 @@ func main() {
 	//1、parse the argument in the exe command-----------
 	path := flag.String("config", "configs/janus.json", "configuration file")
 	check := flag.Bool("check", false, "validate configuration and exit")
+	reloadInterval := flag.Duration("reload-interval", time.Second, "poll interval for versioned configuration and TLS files")
 	flag.Parse()
 	//2、logger init---------------------------------
 	logger, cleanup, err := appLogger.New(appLogger.DefaultConfig())
@@ -38,13 +39,13 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	//4、Run : the core logics
-	if err := run(ctx, *path, *check, logger); err != nil {
+	if err := run(ctx, *path, *check, *reloadInterval, logger); err != nil {
 		logger.Error("janus stopped", zap.Error(err))
 		os.Exit(1)
 	}
 }
 
-func run(ctx context.Context, path string, check bool, logger *zap.Logger) error {
+func run(ctx context.Context, path string, check bool, reloadInterval time.Duration, logger *zap.Logger) error {
 	// Open and validate the Janus configuration. Versioned TLS paths are
 	// resolved relative to this file by LoadFile.
 	c, err := config.LoadFile(path)
@@ -74,6 +75,7 @@ func run(ctx context.Context, path string, check bool, logger *zap.Logger) error
 	}
 	sort.Strings(names)
 	servers := make([]*limen.Limen, 0, len(names))
+	serversByName := make(map[string]*limen.Limen, len(names))
 	listeners := make([]net.Listener, 0, len(names))
 	for _, name := range names {
 		protocolLimen, err := limen.NewBinding(name, bindings[name], requestRuntime, c.Settings)
@@ -89,8 +91,27 @@ func run(ctx context.Context, path string, check bool, logger *zap.Logger) error
 			return fmt.Errorf("limen %q: %w", name, err)
 		}
 		servers = append(servers, protocolLimen)
+		serversByName[name] = protocolLimen
 		listeners = append(listeners, ln)
 		logger.Info("janus listening", zap.String("limen", name), zap.String("address", ln.Addr().String()))
+	}
+	reloadCtx, cancelReload := context.WithCancel(ctx)
+	defer cancelReload()
+	if c.Version == config.CurrentConfigVersion {
+		routeReloader, err := janusruntime.NewFileReloader(requestRuntime, path, reloadInterval, logger)
+		if err != nil {
+			closeListeners(listeners)
+			closeServers(servers)
+			return err
+		}
+		certificateReloader, err := limen.NewCertificateReloader(bindings, serversByName, reloadInterval, logger)
+		if err != nil {
+			closeListeners(listeners)
+			closeServers(servers)
+			return err
+		}
+		go func() { _ = routeReloader.Run(reloadCtx) }()
+		go func() { _ = certificateReloader.Run(reloadCtx) }()
 	}
 	done := make(chan error, len(servers))
 	for i, server := range servers {
@@ -98,6 +119,7 @@ func run(ctx context.Context, path string, check bool, logger *zap.Logger) error
 	}
 	select {
 	case err := <-done:
+		cancelReload()
 		closeServers(servers)
 		if errors.Is(err, http.ErrServerClosed) {
 			return nil

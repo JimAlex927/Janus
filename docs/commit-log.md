@@ -5,6 +5,39 @@ repository commit. Add a new dated section before every future commit.
 
 ## 2026-09-16
 
+### Add dynamic routing reload and certificate rotation
+
+Commit message: `feat(runtime): add file reload and certificate rotation`
+
+Scope:
+
+- Added bounded configuration snapshots with SHA-256 content hashes and strict
+  parsing from the same file read used for deduplication.
+- Added a polling FileReloader that serializes through Runtime publication,
+  coalesces unchanged content, logs rejected candidates, and preserves the last
+  good generation for malformed, missing, or startup-changing input.
+- Strengthened Runtime's startup boundary to compare normalized Limen bindings,
+  protocol/TLS settings, config version, and global settings before replacement.
+- Added atomic TLS certificate/key publication for future handshakes and a
+  separate certificate poller that retains the previous identity for invalid or
+  partial pairs.
+- Enabled versioned deployments to poll routes and certificates from `cmd/janus`
+  while preserving legacy startup-only configuration behavior. Updated the
+  architecture, plan, runtime, README, and commit documentation.
+
+Verification:
+
+- `gofmt` on touched Go files
+- `go test ./...`
+- `go vet ./...`
+- `go build -o bin/janus.exe ./cmd/janus`
+- `go run ./cmd/janus -check -config configs/janus.json`
+
+Scope note: HTTP/3, unencrypted HTTP/2, long-lived protocol contracts, request
+policies, health, admission, and admin endpoints remain future work.
+
+## 2026-09-16
+
 ### Add native TLS and HTTP/2 Limens
 
 Commit message: `feat(limen): add TLS and HTTP/2 bindings`

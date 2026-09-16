@@ -30,8 +30,9 @@ streaming reverse proxying, HTTPS certificate verification, typed server and
 transport settings, a startup-built middleware chain, request-context
 cancellation, the `internal/limen` HTTP/1 lifecycle, and native TLS/HTTP/2
 bindings. Shutdown exists, with a fixed 35-second drain budget. Body limits,
-admission, access observation, admin endpoints, health checks, and reload are
-not implemented.
+admission, access observation, admin endpoints, and health checks are not
+implemented. Versioned routing reload and TLS certificate rotation are now
+implemented; legacy single-file mode remains startup-only.
 
 The original item1 was settings/deadline configuration, not all of Phase 1.
 Its main implementation exists; Phase 1 below completes its migration and
@@ -72,14 +73,14 @@ not just configuration types. Size effort after each phase's exit review.
 | 2A: Protocol Limen | Extract existing HTTP/1 listener and lifecycle | Complete: legacy config/forwarding retained; Limen owns bind, serve and drain |
 | 2B: runtime generations | Stable dispatcher and explicit resource ownership | Complete: old requests retain old handlers; new requests use new handlers; retirement is bounded and race-safe |
 | 2C: HTTPS and HTTP/2 | TLS Limens, protocol configuration, response capability audit | Complete: actual H2 negotiation, sibling-stream isolation, H1 fallback and TLS startup checks pass |
-| 2D: dynamic files and certificates | Serialized validated routing reload; independent certificate rotation | Invalid updates preserve last-good state; keepalive/H2 traffic survives updates; resource use remains bounded |
+| 2D: dynamic files and certificates | Serialized validated routing reload; independent certificate rotation | Complete: invalid updates preserve last-good state; runtime and certificate resources remain bounded |
 | 2E: usable request policies | Named body-limit policies, request IDs, access observation | Policies compose in order; early rejection, upload limits, trailers, and incomplete responses covered on H1/H2 |
 | 3: bounded operation | Global/service admission, admin readiness, configurable drain | Overload rejects promptly; shared service limits hold across routes; shutdown meets its budget |
 | 4: backend and trust policy | Active health checks, trusted forwarding identity, metrics | Backend failure/recovery and spoofing tests pass; telemetry explains each failure |
 | 5: HTTP/3 and deployment lifecycle | QUIC adapter reusing runtime; deployment artifacts | H3 forwarding, reload, cancellation, TLS rotation, UDP failure/fallback and coordinated drain tests pass |
 | 6: production qualification | Linux CI, security review, realistic load/soak tests, canary | All release gates pass for a named build and environment |
 
-Completed order is 1Q -> 2A -> 2B -> 2C. Next delivery order is 2D -> 2E -> 3 -> 4 -> 5 -> 6.
+Completed order is 1Q -> 2A -> 2B -> 2C -> 2D. Next delivery order is 2E -> 3 -> 4 -> 5 -> 6.
 Phase 2C delivers the first native H1/H2 milestone; Phase 2D adds dynamic-file
 updates and certificate rotation.
 Phase 5 adds H3. All production claims still require Phase 6 qualification for
@@ -181,8 +182,8 @@ closed between selecting it and incrementing its reference count. Old
 generations close only after their active requests release them. Replacement
 build failures close any candidate generation and retain the previous one;
 panic paths release references; and eight concurrently retired generations are
-bounded. Listener/server settings remain startup-owned, and file watching is
-still deferred to Phase 2D.
+bounded. Listener/server settings remain startup-owned. Versioned file watching
+and certificate rotation are delivered in Phase 2D.
 
 ## Phase 2C: HTTPS and HTTP/2 — complete
 
@@ -197,7 +198,7 @@ fallback, concurrent stream isolation, named route scope, graceful startup
 cleanup, and outbound HTTP/2 enablement. Long-lived protocols still require a
 separate timeout, buffering, upgrade, and drain contract.
 
-## Phase 2D: file reload and certificate rotation
+## Phase 2D: file reload and certificate rotation — complete
 
 Read bounded, strict routing documents, build a full candidate, then publish
 through Phase 2B. Add a portable polling trigger with hash-based deduplication
@@ -206,12 +207,19 @@ workflow. Invalid, missing or unreadable input retains the previous generation.
 Expose generation and failure information in logs initially. Reload routing
 without restarting sockets, closing connections, or issuing GOAWAY.
 
-Rotate a validated certificate/key pair independently: new TLS handshakes use
-the new identity while established connections remain intact. Listener addresses,
-protocol sets, global limits, TLS policy and outbound transport settings require
-restart. Test invalid cert pairs, partial file updates, same-connection requests
-across generations, overlapping reloads and reload/shutdown races. Preserve
-legacy single-file startup-only mode with an explicit migration example.
+The implementation polls versioned configuration with a bounded read and
+content-hash deduplication. It serializes publication through Runtime, retains
+the last good generation for invalid/missing/startup-changing input, and keeps
+legacy single-file startup-only mode unchanged. TLS certificate/key contents
+are polled independently; a complete validated pair is atomically published to
+new handshakes while established connections remain intact. Listener addresses,
+protocol sets, global limits, TLS policy and outbound transport settings still
+require restart.
+
+Coverage includes invalid and partial config updates, startup-setting rejection,
+generation replacement, malformed certificate-pair retention, successful
+certificate rotation, and bounded configuration input. Full H1/H2 response
+capability and GOAWAY qualification remain in later protocol work.
 
 ## Phase 2E: request policies (original Phase 2 scope)
 
