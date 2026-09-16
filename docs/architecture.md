@@ -1,10 +1,13 @@
-# Middleware architecture and ownership
+# Protocol Limen, runtime, and middleware architecture
 
 ## Scope and implementation status
 
-Janus targets bounded-duration HTTP APIs on a private HTTP/1.x listener behind
-an existing TLS load balancer, forwarding to static HTTP/HTTPS origins. Public
-TLS termination, SSE, WebSockets, gRPC, HTTP/3, and TCP/UDP tunnels are deferred.
+Janus currently serves bounded-duration HTTP APIs through Protocol Limen on a
+private HTTP/1.x listener behind an existing TLS load balancer, forwarding to
+static HTTP/HTTPS origins. The next architecture adds native HTTPS/HTTP/2 and
+later HTTP/3, plus file-based runtime configuration reload. These are planned
+capabilities.
+SSE, WebSockets, gRPC and arbitrary TCP/UDP tunnels remain outside this scope.
 Use Go's `net/http`, `httputil.ReverseProxy`, and `http.Transport` as the protocol
 foundation. Backend applications retain business authorization responsibilities.
 
@@ -14,6 +17,12 @@ builds the generic middleware chain and applies the overall deadline through
 that chain. The initial route-level `buffer` policy is implemented; other named
 policies, observation, admission, health, admin, and reload below are planned,
 not available configuration features.
+
+The concrete multi-protocol and reload design is in
+[limen-runtime.md](limen-runtime.md). Limen owns protocol servers, runtime owns
+the stable dispatcher and generation lifetime, and gateway builds handler graphs.
+All HTTP versions reuse the handler contract; raw TCP/UDP protocols require
+different contracts. Start with a file source rather than a Provider framework.
 
 We adopt named built-in policies and ordered composition inspired by
 [Traefik's middleware model](https://doc.traefik.io/traefik/reference/routing-configuration/http/middlewares/overview/).
@@ -25,14 +34,15 @@ Configuration names and supported policy types are Janus-specific.
 
 ```mermaid
 flowchart TD
-    LB[Existing TLS load balancer] --> H[HTTP server socket deadlines]
-    H --> ID[Request ID and request observation state]
+    C[Client or external TLS load balancer] --> L[Protocol Limen: H1 / TLS H2 / later QUIC H3]
+    L --> ID[Stable handler: request ID and observation state]
     ID --> O[Access observation]
     O --> T[Overall context deadline]
     T --> G[Protocol and draining guards]
     G --> I[Validated forwarding identity]
     I --> A[Global admission]
-    A --> R[Host and path router]
+    A --> D[Runtime: acquire active generation for this request]
+    D --> R[Limen-scoped host and path router]
     R --> M[Matched route metadata and ordered route middleware]
     M --> S[Shared service handler and ordered service middleware]
     S --> P[ReverseProxy and healthy target selection]
@@ -42,6 +52,9 @@ flowchart TD
 ```
 
 The diagram is the completed target; add each node in its delivery phase.
+The fixed global chain wraps the generation dispatcher. Protocol servers retain
+that stable handler during reload. Requests already dispatched retain their
+generation; later requests on the same connection can acquire the new one.
 Global protections have a fixed order and cannot be bypassed by omitting a route
 reference. Named route middleware runs after matching and cannot cause rerouting.
 Named service middleware runs after route middleware and before target selection.
@@ -59,7 +72,7 @@ The initial API is deliberately small:
 ```go
 type Middleware func(http.Handler) http.Handler
 
-// Proposed API: declaration order is request-entry order.
+// Implemented API: declaration order is request-entry order.
 func Chain(final http.Handler, middlewares ...Middleware) http.Handler
 ```
 
@@ -91,7 +104,7 @@ response through a generic panic-recovery wrapper.
 
 | Configuration | Owner and scope | Planned introduction |
 | --- | --- | --- |
-| Address, header/read/write/idle deadlines, header size | HTTP server; one listener | `server.write_timeout` implemented in Phase 1 |
+| Address, protocol/TLS selection, header/read/write/idle limits | Protocol Limen; per-listener settings | HTTP server budgets exist; Limen extraction 2A, TLS/H2 2C |
 | Overall request deadline | Fixed global timeout middleware using `request.maximum_duration` | Implemented in Phase 1 |
 | Connect/TLS/header timeouts, TCP keepalive, pool limits | Shared outbound `http.Transport` | Already implemented |
 | Request ID and access observation | Fixed global middleware; options only when consumed | Phase 2 |
@@ -101,6 +114,8 @@ response through a generic panic-recovery wrapper.
 | Global admission, drain and admin settings | Process/listener lifecycle | Phase 3 |
 | Health probes | Per-service resource lifecycle | Phase 4 |
 | Trusted proxy CIDRs and identity rules | Listener trust policy with proxy rewrite integration | Phase 4 |
+| Routing file and generation publication | Runtime; strict build-before-swap transaction | 2B/2D |
+| Certificate/key pair rotation | Limen; validated identity for new handshakes | 2D |
 
 Keep server and transport settings outside the named middleware catalog. The
 existing `backend.keep_alive` means TCP keepalive, not HTTP idle-pool duration.
@@ -158,7 +173,8 @@ Validate unused definitions too, and reject missing references, wrong scopes,
 duplicate references within one list, and incompatible policy combinations.
 Definitions in a JSON object have no execution order; attachment arrays do.
 
-The first configurable policy is `body_limit` (route or service scope). Multiple
+The first implemented configurable policy is route-level `buffer`; `body_limit`
+is the next planned policy (route or service scope). Multiple
 applicable body limits compose by the minimum. The example therefore allows at
 most 1 MiB on `/api`. Phase 3 adds `in_flight` at service scope only; global
 admission remains fixed infrastructure. Requests must pass both active caps.
@@ -174,11 +190,13 @@ is a reference for that later convenience, not a Phase 1 dependency.
 | Object | Runtime ownership | Sharing rule |
 | --- | --- | --- |
 | Middleware definition | Immutable configuration | Reusable by name without automatically sharing state |
+| Limen and fixed global chain | Process lifetime | Shared across routing generations; same runtime for H1/H2/H3 |
+| Routing generation | Runtime publication/retirement | One acquired generation per request, released after handler return |
 | Route chain | One instance per route attachment | Route policies keep route-local state |
-| Service handler and limiter | One instance per service | Every route targeting that service uses the same instance |
+| Service handler / limiter | Handler per generation; limiter state runtime-owned by service ID | Routes share the handler; generations share active permit accounting |
 | Global admission | One process-wide instance | All data requests share permits, including across reloads |
 | Request observation | One object per request | Outer observer and inner route/proxy stages share metadata |
-| Transport | One reused instance for current trust/TLS policy | Services share pools; never mutate a live transport |
+| Transport | Process-owned for the initial fixed trust/TLS policy | Services and routing generations share pools; never mutate a live transport |
 | Probe workers and backend health | Per service, managed by runtime owner | Start/stop outside the request path |
 
 For example, routes A and B targeting service S must compete for the same S
@@ -194,10 +212,12 @@ completion in the same state so the outer observer can report them after return.
 Define synchronization for any concurrent callbacks; do not assume a child context
 value set inside a route can be read back from the outer request.
 
-Response wrappers provide `Unwrap` and preserve flushing and trailers. If they
+Transparent response wrappers provide `Unwrap` and preserve flushing and trailers. If they
 expose `ReaderFrom`, it must update byte counts rather than bypass observation.
 Do not pretend unsupported `Hijacker` or other interfaces exist. Test behavior
 through the actual proxy/server, including informational responses and body errors.
+Buffering has an intentional flush barrier and needs its own capability contract;
+unwrapping must not silently let `ResponseController` bypass that barrier.
 
 ## Code layout and dependencies
 
@@ -207,8 +227,9 @@ files below are responsibilities, not empty directories to scaffold immediately.
 | Package | Responsibility and likely files | First phase |
 | --- | --- | --- |
 | `cmd/janus` | CLI, process signals, invoke startup/drain | Existing |
+| `internal/limen` | Listener and protocol adapters, inbound TLS identity, coordinated server lifecycle | HTTP/1 lifecycle in 2A; H2 in 2C, H3 in 5 |
 | `internal/config` | Settings, named policy schema, reference/scope validation | Existing; policy types in 2 |
-| `internal/gateway` | Composition root; `build.go` resolves policies and assembles services/routes; server wiring | 1 |
+| `internal/gateway` | Builds route/service handler generations from validated config and injected runtime resources | Existing; server wiring moves to Limen in 2A |
 | `internal/middleware` | `chain.go`, `timeout.go`, then IDs, observation, body limits and admission | 1–3 |
 | `internal/router` | Immutable host/path matching against prebuilt `http.Handler` | Existing |
 | `internal/proxy` | ReverseProxy, outbound transport, trusted-header rewrite, error mapping | Existing |
@@ -216,7 +237,7 @@ files below are responsibilities, not empty directories to scaffold immediately.
 | `internal/telemetry` | Request outcome type and access logging; later metrics exporters | 2 and 4 |
 | `internal/admin` | Private liveness/readiness handlers; later metrics endpoint | 3 |
 | `internal/health` | Bounded scheduled probes and recovery state transitions | 4 |
-| `internal/runtime` | Snapshot publication, drain references, owned resource retirement | 5 |
+| `internal/runtime` | Stable dispatcher, generation publication, request references, file reload and resource retirement | 2B/2D |
 | `test/integration`, `test/load`, `deploy` | Cross-package scenarios, load evidence, deployment artifacts | As scenarios arrive |
 
 Dependencies flow from `cmd` to `gateway`, then to leaf packages. `gateway` owns
@@ -226,7 +247,8 @@ do not import `gateway` or route tables. `router` only dispatches handlers.
 types; `telemetry` must not import gateway or middleware. Health workers update a
 bounded health store; selection reads it without initiating network probes.
 
-Later `runtime` may call the gateway builder; gateway must not import runtime.
+In Phase 2B `runtime` calls the gateway builder; gateway must not import runtime.
+`cmd` wires Limen to the runtime handler; Limen depends only on the handler contract.
 Avoid a separate service abstraction/package until service lifecycle complexity
 requires it. `http.Handler` and `http.RoundTripper` remain the extension seams.
 Outbound attempt observation can wrap RoundTripper. Retry needs its own reviewed
@@ -234,15 +256,17 @@ replay/body/attempt semantics before implementation and is not enabled by Chain.
 
 ## Startup and reload
 
-Startup: decode and validate -> create transport/pools -> build each service once
--> attach route policies -> build router -> apply fixed global middleware -> bind
-listeners. Close created resources if construction fails. Do not resolve policy
+Current startup: decode and validate -> build gateway handler -> bind and serve
+the HTTP/1 Limen. Target startup: decode and validate -> create process-owned transport -> build
+initial route/service generation -> create stable dispatcher and global chain
+-> bind Limen listeners -> serve. Close created resources if construction fails. Do not resolve policy
 names, read configuration, or allocate connection pools on each request.
 
-Phase 5 reload is a transaction:
+Phase 2B/2D routing reload is a transaction:
 
 1. Read one bounded complete document; reject malformed/duplicate keys and invalid
-   references. Reject changes to restart-only listener/global/transport settings.
+   references. Listener/global/transport settings are in startup config and
+   require restart; reject those keys in a routing update.
 2. Build a complete candidate with rollback cleanup. Prepare healthy-target state
    and candidate probes under explicit lifecycle ownership before publication.
 3. Publish the snapshot atomically. Each accepted request acquires a generation
@@ -257,6 +281,10 @@ Phase 5 reload is a transaction:
 
 Live configuration is immutable; counters and health stores are synchronized runtime
 state. Removing routes must not invalidate handlers serving accepted requests.
+Certificate rotation is a separate validated transaction affecting new handshakes.
+Routing reload does not close listeners or send GOAWAY. Process shutdown drains
+all Limen adapters under one budget and force-closes them at expiry. Full update,
+file publication and retirement-bound rules are in [limen-runtime.md](limen-runtime.md).
 
 ## Preserved forwarding contract and failure behavior
 

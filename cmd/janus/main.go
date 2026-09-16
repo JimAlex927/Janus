@@ -5,7 +5,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -14,6 +13,7 @@ import (
 
 	"janus/internal/config"
 	"janus/internal/gateway"
+	"janus/internal/limen"
 	appLogger "janus/pkg/logger"
 
 	"go.uber.org/zap"
@@ -65,16 +65,17 @@ func run(ctx context.Context, path string, check bool, logger *zap.Logger) error
 	}
 	defer gatewayWithinHandlers.Close()
 	//Start the server
-	srv := gateway.NewServer(c.Listen, gatewayWithinHandlers, c.Settings)
-	//listen the specified network  and address.
-	ln, err := net.Listen("tcp", c.Listen)
+	protocolLimen := limen.New(c.Listen, gatewayWithinHandlers, c.Settings)
+	// Bind the configured address before starting the serving goroutine so
+	// startup failures are returned synchronously.
+	ln, err := protocolLimen.Listen()
 	if err != nil {
 		return err
 	}
 	logger.Info("janus listening", zap.String("address", ln.Addr().String()))
 	done := make(chan error, 1)
 	//bind the server to the net listening
-	go func() { done <- srv.Serve(ln) }()
+	go func() { done <- protocolLimen.Serve(ln) }()
 	select {
 	case err := <-done:
 		if errors.Is(err, http.ErrServerClosed) {
@@ -86,8 +87,8 @@ func run(ctx context.Context, path string, check bool, logger *zap.Logger) error
 		// Do not derive this from the already-cancelled signal context.
 		drain, cancel := context.WithTimeout(context.Background(), 35*time.Second)
 		defer cancel()
-		if err := srv.Shutdown(drain); err != nil {
-			srv.Close()
+		if err := protocolLimen.Shutdown(drain); err != nil {
+			protocolLimen.Close()
 			return fmt.Errorf("drain: %w", err)
 		}
 		return nil

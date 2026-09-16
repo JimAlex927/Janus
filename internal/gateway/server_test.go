@@ -4,13 +4,13 @@ import (
 	"context"
 	"errors"
 	"io"
-	"net"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
 
 	"janus/internal/config"
+	"janus/internal/limen"
 )
 
 func TestShutdownFinishesAcceptedRequest(t *testing.T) {
@@ -25,8 +25,8 @@ func TestShutdownFinishesAcceptedRequest(t *testing.T) {
 	}))
 	defer backend.Close()
 	g := testGateway(t, backend.URL)
-	srv := NewServer("127.0.0.1:0", g)
-	ln, err := net.Listen("tcp", srv.Addr)
+	srv := limen.New("127.0.0.1:0", g, config.DefaultSettings())
+	ln, err := srv.Listen()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,21 +77,5 @@ func TestShutdownFinishesAcceptedRequest(t *testing.T) {
 	}
 	if err := <-drained; err != nil {
 		t.Fatal(err)
-	}
-}
-
-func TestNewServerUsesConfiguredBudgets(t *testing.T) {
-	settings := config.DefaultSettings()
-	settings.Request.ReadTimeout = config.Duration(1200 * time.Millisecond)
-	settings.Request.MaximumDuration = config.Duration(2 * time.Second)
-	settings.Server.WriteTimeout = config.Duration(3 * time.Second)
-	settings.Server.ReadHeaderTimeout = config.Duration(350 * time.Millisecond)
-	settings.Server.IdleTimeout = config.Duration(7 * time.Second)
-	settings.Server.MaxHeaderBytes = 48 << 10
-
-	srv := NewServer("127.0.0.1:0", http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}), settings)
-	if srv.ReadHeaderTimeout != 350*time.Millisecond || srv.ReadTimeout != 1200*time.Millisecond ||
-		srv.WriteTimeout != 3*time.Second || srv.IdleTimeout != 7*time.Second || srv.MaxHeaderBytes != 48<<10 {
-		t.Fatalf("server settings were not applied: %+v", srv)
 	}
 }

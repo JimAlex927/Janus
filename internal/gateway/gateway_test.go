@@ -1,7 +1,6 @@
 package gateway
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -14,6 +13,7 @@ import (
 
 	"go.uber.org/zap"
 	"janus/internal/config"
+	"janus/internal/limen"
 )
 
 func serveTestGateway(t *testing.T, g *Gateway, settings config.Settings) string {
@@ -22,7 +22,7 @@ func serveTestGateway(t *testing.T, g *Gateway, settings config.Settings) string
 	if err != nil {
 		t.Fatal(err)
 	}
-	srv := NewServer(ln.Addr().String(), g, settings)
+	srv := limen.New(ln.Addr().String(), g, settings)
 	serveDone := make(chan error, 1)
 	go func() { serveDone <- srv.Serve(ln) }()
 	t.Cleanup(func() {
@@ -381,104 +381,5 @@ func TestBufferedRouteReturns504BeforeCommitment(t *testing.T) {
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusGatewayTimeout {
 		t.Fatalf("status = %d, want 504", resp.StatusCode)
-	}
-}
-
-func TestSlowUploadExpiresAtServerReadDeadline(t *testing.T) {
-	type uploadResult struct {
-		body string
-		err  error
-	}
-	backendResult := make(chan uploadResult, 1)
-	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		body, err := io.ReadAll(r.Body)
-		backendResult <- uploadResult{body: string(body), err: err}
-		w.WriteHeader(http.StatusNoContent)
-	}))
-	defer backend.Close()
-
-	settings := config.DefaultSettings()
-	settings.Request.ReadTimeout = config.Duration(100 * time.Millisecond)
-	settings.Request.MaximumDuration = config.Duration(1 * time.Second)
-	settings.Server.ReadHeaderTimeout = config.Duration(1 * time.Second)
-	settings.Server.WriteTimeout = config.Duration(1500 * time.Millisecond)
-	g := testGatewayWithSettings(t, backend.URL, settings)
-	front := serveTestGateway(t, g, settings)
-
-	conn, err := net.DialTimeout("tcp", strings.TrimPrefix(front, "http://"), 2*time.Second)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer conn.Close()
-	if _, err := io.WriteString(conn, "POST /api HTTP/1.1\r\nHost: gateway\r\nContent-Length: 4\r\nConnection: close\r\n\r\nx"); err != nil {
-		t.Fatal(err)
-	}
-
-	// The request body is deliberately incomplete. ReadTimeout covers the
-	// complete inbound request, not only header parsing.
-	time.Sleep(250 * time.Millisecond)
-	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
-	_, err = io.ReadAll(conn)
-	var timeoutErr net.Error
-	if errors.As(err, &timeoutErr) && timeoutErr.Timeout() {
-		t.Fatalf("slow upload connection remained open: %v", err)
-	}
-	select {
-	case result := <-backendResult:
-		if result.body == "xyzw" && result.err == nil {
-			t.Fatal("slow upload reached the backend as a complete request")
-		}
-		// The proxy may receive a partial body before the server read
-		// deadline. A partial body must not turn into a complete upload.
-	default:
-	}
-}
-
-func TestSlowResponseReaderHitsServerWriteDeadline(t *testing.T) {
-	backendStopped := make(chan struct{}, 1)
-	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/octet-stream")
-		chunk := bytes.Repeat([]byte("x"), 32<<10)
-		for {
-			if _, err := w.Write(chunk); err != nil {
-				backendStopped <- struct{}{}
-				return
-			}
-		}
-	}))
-	defer backend.Close()
-
-	settings := config.DefaultSettings()
-	settings.Request.MaximumDuration = config.Duration(100 * time.Millisecond)
-	settings.Server.WriteTimeout = config.Duration(250 * time.Millisecond)
-	g := testGatewayWithSettings(t, backend.URL, settings)
-	front := serveTestGateway(t, g, settings)
-
-	conn, err := net.DialTimeout("tcp", strings.TrimPrefix(front, "http://"), 2*time.Second)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer conn.Close()
-	if tcp, ok := conn.(*net.TCPConn); ok {
-		_ = tcp.SetReadBuffer(1024)
-	}
-	if _, err := io.WriteString(conn, "GET /api HTTP/1.1\r\nHost: gateway\r\nConnection: close\r\n\r\n"); err != nil {
-		t.Fatal(err)
-	}
-
-	_ = conn.SetReadDeadline(time.Now().Add(3 * time.Second))
-	raw, err := io.ReadAll(conn)
-	var timeoutErr net.Error
-	if errors.As(err, &timeoutErr) && timeoutErr.Timeout() {
-		t.Fatalf("slow response reader connection remained open: %v", err)
-	}
-	response := string(raw)
-	if strings.Contains(response, "504 Gateway Timeout") {
-		t.Fatalf("committed slow-reader response was rewritten as 504: %q", response[:min(len(response), 512)])
-	}
-	select {
-	case <-backendStopped:
-	case <-time.After(2 * time.Second):
-		t.Fatal("backend did not stop after the slow client connection closed")
 	}
 }

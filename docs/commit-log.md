@@ -5,6 +5,34 @@ repository commit. Add a new dated section before every future commit.
 
 ## 2026-09-16
 
+### Qualify deadlines and extract Protocol Limen HTTP/1 lifecycle
+
+Commit message: `feat(limen): extract HTTP/1 lifecycle and qualify deadlines`
+
+Scope:
+
+- Added `internal/limen` to own the current HTTP/1 listener, server budgets,
+  serving, graceful shutdown, and immediate close lifecycle.
+- Updated `cmd/janus` to construct and run Protocol Limen while keeping Gateway
+  as an `http.Handler`; removed inbound `http.Server` construction from Gateway.
+- Reworked qualification coverage so slow uploads prove server read-deadline
+  termination, slow readers prove server write-deadline termination, and the
+  timeout middleware proves an earlier parent deadline is preserved and cancels.
+- Added bind-failure coverage and moved server-budget assertions to Limen tests.
+- Updated the architecture, delivery plan, runtime design, and README to mark
+  1Q and 2A complete while keeping HTTPS/HTTP/2, runtime generations, reload,
+  and HTTP/3 as future work.
+
+Verification:
+
+- `go test ./...`
+- `go test -count=5 ./internal/limen ./internal/gateway ./internal/middleware`
+- `go vet ./...`
+- `go build -o bin/janus.exe ./cmd/janus`
+- `go run ./cmd/janus -check -config configs/janus.json`
+
+## 2026-09-16
+
 ### Complete Phase 0 contract and Phase 1 qualification
 
 Commit message: `test(phase1): complete phase0 and phase1 qualification`

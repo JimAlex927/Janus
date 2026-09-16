@@ -1,11 +1,15 @@
-# Delivery plan for a middleware-based API gateway
+# Delivery plan for Protocol Limen, runtime reload, and HTTP policies
 
 ## Objective
 
-A small, auditable HTTP API reverse proxy that an individual can maintain. First
-deployment: private HTTP listener behind a TLS load balancer, statically configured
-HTTP/HTTPS backends, bounded-duration API calls. Public clients must not bypass
-the load balancer. Backend apps retain their business authorization responsibility.
+A small, auditable HTTP API reverse proxy that an individual can maintain.
+The current deployment profile is a private HTTP/1.x listener behind a TLS load
+balancer. Protocol Limen now owns that HTTP/1 lifecycle; later deliveries add
+native HTTPS/HTTP/2, a stable runtime dispatcher for file-based routing reload,
+and HTTP/3. Backend apps retain their business authorization responsibility.
+Support remains scoped to bounded-duration HTTP APIs; adding an HTTP version does
+not add streaming RPC or tunnel support. Concrete ownership and update rules are in
+[limen-runtime.md](limen-runtime.md).
 
 Adopt built-in HTTP middleware composed at startup, with named policy definitions
 and ordered route/service references introduced alongside their implementations.
@@ -23,8 +27,9 @@ broader middleware policy types and service attachments remain future work.
 
 As of 2026-09-16, the baseline has host/path routing, round-robin services,
 streaming reverse proxying, HTTPS certificate verification, typed server and
-transport settings, a startup-built middleware chain, and request-context
-cancellation. Shutdown exists, with a fixed 35-second drain budget. Body limits,
+transport settings, a startup-built middleware chain, request-context
+cancellation, and an `internal/limen` HTTP/1 lifecycle. Shutdown exists, with a
+fixed 35-second drain budget. Body limits,
 admission, access observation, admin endpoints, health checks, and reload are
 not implemented.
 
@@ -35,10 +40,11 @@ timeout middleware, while `server.write_timeout` supplies the independent socket
 write deadline. The default write budget is 5 seconds longer than
 `request.maximum_duration`; an omitted write setting derives the same headroom
 from a customized overall budget. Server write deadlines allow the same 5-second
-headroom above the 24-hour overall maximum. Real-socket coverage now proves clean
-504s before commitment, incomplete responses after commitment, slow-upload
-termination, and slow-reader termination. The middleware unit contract also
-proves that an earlier parent deadline is preserved.
+headroom above the 24-hour overall maximum. Real-socket coverage demonstrates
+504s before commitment and incomplete responses after commitment. Slow-upload
+and slow-reader tests exist but do not establish all claimed deadline behavior;
+1Q qualification now separately verifies the server read deadline, server write
+deadline, and preservation of an earlier parent deadline.
 
 Keep only settings with runtime consumers. Previously removed body-limit,
 capacity, SLO, and trusted-proxy fields return only with their implementations.
@@ -61,19 +67,28 @@ not just configuration types. Size effort after each phase's exit review.
 | Phase | Goal | Exit criteria |
 | --- | --- | --- |
 | 0: contract | Adopt the architecture and record deployment assumptions | Ordering, scopes, timeout semantics, unsupported protocols, and state ownership are explicit |
-| 1: middleware foundation | Chain utility, startup assembly, overall-timeout migration | Existing forwarding contract passes; real-socket cancellation and deadline tests pass |
-| 2: usable request policies | Named body-limit policies, request IDs, access observation | Policies compose in order; early rejection, chunked uploads, trailers, and incomplete responses are covered |
+| 1: middleware foundation | Implemented chain, startup assembly and timeout migration | Qualification reopened as 1Q; implementation checkpoint is retained |
+| 1Q: deadline qualification | Correct slow-upload/reader and parent-deadline evidence | Complete: isolated deadlines, cancellation and response outcomes verified |
+| 2A: Protocol Limen | Extract existing HTTP/1 listener and lifecycle | Complete: legacy config/forwarding retained; Limen owns bind, serve and drain |
+| 2B: runtime generations | Stable dispatcher and explicit resource ownership | Old requests complete on old handlers; new requests use new handlers; retirement is race-safe |
+| 2C: HTTPS and HTTP/2 | TLS Limens, protocol configuration, response capability audit | Actual H2 negotiation, sibling-stream isolation, H1 fallback and drain tests pass |
+| 2D: dynamic files and certificates | Serialized validated routing reload; independent certificate rotation | Invalid updates preserve last-good state; keepalive/H2 traffic survives updates; resource use remains bounded |
+| 2E: usable request policies | Named body-limit policies, request IDs, access observation | Policies compose in order; early rejection, upload limits, trailers, and incomplete responses covered on H1/H2 |
 | 3: bounded operation | Global/service admission, admin readiness, configurable drain | Overload rejects promptly; shared service limits hold across routes; shutdown meets its budget |
 | 4: backend and trust policy | Active health checks, trusted forwarding identity, metrics | Backend failure/recovery and spoofing tests pass; telemetry explains each failure |
-| 5: safe reconfiguration | Snapshot reload and deployment lifecycle | Invalid reload preserves traffic; repeated reload/drain cycles do not leak resources or reset active limits |
+| 5: HTTP/3 and deployment lifecycle | QUIC adapter reusing runtime; deployment artifacts | H3 forwarding, reload, cancellation, TLS rotation, UDP failure/fallback and coordinated drain tests pass |
 | 6: production qualification | Linux CI, security review, realistic load/soak tests, canary | All release gates pass for a named build and environment |
 
-The minimum production candidate completes phases 0–6. Phase 2 is a useful
-development milestone, not a production-readiness claim.
+Completed order is 1Q -> 2A. Next delivery order is 2B -> 2C -> 2D -> 2E -> 3 -> 4 -> 5 -> 6.
+Phase 2D delivers the first native H1/H2 plus dynamic-file development milestone.
+Phase 5 adds H3. All production claims still require Phase 6 qualification for
+the enabled protocol set; neither development milestone is production certification.
 
 ## Phase 0 decisions — complete
 
-The initial repository contract is now explicit:
+The initial HTTP/1 baseline contract is recorded below. The expanded target
+uses the Limen and reload contracts in [limen-runtime.md](limen-runtime.md);
+native TLS/H2/H3 remain planned, not current capabilities.
 
 | Area | Decision |
 | --- | --- |
@@ -118,28 +133,87 @@ universal values for them.
    5s to preserve the default headroom. The overall budget starts at handler
    entry; header reading has its own earlier deadline. It cancels outbound work
    but does not forcibly stop arbitrary application code.
-5. Test using a real Janus listener: backend header stall, stalled response body,
-   client cancellation, slow upload, slow response-reader, and the
-   pre/post-commitment deadline behavior are covered. The timeout unit test
-   covers preservation of a shorter parent deadline. Do not buffer whole
-   responses for timeout.
+5. Real-listener tests cover backend header stall, stalled response body,
+   client cancellation, pre/post-commitment deadline behavior, server-side slow
+   upload termination, and server-side slow-reader termination. Timeout itself
+   does not buffer responses.
 
-Phase 1 is complete for the middleware foundation and the first route-policy
-checkpoint. It introduces the named route policy `buffer` to prove route
+Phase 1 implementation is present; its qualification is reopened as 1Q after
+reviewing the existing test assertions. It introduces the named route policy `buffer` to prove route
 handler assembly. It is optional and bounded by `max_response_body_bytes`;
 routes without it retain streaming behavior. HTTP server settings and backend
 transport settings remain infrastructure configuration. Broader policy types,
 service attachments, and the complete response-capability contract remain in
 Phase 2.
 
-## Phase 2 tasks
+## Phase 1Q: repair qualification evidence — complete
+
+The qualification tests now deliberately isolate each deadline. The slow-reader
+test does not read the response and observes the handler's socket write timeout;
+the slow-upload test reads an incomplete body and observes the server read
+timeout; the middleware test confirms an earlier parent deadline is preserved
+and still cancels the request. HTTP does not transmit a Go deadline timestamp to
+a remote backend, so parent-deadline evidence is cancellation-based.
+
+## Phase 2A: Protocol Limen extraction — complete
+
+`internal/limen` now owns the current HTTP/1 listener and `net/http` server
+lifecycle. `cmd/janus` constructs it, binds through `Limen.Listen`, serves
+through `Limen.Serve`, and drains through `Limen.Shutdown`. `gateway.Gateway`
+remains an `http.Handler` and no longer constructs or owns the inbound server.
+The legacy JSON configuration, route middleware assembly, forwarding behavior,
+and fixed 35-second process drain budget are unchanged. Native TLS/HTTP/2,
+runtime generations, and reload remain in later phases; no placeholder protocol
+adapters were added.
+
+## Phase 2B: stable runtime and generations
+
+Introduce `internal/runtime` as the stable HTTP dispatcher. Put the fixed global
+chain outside the replaceable gateway handler graph. Inject one process-owned
+transport into builders; retire only generation-owned resources. Serialize
+publication and request acquisition so a retired generation cannot be freed
+between selection and reference acquisition. Test in-memory replacement,
+rollback, panic-path release, and concurrent retirement before watching files.
+Bound retired generations and pending builds; blocked handlers must not cause
+unlimited accumulation. Run race tests in a supported environment.
+
+## Phase 2C: HTTPS and HTTP/2
+
+Introduce the versioned startup/routing split described in
+[limen-runtime.md](limen-runtime.md), initially loaded only at startup. Add named
+Limen bindings, certificate/key files and explicit H1/H2 protocol selection.
+Serve TLS through Go `net/http`; retain plaintext H1 as an alternative listener.
+Unencrypted H2 is technically possible but deferred. Verify both inbound and
+outbound negotiated versions independently, concurrent streams on one connection,
+cancellation isolation, read/write budgets and graceful drain. Audit streaming
+and buffer writer semantics including trailers, 1xx and controller operations;
+do not blindly unwrap a buffer and bypass its flush policy. Reuse the same
+router and middleware implementations, subject to those protocol tests.
+
+## Phase 2D: file reload and certificate rotation
+
+Read bounded, strict routing documents, build a full candidate, then publish
+through Phase 2B. Add a portable polling trigger with hash-based deduplication
+and serialized/coalesced reloads. Atomic file replacement is the supported write
+workflow. Invalid, missing or unreadable input retains the previous generation.
+Expose generation and failure information in logs initially. Reload routing
+without restarting sockets, closing connections, or issuing GOAWAY.
+
+Rotate a validated certificate/key pair independently: new TLS handshakes use
+the new identity while established connections remain intact. Listener addresses,
+protocol sets, global limits, TLS policy and outbound transport settings require
+restart. Test invalid cert pairs, partial file updates, same-connection requests
+across generations, overlapping reloads and reload/shutdown races. Preserve
+legacy single-file startup-only mode with an explicit migration example.
+
+## Phase 2E: request policies (original Phase 2 scope)
 
 1. Add request ID and a single access observer in the fixed global chain. Generate
    IDs by default; define validation and trust before accepting client-supplied
    IDs. Record route/service IDs, final status, duration, consumed request bytes,
    written response bytes, and error class, including early 404/413/501/502/504.
    Keep authorization, cookies, bodies, and raw queries out of logs.
-2. Preserve response capabilities through observation: `Unwrap`, flushing,
+2. Extend the Phase 2C response capability tests through observation: `Unwrap`, flushing,
    trailers, informational responses, implicit 200, and copy/error accounting.
    Test `ResponseController`; do not advertise unsupported optional interfaces.
 3. Extend typed named middleware definitions and ordered route/service references.
@@ -167,7 +241,7 @@ Phase 2.
 3. Add a separate loopback/private admin listener with `/livez` and `/readyz`.
    Readiness means startup completed and requests are accepted under the global
    policy; one unhealthy service does not make the whole gateway unready.
-4. Add configurable drain timeout and an optional bounded load-balancer removal
+4. Extend Limen's configurable drain with an optional bounded load-balancer removal
    delay. Mark unready first, stop admitting new work, allow accepted work to
    finish within budget, then force-close remaining connections. Align the grace
    budget with header, request, and response-write budgets and the orchestrator.
@@ -182,20 +256,25 @@ Phase 2.
    emit canonical headers. Test untrusted spoofing, malformed chains, and HTTPS
    redirects. Keep the existing immediate-peer-only behavior until implemented.
 3. Add `/metrics` to the admin listener: requests, errors, duration, in-flight,
-   rejections, backend health, and drain duration. Add reload metrics in Phase 5.
+   rejections, backend health, drain duration, and the Phase 2D reload outcomes.
    Labels use bounded route/service/error identifiers; never raw paths, hosts,
    user IDs, or request IDs. Reuse the access observation outcome model.
 
-## Phase 5 tasks
+## Phase 5: HTTP/3 and deployment lifecycle
 
-1. Bound config document size and reject duplicate JSON keys as well as unknown
-   fields. Build all route/service policy references before publication.
-2. Introduce immutable snapshots with rollback and explicit resource cleanup.
-   Reload routes, service targets, and named policies. Keep listener, global
-   settings, and the initial shared transport policy restart-only.
-3. Keep global admission process-owned. Preserve active service permit accounting
-   across snapshot generations; lowering a cap rejects new work until usage falls.
-   A reload must not create fresh capacity while older requests remain active.
+The former Phase 5 reload work moves to 2B/2D. Admission added in Phase 3 must
+retain active service permit accounting across generations, including service
+remove/re-add; lowering a cap cannot create fresh capacity. Health workers added
+in Phase 4 also need retirement/reload tests when introduced.
+
+1. Pin a compatible supported Go/quic-go version and add an HTTP/3 adapter inside
+   Limen. Use its `http.Handler` integration with the existing dispatcher.
+   Inbound H3 may proxy to H1/H2; outbound H3 remains deferred.
+2. Coordinate TCP HTTPS and UDP/QUIC sockets, TLS identity, Alt-Svc advertisement
+   and fallback. Failed startup cleans up all bound sockets. Leave 0-RTT off.
+3. Test H3 stream isolation, limits, buffer/stream response semantics, reload on
+   existing connections, certificate rotation and coordinated bounded shutdown.
+   Verify real UDP behavior on Linux and the supported development platform.
 4. Ship a minimal deployment artifact, verified CA roots, non-root execution,
    resource budgets, rollout/rollback instructions, and effective-config inspection
    that excludes secrets. Add per-service transport/TLS policy only when required.
@@ -209,9 +288,10 @@ Perform representative load, a 24-hour soak, and a canary with rollback criteria
 
 ## Suggested implementation commits
 
-Start with Phase 1: (1) chain contract and ordering tests; (2) timeout extraction;
-(3) coherent write/context budgets, documentation, and real-socket tests.
-Then implement the Phase 2 observer and named body-limit policy in separate changes.
+Start with 1Q qualification fixes, then separate commits for Limen extraction,
+runtime generation ownership, HTTPS/H2, file reload, and TLS pair rotation.
+Follow with the observer/body-limit work in 2E and the existing operation phases.
+HTTP/3 lands as its own adapter and integration-test changes in Phase 5.
 Each implementation commit updates [commit-log.md](commit-log.md) with actual
 changes and verification. Do not describe planned capabilities as shipped.
 
@@ -266,7 +346,8 @@ selection plus admission first. Authentication needs its own identity/trust and
 failure contract, and retry needs bounded replay and idempotency rules.
 
 Plugin marketplace, scripting, dashboard, Kubernetes/Docker discovery, distributed
-configuration store, caching, WAF rules, transformation language, ACME, HTTP/3,
-arbitrary TCP/UDP proxying, and a general policy engine. Each expands the security
+configuration store, caching, WAF rules, transformation language, ACME, outbound
+HTTP/3, unencrypted HTTP/2, SSE/WebSocket/gRPC, arbitrary TCP/UDP proxying,
+and a general policy engine. Each expands the security
 and operational contract substantially. Add one only after defining its owner,
 tests and failure behavior.

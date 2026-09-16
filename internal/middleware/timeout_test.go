@@ -26,6 +26,7 @@ func TestTimeoutPreservesEarlierParentDeadline(t *testing.T) {
 	parent, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
 	defer cancel()
 	seen := make(chan time.Time, 1)
+	cancelled := make(chan struct{}, 1)
 	h := Timeout(time.Second)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		deadline, ok := r.Context().Deadline()
 		if !ok {
@@ -33,6 +34,8 @@ func TestTimeoutPreservesEarlierParentDeadline(t *testing.T) {
 			return
 		}
 		seen <- deadline
+		<-r.Context().Done()
+		cancelled <- struct{}{}
 	}))
 	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", "/", nil).WithContext(parent))
 	select {
@@ -42,5 +45,10 @@ func TestTimeoutPreservesEarlierParentDeadline(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("handler did not run")
+	}
+	select {
+	case <-cancelled:
+	case <-time.After(time.Second):
+		t.Fatal("earlier parent deadline did not cancel the request")
 	}
 }

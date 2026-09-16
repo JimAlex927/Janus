@@ -86,30 +86,3 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (g *Gateway) Close() { g.transport.CloseIdleConnections() }
-
-// NewServer is a bounded-duration API profile, not an SSE/WebSocket profile.
-// The optional argument keeps callers using the starter defaults source-compatible.
-func NewServer(address string, handler http.Handler, values ...config.Settings) *http.Server {
-	settings := config.DefaultSettings()
-	if len(values) > 0 {
-		settings = values[0]
-	}
-	settings = settings.WithDefaults()
-	return &http.Server{
-		Addr: address, Handler: handler,
-		//客户端最多可以花多久把 HTTP Request Header 发完整。
-		ReadHeaderTimeout: settings.Server.ReadHeaderTimeout.Duration(),
-		//ReadTimeout 是读取整个 request，包括 body 的最大持续时间。 Go 的实现是在开始读取这个 request 时算。不是开始读取header的时候算。
-		ReadTimeout: settings.Request.ReadTimeout.Duration(),
-		// WriteTimeout 是 response 写操作的底层 socket deadline；它通常在
-		// request header 读取完成后开始计时，也会覆盖 Handler 的处理时间。
-		// 它独立于 overall context deadline，配置校验要求它更长，以便超时后
-		// 仍有余量写入 504；它不会强制停止任意业务代码。
-		WriteTimeout: settings.Server.WriteTimeout.Duration(),
-		//HTTP keep-alive 状态下，Server 最多等下一个 request 多久。用于http的 keep-alive的情况。
-		//现代http请求一般默认都是keep-alive 这样请求可以复用旧的connection
-		IdleTimeout: settings.Server.IdleTimeout.Duration(),
-		//Server 允许客户端 HTTP Request Header 有多大
-		MaxHeaderBytes: int(settings.Server.MaxHeaderBytes),
-	}
-}
