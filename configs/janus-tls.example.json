@@ -3,7 +3,7 @@
   "limens": {
     "public": {
       "address": "0.0.0.0:8443",
-      "protocols": ["http1", "http2"],
+      "protocols": ["http1", "http2", "http3"],
       "tls": {
         "cert_file": "certs/janus.crt",
         "key_file": "certs/janus.key",

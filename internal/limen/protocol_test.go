@@ -7,10 +7,14 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptrace"
+	"strings"
 	"testing"
 	"time"
 
 	"janus/internal/config"
+
+	"github.com/quic-go/quic-go"
+	"github.com/quic-go/quic-go/http3"
 )
 
 func startTestLimen(t *testing.T, binding config.LimenConfig, handler http.Handler) (*Limen, net.Listener) {
@@ -32,6 +36,85 @@ func startTestLimen(t *testing.T, binding config.LimenConfig, handler http.Handl
 		}
 	})
 	return l, listener
+}
+
+func TestLimenServesHTTP3AndAdvertisesUDPPort(t *testing.T) {
+	certFile, keyFile, roots := writeTestCertificate(t)
+	l, err := NewBinding("public", config.LimenConfig{
+		Address:   "127.0.0.1:0",
+		Protocols: []string{config.ProtocolHTTP1, config.ProtocolHTTP3},
+		TLS:       &config.TLSSettings{CertFile: certFile, KeyFile: keyFile},
+	}, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, r.Proto)
+	}), config.DefaultSettings())
+	if err != nil {
+		t.Fatal(err)
+	}
+	tcpListener, err := l.Listen()
+	if err != nil {
+		t.Fatal(err)
+	}
+	udpListener, err := l.ListenPacket()
+	if err != nil {
+		_ = tcpListener.Close()
+		t.Fatal(err)
+	}
+	serveDone := make(chan error, 1)
+	go func() { serveDone <- l.Serve(tcpListener) }()
+	t.Cleanup(func() {
+		_ = l.Close()
+		if err := <-serveDone; err != nil && !errors.Is(err, http.ErrServerClosed) {
+			t.Errorf("limen stopped: %v", err)
+		}
+	})
+
+	transport := &http3.Transport{
+		TLSClientConfig: &tls.Config{RootCAs: roots, ServerName: "localhost"},
+		QUICConfig:      &quic.Config{Allow0RTT: false},
+	}
+	defer transport.Close()
+	response, err := (&http.Client{Transport: transport}).Get("https://" + udpListener.LocalAddr().String() + "/h3")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := io.ReadAll(response.Body)
+	response.Body.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.ProtoMajor != 3 || string(body) != "HTTP/3.0" {
+		t.Fatalf("HTTP/3 response = proto %s body %q", response.Proto, body)
+	}
+
+	h1Transport := &http.Transport{TLSClientConfig: &tls.Config{RootCAs: roots}, Protocols: new(http.Protocols)}
+	h1Transport.Protocols.SetHTTP1(true)
+	defer h1Transport.CloseIdleConnections()
+	h1Response, err := (&http.Client{Transport: h1Transport}).Get("https://" + tcpListener.Addr().String() + "/h1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := h1Response.Header.Get("Alt-Svc"); !strings.Contains(got, "h3=\":") {
+		h1Response.Body.Close()
+		t.Fatalf("Alt-Svc = %q, want HTTP/3 advertisement", got)
+	}
+	_, _ = io.Copy(io.Discard, h1Response.Body)
+	h1Response.Body.Close()
+}
+
+func TestLimenRejectsHTTP3WithoutTLSOrTCPFallback(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		binding config.LimenConfig
+	}{
+		{name: "without tls", binding: config.LimenConfig{Address: "127.0.0.1:8443", Protocols: []string{config.ProtocolHTTP1, config.ProtocolHTTP3}}},
+		{name: "without tcp fallback", binding: config.LimenConfig{Address: "127.0.0.1:8443", Protocols: []string{config.ProtocolHTTP3}, TLS: &config.TLSSettings{CertFile: "missing", KeyFile: "missing"}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := NewBinding("public", tc.binding, http.NotFoundHandler(), config.DefaultSettings()); err == nil {
+				t.Fatal("expected HTTP/3 binding validation error")
+			}
+		})
+	}
 }
 
 func TestLimenNegotiatesHTTP2AndHTTP1Fallback(t *testing.T) {

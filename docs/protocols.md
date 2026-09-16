@@ -127,18 +127,21 @@ storms and synchronized probes can amplify a backend outage.
 ## HTTPS and protocol expansion
 
 The legacy listener receives HTTP/1.x on a private interface. Versioned startup
-configuration can also create a native TLS Limen with HTTP/1.1 and HTTP/2
-selected through ALPN. A load balancer can still terminate public TLS and forward
-HTTP/1.1 to Janus. Outbound TLS must verify certificates and hostnames; never ship
-`InsecureSkipVerify` to make a deployment work. Plan CA rotation and mTLS
-separately if required.
+configuration can also create a native TLS Limen with HTTP/1.1, HTTP/2 selected
+through ALPN, and an opt-in HTTP/3 UDP listener. H3 requires TLS and a TCP
+HTTP/1 or HTTP/2 fallback; it advertises the bound UDP port with `Alt-Svc`,
+shares the rotated certificate callback, and leaves 0-RTT disabled. A load
+balancer can still terminate public TLS and forward HTTP/1.1 to Janus. Outbound
+TLS must verify certificates and hostnames; never ship `InsecureSkipVerify` to
+make a deployment work. Plan CA rotation and mTLS separately if required.
 
 gRPC requires a deliberate HTTP/2 path, trailer preservation, deadline and
 cancellation semantics, gRPC status visibility and streaming tests. HTTPS
 upstream HTTP/2 capability alone is not a gRPC support claim. Janus supports SSE
 through the normal HTTP response path and proxies classic HTTP/1 WebSocket
-upgrades through `ReverseProxy`. WebSocket extended CONNECT over HTTP/2 is not
-enabled. WebSocket routes must be explicitly declared with
+upgrades through `ReverseProxy`; HTTP/3 uses the same `http.Handler` contract
+for ordinary requests and SSE. WebSocket extended CONNECT over HTTP/2 or H3 is
+not enabled. WebSocket routes must be explicitly declared with
 `"protocols": ["websocket"]`; SSE routes use `"protocols": ["sse"]`. The
 route-level buffer policy bypasses both streaming modes so it cannot delay
 events or break the upgrade handshake.

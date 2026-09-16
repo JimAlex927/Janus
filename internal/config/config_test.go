@@ -210,7 +210,9 @@ func TestVersionedLimenConfigRejectsInvalidBindings(t *testing.T) {
 		body string
 	}{
 		{"http2 without tls", strings.Replace(base, `["http1"]`, `["http2"]`, 1)},
-		{"unknown protocol", strings.Replace(base, `["http1"]`, `["http3"]`, 1)},
+		{"unknown protocol", strings.Replace(base, `["http1"]`, `["tcp"]`, 1)},
+		{"http3 without TLS", strings.Replace(base, `["http1"]`, `["http1","http3"]`, 1)},
+		{"http3 without TCP fallback", strings.Replace(base, `["http1"]`, `["http3"]`, 1)},
 		{"mixed legacy syntax", strings.Replace(base, `{"version":1`, `{"version":1,"listen":"127.0.0.1:8080"`, 1)},
 		{"missing route limen with multiple bindings", strings.Replace(base, `"limen":"public"`, `"limen":"missing"`, 1)},
 	} {
@@ -219,6 +221,13 @@ func TestVersionedLimenConfigRejectsInvalidBindings(t *testing.T) {
 				t.Fatal("expected configuration validation error")
 			}
 		})
+	}
+}
+
+func TestVersionedLimenConfigAcceptsHTTP3WithTLSAndTCPFallback(t *testing.T) {
+	body := `{"version":1,"limens":{"public":{"address":"127.0.0.1:8443","protocols":["http1","http3"],"tls":{"cert_file":"server.crt","key_file":"server.key"}}},"services":{"s":{"upstreams":["http://localhost:9000"]}},"routes":[{"name":"r","limen":"public","path_prefix":"/api","service":"s"}]}`
+	if _, err := Load(strings.NewReader(body)); err != nil {
+		t.Fatal(err)
 	}
 }
 

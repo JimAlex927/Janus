@@ -14,6 +14,9 @@ import (
 
 	"janus/internal/config"
 	"janus/internal/protocol"
+
+	"github.com/quic-go/quic-go"
+	"github.com/quic-go/quic-go/http3"
 )
 
 // Limen is the inbound protocol boundary for one listener. It deliberately
@@ -24,6 +27,8 @@ type Limen struct {
 	server  *http.Server
 	tls     *tls.Config
 	cert    *atomic.Pointer[tls.Certificate]
+	http3   *http3.Server
+	packet  net.PacketConn
 
 	hijackedMu    sync.Mutex
 	hijacked      map[net.Conn]struct{}
@@ -63,12 +68,34 @@ func NewBinding(name string, binding config.LimenConfig, handler http.Handler, s
 			next.ServeHTTP(w, protocol.WithLimenID(r, name))
 		})
 	}
+	var h3Server *http3.Server
+	if hasProtocol(binding.Protocols, config.ProtocolHTTP3) {
+		h3TLS := tlsConfig.Clone()
+		h3TLS.MinVersion = tls.VersionTLS13
+		h3Server = &http3.Server{
+			TLSConfig:      http3.ConfigureTLSConfig(h3TLS),
+			Handler:        handler,
+			MaxHeaderBytes: int(settings.Server.MaxHeaderBytes),
+			IdleTimeout:    settings.Server.IdleTimeout.Duration(),
+			// 0-RTT is intentionally disabled: Janus does not have a replay-safe
+			// request policy for arbitrary backend operations.
+			QUICConfig: &quic.Config{Allow0RTT: false},
+		}
+		// Advertise H3 only from the TCP response path after the UDP listener
+		// has been bound and the QUIC server has started.
+		next := handler
+		handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_ = h3Server.SetQUICHeaders(w.Header())
+			next.ServeHTTP(w, r)
+		})
+	}
 	hijackedEmpty := make(chan struct{})
 	close(hijackedEmpty)
 	l := &Limen{
 		address:  binding.Address,
 		tls:      tlsConfig,
 		cert:     certificates,
+		http3:    h3Server,
 		hijacked: make(map[net.Conn]struct{}), hijackedEmpty: hijackedEmpty,
 		server: &http.Server{
 			Addr: binding.Address, Handler: handler,
@@ -90,6 +117,15 @@ func NewBinding(name string, binding config.LimenConfig, handler http.Handler, s
 	return l, nil
 }
 
+func hasProtocol(protocols []string, wanted string) bool {
+	for _, value := range protocols {
+		if value == wanted {
+			return true
+		}
+	}
+	return false
+}
+
 func serverProtocols(binding config.LimenConfig) (*http.Protocols, error) {
 	if len(binding.Protocols) == 0 {
 		return nil, fmt.Errorf("limen must enable at least one protocol")
@@ -109,8 +145,18 @@ func serverProtocols(binding config.LimenConfig) (*http.Protocols, error) {
 				return nil, fmt.Errorf("HTTP/2 requires TLS")
 			}
 			protocols.SetHTTP2(true)
+		case config.ProtocolHTTP3:
+			// HTTP/3 is served by the QUIC adapter below, not net/http.Server.
 		default:
 			return nil, fmt.Errorf("unsupported protocol %q", name)
+		}
+	}
+	if hasProtocol(binding.Protocols, config.ProtocolHTTP3) {
+		if binding.TLS == nil {
+			return nil, fmt.Errorf("HTTP/3 requires TLS")
+		}
+		if !protocols.HTTP1() && !protocols.HTTP2() {
+			return nil, fmt.Errorf("HTTP/3 requires an HTTP/1 or HTTP/2 TCP fallback")
 		}
 	}
 	return protocols, nil
@@ -172,6 +218,33 @@ func (l *Limen) Listen() (net.Listener, error) {
 	return net.Listen("tcp", l.address)
 }
 
+// HTTP3Enabled reports whether this binding owns a UDP/QUIC listener in
+// addition to its TCP listener.
+func (l *Limen) HTTP3Enabled() bool { return l != nil && l.http3 != nil }
+
+// ListenPacket binds the UDP address for HTTP/3. The returned packet
+// connection is owned by the Limen after a successful call.
+func (l *Limen) ListenPacket() (net.PacketConn, error) {
+	if !l.HTTP3Enabled() {
+		return nil, fmt.Errorf("limen does not enable HTTP/3")
+	}
+	if l.packet != nil {
+		return nil, fmt.Errorf("limen HTTP/3 packet listener already bound")
+	}
+	packet, err := net.ListenPacket("udp", l.address)
+	if err != nil {
+		return nil, err
+	}
+	l.packet = packet
+	// SetQUICHeaders uses Server.Port when a listener was bound to :0. The
+	// advertised port must be the actual UDP port, not the independent TCP
+	// ephemeral port.
+	if addr, ok := packet.LocalAddr().(*net.UDPAddr); ok {
+		l.http3.Port = addr.Port
+	}
+	return packet, nil
+}
+
 // Serve runs the HTTP server on a listener. The listener is owned by the
 // server after this call and is closed by Shutdown or Close.
 func (l *Limen) Serve(listener net.Listener) error {
@@ -179,7 +252,24 @@ func (l *Limen) Serve(listener net.Listener) error {
 	if l.tls != nil {
 		listener = tls.NewListener(listener, l.tls)
 	}
-	return l.server.Serve(listener)
+	if l.http3 == nil {
+		return l.server.Serve(listener)
+	}
+	if l.packet == nil {
+		return fmt.Errorf("limen HTTP/3 packet listener is not bound")
+	}
+	tcpDone := make(chan error, 1)
+	h3Done := make(chan error, 1)
+	go func() { tcpDone <- l.server.Serve(listener) }()
+	go func() { h3Done <- l.http3.Serve(l.packet) }()
+	select {
+	case err := <-tcpDone:
+		_ = l.http3.Close()
+		return err
+	case err := <-h3Done:
+		_ = l.server.Close()
+		return err
+	}
 }
 
 // Shutdown stops accepting new connections and waits for active requests until
@@ -188,8 +278,30 @@ func (l *Limen) Shutdown(ctx context.Context) error {
 	l.hijackedMu.Lock()
 	l.shuttingDown = true
 	l.hijackedMu.Unlock()
-	if err := l.server.Shutdown(ctx); err != nil {
+	serverDone := make(chan error, 1)
+	go func() { serverDone <- l.server.Shutdown(ctx) }()
+	h3Done := make(chan error, 1)
+	if l.http3 != nil {
+		go func() {
+			// HTTP/3 Shutdown closes its QUIC listener and sends GOAWAY to
+			// active connections before the raw packet socket is released.
+			err := l.http3.Shutdown(ctx)
+			if l.packet != nil {
+				_ = l.packet.Close()
+			}
+			h3Done <- err
+		}()
+	} else {
+		h3Done <- nil
+	}
+	if err := <-serverDone; err != nil {
 		l.closeHijacked()
+		_ = l.http3Close()
+		return err
+	}
+	if err := <-h3Done; err != nil {
+		l.closeHijacked()
+		_ = l.http3Close()
 		return err
 	}
 	l.hijackedMu.Lock()
@@ -200,6 +312,7 @@ func (l *Limen) Shutdown(ctx context.Context) error {
 		return nil
 	case <-ctx.Done():
 		l.closeHijacked()
+		_ = l.http3Close()
 		return ctx.Err()
 	}
 }
@@ -210,8 +323,21 @@ func (l *Limen) Close() error {
 	l.shuttingDown = true
 	l.hijackedMu.Unlock()
 	err := l.server.Close()
+	if l.packet != nil {
+		_ = l.packet.Close()
+	}
+	if h3Err := l.http3Close(); err == nil {
+		err = h3Err
+	}
 	l.closeHijacked()
 	return err
+}
+
+func (l *Limen) http3Close() error {
+	if l.http3 == nil {
+		return nil
+	}
+	return l.http3.Close()
 }
 
 func (l *Limen) trackHijacked(conn net.Conn, state http.ConnState) {

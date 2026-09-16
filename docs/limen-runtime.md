@@ -1,13 +1,14 @@
 # Protocol Limen and dynamic configuration
 
-Status: implementation plan reviewed against the repository on 2026-09-16.
+Status: implementation plan reviewed against the repository on 2026-09-17.
 Phase 1Q qualification, the Phase 2A HTTP/1 Limen extraction, the Phase 2B
 stable runtime/generation core, and the Phase 2C TLS/HTTP/2 startup path are
 shipped; the Phase 2D routing file reload and certificate rotation path is also
-shipped. Explicit SSE and classic HTTP/1 WebSocket routes are supported, and the
-typed `body_limit` middleware is available at route/service scope, and fixed
-global/service admission is available. HTTP/3 and the remaining long-lived
-protocol contracts remain future work. The fixed global request observer and
+shipped. The first Phase 5 native HTTP/3 adapter is now shipped. Explicit SSE
+and classic HTTP/1 WebSocket routes are supported, and the typed `body_limit`
+middleware is available at route/service scope, and fixed global/service
+admission is available. H3 interop/deployment qualification and the remaining
+long-lived protocol contracts remain future work. The fixed global request observer and
 admission are outside replaceable generations, so reloads do not change request
 ID generation or global permit ownership. Shutdown clears readiness and stops
 business admission before the optional load-balancer removal delay. That delay
@@ -18,7 +19,7 @@ The delivery sequence and exit gates are in [plan.md](plan.md).
 ## Scope
 
 Support ordinary bounded HTTP API requests over HTTP/1.1, HTTPS/HTTP/2, and
-later HTTP/3. Reuse the existing router, middleware chain, and reverse proxy.
+HTTPS/HTTP/3. Reuse the existing router, middleware chain, and reverse proxy.
 Support file-based routing updates without restarting listeners or canceling
 requests already executing. Protocol enablement and reload are separate changes.
 
@@ -50,7 +51,7 @@ when their implementation phase lands:
 ```text
 HTTP/1.1 or HTTPS/HTTP/2 (net/http) --+
                                     +--> stable Handler
-HTTP/3 (quic-go/http3, later) -------+      -> fixed global chain
+HTTP/3 (quic-go/http3) --------------+      -> fixed global chain
                                            -> acquire active generation
                                            -> router for this Limen
                                            -> route middleware
@@ -81,9 +82,11 @@ HTTP request remain within the observed HTTP chain.
    it owns. The runtime now keeps the process-owned transport alive across
    replacements; standalone `gateway.New` retains an owned transport for direct
    use and tests.
-4. Add TLS and HTTP/2 to Limen. The native startup path is now complete; wire
-   routing-file changes and certificate rotation to the runtime transactions
-   in Phase 2D. Add HTTP/3 only after these contracts pass their tests.
+4. Add TLS and HTTP/2 to Limen. The native startup path is complete; routing
+   file changes and certificate rotation are wired through the runtime
+   transactions in Phase 2D.
+5. Add HTTP/3 to Limen only as an opt-in TLS binding with a TCP fallback. The
+   first adapter now exists; interop, fault and deployment qualification remain.
 
 Limen depends on `http.Handler`, not the gateway builder. Runtime may call the
 gateway builder; gateway must not import runtime. Add files/packages only as
@@ -208,16 +211,18 @@ Do not promise every optional ResponseWriter interface on every protocol.
 ## HTTP/3 delivery
 
 Pin a compatible supported Go/quic-go combination at implementation time.
-`quic-go/http3.Server` accepts the same HTTP handler, so add a UDP/QUIC adapter
-inside Limen while keeping the dispatcher and gateway graph. QUIC integrates
-TLS 1.3. Library docs show handler reuse, Alt-Svc, and graceful shutdown:
+Janus currently pins quic-go v0.61.0 for Go 1.25. `quic-go/http3.Server` accepts
+the same HTTP handler, so the UDP/QUIC adapter stays inside Limen while keeping
+the dispatcher and gateway graph. QUIC integrates TLS 1.3. Library docs show
+handler reuse, Alt-Svc, and graceful shutdown:
 [quic-go HTTP/3 server](https://quic-go.net/docs/http3/server/).
 
 Enable TCP HTTPS and UDP HTTP/3 together on a named TLS Limen, normally the same
-numeric port. Bind both before readiness; if UDP bind fails, clean up the TCP
-listener too. Advertise Alt-Svc only for an available, correctly addressed H3
-endpoint, accounting for public port mapping. Keep HTTP/1.1 and HTTP/2 available
-for clients/networks that cannot use UDP. Leave 0-RTT disabled initially.
+numeric port. The current adapter binds both before readiness, advertises the
+actual UDP port (including `:0`), shares the certificate rotation callback,
+keeps HTTP/1.1 and HTTP/2 available for fallback, and leaves 0-RTT disabled.
+Startup cleanup and coordinated drain are implemented; fault-injection and
+public-port deployment tests remain.
 
 Test negotiated H3, stream cancellation isolation, stream/connection flow-control
 limits, handshake/idle/drain budgets, TLS pair rotation, reload on existing QUIC

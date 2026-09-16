@@ -3,9 +3,10 @@
 ## Objective
 
 A small, auditable HTTP gateway that an individual can maintain.
-The current deployment profile supports private HTTP/1.x or native HTTPS/HTTP/2
-listeners through Protocol Limen. The stable runtime dispatcher and versioned
-file-based routing reload are implemented; HTTP/3 is later. Backend apps retain
+The current deployment profile supports private HTTP/1.x, native HTTPS/HTTP/2,
+and opt-in native HTTPS/HTTP/3 listeners through Protocol Limen. The stable
+runtime dispatcher and versioned file-based routing reload are implemented;
+HTTP/3 adapter work is in progress. Backend apps retain
 their business authorization responsibility.
 Support remains scoped to ordinary bounded APIs plus explicit SSE and classic
 HTTP/1 WebSocket routes; adding an HTTP version does not add streaming RPC or
@@ -26,10 +27,10 @@ qualification rather than speculative unused settings.
 
 ## Current baseline and the original item1
 
-As of 2026-09-16, the baseline has host/path routing, round-robin services,
+As of 2026-09-17, the baseline has host/path routing, round-robin services,
 streaming reverse proxying, HTTPS certificate verification, typed server and
 transport settings, a startup-built middleware chain, request-context
-cancellation, the `internal/limen` HTTP/1 lifecycle, and native TLS/HTTP/2
+cancellation, the `internal/limen` HTTP/1 lifecycle, and native TLS/HTTP/2/HTTP/3
 bindings. Shutdown uses a validated configurable drain budget. Body limits,
 admission, access observation, optional admin endpoints and service-owned active
 health checks, trusted forwarding and metrics are implemented. Versioned
@@ -83,10 +84,11 @@ not just configuration types. Size effort after each phase's exit review.
 | 5: HTTP/3 and deployment lifecycle | QUIC adapter reusing runtime; deployment artifacts | H3 forwarding, reload, cancellation, TLS rotation, UDP failure/fallback and coordinated drain tests pass |
 | 6: production qualification | Linux CI, security review, realistic load/soak tests, canary | All release gates pass for a named build and environment |
 
-Completed order is 1Q -> 2A -> 2B -> 2C -> 2D -> 2E -> 2F -> 3. Phase 4 bounded health/trust/metrics is complete; next delivery is Phase 5 -> 6.
+Completed order is 1Q -> 2A -> 2B -> 2C -> 2D -> 2E -> 2F -> 3 -> 4 bounded scope.
 Phase 2C delivers the first native H1/H2 milestone; Phase 2D adds dynamic-file
-updates and certificate rotation.
-Phase 5 adds H3. All production claims still require Phase 6 qualification for
+updates and certificate rotation. Phase 5.1 now adds the native H3 adapter;
+remaining Phase 5 work is socket-failure, interop, deployment and qualification
+coverage. All production claims still require Phase 6 qualification for
 the enabled protocol set; neither development milestone is production certification.
 
 ## Phase 0 decisions — complete
@@ -327,11 +329,14 @@ retain active service permit accounting across generations, including service
 remove/re-add; lowering a cap cannot create fresh capacity. Health workers added
 in Phase 4 also need retirement/reload tests when introduced.
 
-1. Pin a compatible supported Go/quic-go version and add an HTTP/3 adapter inside
-   Limen. Use its `http.Handler` integration with the existing dispatcher.
-   Inbound H3 may proxy to H1/H2; outbound H3 remains deferred.
-2. Coordinate TCP HTTPS and UDP/QUIC sockets, TLS identity, Alt-Svc advertisement
-   and fallback. Failed startup cleans up all bound sockets. Leave 0-RTT off.
+1. Complete for the first adapter milestone: pin quic-go v0.61.0 for Go 1.25,
+   add the HTTP/3 adapter inside Limen, and reuse its `http.Handler` integration
+   with the existing dispatcher. Inbound H3 may proxy to H1/H2; outbound H3
+   remains deferred.
+2. Partially complete: coordinate TCP HTTPS and UDP/QUIC sockets, TLS identity,
+   `Alt-Svc` advertisement and TCP fallback. The current adapter binds both
+   sockets, disables 0-RTT, handles `:0` UDP advertisement, and cleans up
+   startup failures; coordinated fault and deployment tests remain.
 3. Test H3 stream isolation, limits, buffer/stream response semantics, reload on
    existing connections, certificate rotation and coordinated bounded shutdown.
    Verify real UDP behavior on Linux and the supported development platform.

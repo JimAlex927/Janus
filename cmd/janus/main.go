@@ -78,6 +78,7 @@ func run(ctx context.Context, path string, check bool, reloadInterval time.Durat
 	servers := make([]*limen.Limen, 0, len(names))
 	serversByName := make(map[string]*limen.Limen, len(names))
 	listeners := make([]net.Listener, 0, len(names))
+	packetListeners := make([]net.PacketConn, 0, len(names))
 	var adminState *admin.State
 	var adminServer *http.Server
 	var adminListener net.Listener
@@ -105,6 +106,7 @@ func run(ctx context.Context, path string, check bool, reloadInterval time.Durat
 				_ = adminServer.Close()
 			}
 			closeListeners(listeners)
+			closePacketListeners(packetListeners)
 			closeServers(servers)
 			return err
 		}
@@ -114,6 +116,7 @@ func run(ctx context.Context, path string, check bool, reloadInterval time.Durat
 				_ = adminServer.Close()
 			}
 			closeListeners(listeners)
+			closePacketListeners(packetListeners)
 			closeServers(servers)
 			return fmt.Errorf("limen %q: %w", name, err)
 		}
@@ -121,6 +124,20 @@ func run(ctx context.Context, path string, check bool, reloadInterval time.Durat
 		serversByName[name] = protocolLimen
 		listeners = append(listeners, ln)
 		logger.Info("janus listening", zap.String("limen", name), zap.String("address", ln.Addr().String()))
+		if protocolLimen.HTTP3Enabled() {
+			packet, err := protocolLimen.ListenPacket()
+			if err != nil {
+				if adminListener != nil {
+					_ = adminServer.Close()
+				}
+				closeListeners(listeners)
+				closePacketListeners(packetListeners)
+				closeServers(servers)
+				return fmt.Errorf("limen %q HTTP/3: %w", name, err)
+			}
+			packetListeners = append(packetListeners, packet)
+			logger.Info("janus listening", zap.String("limen", name), zap.String("protocol", "http3"), zap.String("address", packet.LocalAddr().String()))
+		}
 	}
 	reloadCtx, cancelReload := context.WithCancel(ctx)
 	defer cancelReload()
@@ -128,12 +145,14 @@ func run(ctx context.Context, path string, check bool, reloadInterval time.Durat
 		routeReloader, err := janusruntime.NewFileReloader(requestRuntime, path, reloadInterval, logger)
 		if err != nil {
 			closeListeners(listeners)
+			closePacketListeners(packetListeners)
 			closeServers(servers)
 			return err
 		}
 		certificateReloader, err := limen.NewCertificateReloader(bindings, serversByName, reloadInterval, logger)
 		if err != nil {
 			closeListeners(listeners)
+			closePacketListeners(packetListeners)
 			closeServers(servers)
 			return err
 		}
@@ -216,6 +235,12 @@ func run(ctx context.Context, path string, check bool, reloadInterval time.Durat
 }
 
 func closeListeners(listeners []net.Listener) {
+	for _, listener := range listeners {
+		_ = listener.Close()
+	}
+}
+
+func closePacketListeners(listeners []net.PacketConn) {
 	for _, listener := range listeners {
 		_ = listener.Close()
 	}

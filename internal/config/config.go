@@ -34,6 +34,7 @@ const (
 	CurrentConfigVersion   = 1
 	ProtocolHTTP1          = "http1"
 	ProtocolHTTP2          = "http2"
+	ProtocolHTTP3          = "http3"
 	RouteProtocolHTTP      = "http"
 	RouteProtocolSSE       = "sse"
 	RouteProtocolWebSocket = "websocket"
@@ -428,7 +429,7 @@ func (c Config) validateLimenBindings() (map[string]LimenConfig, error) {
 		}
 		seen := map[string]bool{}
 		for _, protocol := range binding.Protocols {
-			if protocol != ProtocolHTTP1 && protocol != ProtocolHTTP2 {
+			if protocol != ProtocolHTTP1 && protocol != ProtocolHTTP2 && protocol != ProtocolHTTP3 {
 				return nil, fmt.Errorf("limen %q has unsupported protocol %q", name, protocol)
 			}
 			if seen[protocol] {
@@ -436,8 +437,11 @@ func (c Config) validateLimenBindings() (map[string]LimenConfig, error) {
 			}
 			seen[protocol] = true
 		}
-		if seen[ProtocolHTTP2] && binding.TLS == nil {
-			return nil, fmt.Errorf("limen %q: HTTP/2 requires TLS", name)
+		if (seen[ProtocolHTTP2] || seen[ProtocolHTTP3]) && binding.TLS == nil {
+			return nil, fmt.Errorf("limen %q: HTTP/2 and HTTP/3 require TLS", name)
+		}
+		if seen[ProtocolHTTP3] && !seen[ProtocolHTTP1] && !seen[ProtocolHTTP2] {
+			return nil, fmt.Errorf("limen %q: HTTP/3 requires an HTTP/1 or HTTP/2 TCP fallback", name)
 		}
 		if err := validateTLSSettings(name, binding.TLS); err != nil {
 			return nil, err

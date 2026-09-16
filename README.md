@@ -5,25 +5,26 @@ A small Go HTTP gateway foundation, designed to remain easy to understand and mo
 **Status: runnable architecture starter, not production-ready.** The production roadmap is
 in [docs/plan.md](docs/plan.md). Start with [docs/architecture.md](docs/architecture.md)
 for the design and [docs/protocols.md](docs/protocols.md) for the mechanisms to learn.
-The Protocol Limen layer currently owns HTTP/1 and native TLS/HTTP/2 listener
-lifecycle. Versioned configurations support polled routing reload and TLS
-certificate-content rotation; HTTP/3 remains later work. See
+The Protocol Limen layer currently owns HTTP/1, native TLS/HTTP/2, and an
+opt-in native TLS/HTTP/3 UDP listener. Versioned configurations support polled
+routing reload and TLS certificate-content rotation. See
 [docs/limen-runtime.md](docs/limen-runtime.md).
 
 The first release targets ordinary HTTP APIs behind an existing TLS load balancer.
 Janus accepts plaintext HTTP/1.x, and versioned configuration can enable native
-TLS/HTTP/2 plus explicitly scoped SSE and HTTP/1 WebSocket routes, forwarding to
+TLS/HTTP/2/HTTP/3 plus explicitly scoped SSE and HTTP/1 WebSocket routes, forwarding to
 configured HTTP or HTTPS origins.
 HTTPS upstreams use normal certificate verification and may negotiate HTTP/2.
-Public TLS termination, gRPC, HTTP/2 WebSocket extended CONNECT, TCP/UDP, and
-HTTP/3 are outside this starter's contract.
+Public TLS termination, gRPC, HTTP/2 WebSocket extended CONNECT, and arbitrary
+TCP/UDP tunnels are outside this starter's contract.
 
 ## Try it
 
 Go 1.25+ compiles this starter. Use the latest patched, supported Go release for
 deployment; the minimum language version in `go.mod` is not a security recommendation.
-There are no third-party dependencies. `janus` is a local module name; replace it and
-internal import prefixes with your repository's module path when publishing.
+Runtime dependencies are pinned in `go.mod`; the HTTP/3 adapter uses quic-go.
+`janus` is a local module name; replace it and internal import prefixes with your
+repository's module path when publishing.
 
 From the project root, in separate terminals:
 
@@ -58,6 +59,7 @@ The race detector needs a supported C toolchain. On Windows, build to
 cmd/janus/             flags, signals, startup, shutdown
 internal/config/       JSON model, strict field decoding, validation
 internal/gateway/      composition root and HTTP server profile
+internal/limen/        protocol boundary, HTTP/TLS lifecycle and QUIC adapter
 internal/middleware/   global timeout and optional route response policies
 internal/router/       immutable host and path matching
 internal/upstream/     concurrent selection with optional health eligibility
@@ -116,7 +118,14 @@ still require restart. Legacy configurations remain startup-only.
   no trust-all mode, and malformed or untrusted input falls back to the peer.
 - CONNECT and non-WebSocket Upgrade requests receive 501. SSE routes stream
   `text/event-stream` responses; WebSocket routes proxy RFC 6455 upgrades over
-  HTTP/1. Existing upgraded connections are tracked for bounded Limen drain.
+  HTTP/1. HTTP/3 routes use the same handler and runtime generation; H3 is
+  enabled only on a TLS limen with a TCP HTTP/1 or HTTP/2 fallback. Existing
+  upgraded connections are tracked for bounded Limen drain, while QUIC
+  connections receive the HTTP/3 server's graceful GOAWAY/close treatment.
+- HTTP/3 uses a separately bound UDP socket, advertises `Alt-Svc` from the TCP
+  path, disables 0-RTT, and reuses the rotated TLS identity. H3 forwarding and
+  local UDP behavior are tested; Linux interop, load/soak, and deployment
+  qualification remain outstanding.
 - Unknown JSON fields and duplicate route matches fail validation. Go's JSON
   decoder still accepts duplicate object keys using its normal semantics; a
   stricter duplicate-key policy is a production configuration task.

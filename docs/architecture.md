@@ -3,11 +3,12 @@
 ## Scope and implementation status
 
 Janus currently serves bounded-duration HTTP APIs through Protocol Limen on
-private HTTP/1.x or native TLS/HTTP/2 listeners, forwarding to static
-HTTP/HTTPS origins. Versioned file-based routing reload, TLS certificate
-content rotation, SSE, and HTTP/1 WebSocket proxying are implemented; HTTP/3,
-HTTP/2 WebSocket extended CONNECT, gRPC and arbitrary TCP/UDP tunnels remain
-outside this scope.
+private HTTP/1.x, native TLS/HTTP/2, and opt-in native TLS/HTTP/3 listeners,
+forwarding to static HTTP/HTTPS origins. Versioned file-based routing reload,
+TLS certificate content rotation, SSE, and HTTP/1 WebSocket proxying are
+implemented; HTTP/2 WebSocket extended CONNECT, gRPC and arbitrary TCP/UDP
+tunnels remain outside this scope. H3 interop and deployment qualification are
+not yet complete.
 Use Go's `net/http`, `httputil.ReverseProxy`, and `http.Transport` as the protocol
 foundation. Backend applications retain business authorization responsibilities.
 
@@ -38,7 +39,7 @@ Configuration names and supported policy types are Janus-specific.
 
 ```mermaid
 flowchart TD
-    C[Client or external TLS load balancer] --> L[Protocol Limen: H1 / TLS H2 / later QUIC H3]
+    C[Client or external TLS load balancer] --> L[Protocol Limen: H1 / TLS H2 / TLS-QUIC H3]
     L --> ID[Stable handler: request ID and observation state]
     ID --> O[Access observation]
     O --> T[Overall context deadline]
@@ -233,7 +234,7 @@ files below are responsibilities, not empty directories to scaffold immediately.
 | Package | Responsibility and likely files | First phase |
 | --- | --- | --- |
 | `cmd/janus` | CLI, process signals, invoke startup/drain | Existing |
-| `internal/limen` | Listener and protocol adapters, inbound TLS identity, coordinated server lifecycle | HTTP/1 and TLS/H2 in 2A/2C; H3 in 5 |
+| `internal/limen` | Listener and protocol adapters, inbound TLS identity, coordinated server lifecycle | HTTP/1 and TLS/H2 in 2A/2C; first H3 adapter in 5 |
 | `internal/config` | Settings, named policy schema, reference/scope validation | Existing; policy types in 2 |
 | `internal/gateway` | Builds route/service handler generations from validated config and injected runtime resources | 2B generation builder; server wiring moved to Limen in 2A |
 | `internal/middleware` | `chain.go`, `timeout.go`, then IDs, observation, body limits and admission | 1–3 |

@@ -3,6 +3,33 @@
 This document records the purpose, scope, and verification for each Janus
 repository commit. Add a new dated section before every future commit.
 
+## 2026-09-17
+
+### Add native HTTP/3 Limen adapter
+
+Commit message: `feat(protocol): add native HTTP/3 limen adapter`
+
+Scope:
+
+- Added an opt-in HTTP/3 binding backed by pinned `github.com/quic-go/quic-go`
+  v0.61.0, with the existing stable runtime handler as the request entry point.
+- Bound TCP and UDP sockets for one Limen, set the actual UDP port in `Alt-Svc`,
+  reused the atomic TLS certificate callback, and kept HTTP/3 0-RTT disabled.
+- Added validation requiring TLS and an HTTP/1 or HTTP/2 TCP fallback, plus
+  coordinated Limen serving/shutdown and local real-UDP forwarding coverage.
+- Updated the protocol, architecture, plan and TLS example documentation. H3
+  interop, deployment, load/soak and Linux qualification remain future gates.
+
+Verification:
+
+- `gofmt` on touched Go files
+- `go test ./...`
+- real local HTTP/3 request through a UDP socket and TCP `Alt-Svc` assertion
+- configuration validation tests
+
+Scope note: this is an adapter milestone, not a production-certification claim.
+HTTP/3 fault-injection, Linux interop, load/soak and deployment gates remain.
+
 ## 2026-09-16
 
 ### Add bounded admin metrics
