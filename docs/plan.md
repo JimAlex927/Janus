@@ -337,9 +337,10 @@ in Phase 4 also need retirement/reload tests when introduced.
    `Alt-Svc` advertisement and TCP fallback. The current adapter binds both
    sockets, disables 0-RTT, handles `:0` UDP advertisement, and cleans up
    startup failures; coordinated fault and deployment tests remain.
-3. Test H3 stream isolation, limits, buffer/stream response semantics, reload on
-   existing connections, certificate rotation and coordinated bounded shutdown.
-   Verify real UDP behavior on Linux and the supported development platform.
+3. Partially complete: local H3 stream isolation, client cancellation, and
+   forwarding pass on the supported development platform. H3 limits,
+   buffer/stream response semantics, reload on existing connections,
+   certificate rotation, coordinated bounded shutdown and Linux interop remain.
 4. Ship a minimal deployment artifact, verified CA roots, non-root execution,
    resource budgets, rollout/rollback instructions, and effective-config inspection
    that excludes secrets. Add per-service transport/TLS policy only when required.

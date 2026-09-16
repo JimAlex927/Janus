@@ -5,6 +5,30 @@ repository commit. Add a new dated section before every future commit.
 
 ## 2026-09-17
 
+### Qualify local HTTP/3 stream behavior
+
+Commit message: `test(protocol): qualify HTTP/3 stream lifecycle`
+
+Scope:
+
+- Added local real-UDP HTTP/3 regression coverage for concurrent stream
+  isolation and client-cancellation propagation.
+- Added direct Limen validation tests so invalid H3 bindings return errors
+  instead of reaching a nil TLS configuration.
+- Updated the Phase 5 plan to distinguish local evidence from the remaining
+  Linux interop, fault-injection and deployment gates.
+
+Verification:
+
+- `gofmt` on touched Go files
+- `go test -count=2 ./...`
+- `go vet ./...`
+- `go build -o bin/janus.exe ./cmd/janus`
+- `git diff --check`
+
+Scope note: this proves local stream/cancellation behavior only; it is not a
+production-certification claim.
+
 ### Add native HTTP/3 Limen adapter
 
 Commit message: `feat(protocol): add native HTTP/3 limen adapter`

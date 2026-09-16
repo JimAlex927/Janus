@@ -1,13 +1,16 @@
 package limen
 
 import (
+	"context"
 	"crypto/tls"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"net/http/httptrace"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -114,6 +117,154 @@ func TestLimenRejectsHTTP3WithoutTLSOrTCPFallback(t *testing.T) {
 				t.Fatal("expected HTTP/3 binding validation error")
 			}
 		})
+	}
+}
+
+func TestLimenHTTP3StreamsAreIsolated(t *testing.T) {
+	certFile, keyFile, roots := writeTestCertificate(t)
+	started, release := make(chan struct{}), make(chan struct{})
+	var releaseOnce sync.Once
+	l, err := NewBinding("public", config.LimenConfig{
+		Address:   "127.0.0.1:0",
+		Protocols: []string{config.ProtocolHTTP1, config.ProtocolHTTP3},
+		TLS:       &config.TLSSettings{CertFile: certFile, KeyFile: keyFile},
+	}, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/slow" {
+			close(started)
+			<-release
+			_, _ = io.WriteString(w, "slow")
+			return
+		}
+		_, _ = io.WriteString(w, "fast")
+	}), config.DefaultSettings())
+	if err != nil {
+		t.Fatal(err)
+	}
+	tcpListener, err := l.Listen()
+	if err != nil {
+		t.Fatal(err)
+	}
+	udpListener, err := l.ListenPacket()
+	if err != nil {
+		_ = tcpListener.Close()
+		t.Fatal(err)
+	}
+	serveDone := make(chan error, 1)
+	go func() { serveDone <- l.Serve(tcpListener) }()
+	t.Cleanup(func() {
+		releaseOnce.Do(func() { close(release) })
+		_ = l.Close()
+		if err := <-serveDone; err != nil && !errors.Is(err, http.ErrServerClosed) {
+			t.Errorf("limen stopped: %v", err)
+		}
+	})
+
+	transport := &http3.Transport{
+		TLSClientConfig: &tls.Config{RootCAs: roots, ServerName: "localhost"},
+		QUICConfig:      &quic.Config{Allow0RTT: false},
+	}
+	defer transport.Close()
+	client := &http.Client{Transport: transport}
+	slowDone := make(chan error, 1)
+	go func() {
+		response, err := client.Get("https://" + udpListener.LocalAddr().String() + "/slow")
+		if err == nil {
+			body, readErr := io.ReadAll(response.Body)
+			response.Body.Close()
+			if readErr != nil || string(body) != "slow" {
+				err = fmt.Errorf("slow response body = %q, read error = %v", body, readErr)
+			}
+		}
+		slowDone <- err
+	}()
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("HTTP/3 slow stream did not start")
+	}
+
+	fastResponse, err := client.Get("https://" + udpListener.LocalAddr().String() + "/fast")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fastBody, err := io.ReadAll(fastResponse.Body)
+	fastResponse.Body.Close()
+	if err != nil || string(fastBody) != "fast" || fastResponse.ProtoMajor != 3 {
+		t.Fatalf("HTTP/3 fast response = proto %s body %q error %v", fastResponse.Proto, fastBody, err)
+	}
+	releaseOnce.Do(func() { close(release) })
+	if err := <-slowDone; err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestLimenHTTP3ClientCancellationReachesHandler(t *testing.T) {
+	certFile, keyFile, roots := writeTestCertificate(t)
+	started, canceled := make(chan struct{}), make(chan struct{})
+	l, err := NewBinding("public", config.LimenConfig{
+		Address:   "127.0.0.1:0",
+		Protocols: []string{config.ProtocolHTTP1, config.ProtocolHTTP3},
+		TLS:       &config.TLSSettings{CertFile: certFile, KeyFile: keyFile},
+	}, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(started)
+		<-r.Context().Done()
+		close(canceled)
+	}), config.DefaultSettings())
+	if err != nil {
+		t.Fatal(err)
+	}
+	tcpListener, err := l.Listen()
+	if err != nil {
+		t.Fatal(err)
+	}
+	udpListener, err := l.ListenPacket()
+	if err != nil {
+		_ = tcpListener.Close()
+		t.Fatal(err)
+	}
+	serveDone := make(chan error, 1)
+	go func() { serveDone <- l.Serve(tcpListener) }()
+	t.Cleanup(func() {
+		_ = l.Close()
+		if err := <-serveDone; err != nil && !errors.Is(err, http.ErrServerClosed) {
+			t.Errorf("limen stopped: %v", err)
+		}
+	})
+
+	transport := &http3.Transport{
+		TLSClientConfig: &tls.Config{RootCAs: roots, ServerName: "localhost"},
+		QUICConfig:      &quic.Config{Allow0RTT: false},
+	}
+	defer transport.Close()
+	request, err := http.NewRequest(http.MethodGet, "https://"+udpListener.LocalAddr().String()+"/cancel", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	requestCtx, cancel := context.WithCancel(request.Context())
+	request = request.WithContext(requestCtx)
+	requestDone := make(chan error, 1)
+	go func() {
+		response, err := (&http.Client{Transport: transport}).Do(request)
+		if response != nil {
+			response.Body.Close()
+		}
+		requestDone <- err
+	}()
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("HTTP/3 cancellation handler did not start")
+	}
+	cancel()
+	select {
+	case <-canceled:
+	case <-time.After(2 * time.Second):
+		t.Fatal("HTTP/3 client cancellation did not reach handler")
+	}
+	select {
+	case <-requestDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("HTTP/3 client request did not finish after cancellation")
 	}
 }
 
