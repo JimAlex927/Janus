@@ -166,7 +166,9 @@ No unauthenticated network reload endpoint is needed.
 
 Limit pending builds and retired generations. If an old handler does not return,
 report the condition and reject/defer further reloads at the configured bound;
-do not prematurely free resources still in use. Shutdown has a separate bounded
+do not prematurely free resources still in use. Candidate publication failures
+are retried on the next poll while unchanged failure logs are hash-deduplicated.
+Shutdown has a separate bounded
 drain and force-close path. A context deadline alone cannot kill arbitrary Go code.
 
 Runtime owns counters keyed by stable service identity. Old and new generations,

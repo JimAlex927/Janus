@@ -5,6 +5,31 @@ repository commit. Add a new dated section before every future commit.
 
 ## 2026-09-16
 
+### Retry transient routing publication failures
+
+Commit message: `fix(reload): retry transient candidate failures`
+
+Scope:
+
+- Changed the routing reloader hash state so only successfully published
+  generations are treated as applied and skipped.
+- Transient candidate-build/publication failures are retried on later polls
+  while unchanged failure logs remain hash-deduplicated.
+- Serialized concurrent `ReloadOnce` calls to prevent duplicate candidate
+  generations from being published for one content hash.
+- Added regression tests for retry after a transient build failure and for
+  concurrent reload serialization.
+- Updated reload lifecycle documentation.
+
+Verification:
+
+- `gofmt -w internal/runtime/reloader.go internal/runtime/reloader_test.go`
+- `go test ./internal/runtime`
+- `git diff --check`
+
+Scope note: this fixes reloader retry/serialization behavior; it does not
+change startup-owned configuration rejection or add a reload queue.
+
 ### Add configuration parser fuzz smoke
 
 Commit message: `test(config): add parser fuzz smoke`

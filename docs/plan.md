@@ -213,8 +213,9 @@ Expose generation and failure information in logs initially. Reload routing
 without restarting sockets, closing connections, or issuing GOAWAY.
 
 The implementation polls versioned configuration with a bounded read and
-content-hash deduplication. It serializes publication through Runtime, retains
-the last good generation for invalid/missing/startup-changing input, and keeps
+content-hash deduplication. It serializes reload attempts and publication
+through Runtime, retains the last good generation for invalid/missing/
+startup-changing input, and keeps
 legacy single-file startup-only mode unchanged. TLS certificate/key contents
 are polled independently; a complete validated pair is atomically published to
 new handshakes while established connections remain intact. Listener addresses,

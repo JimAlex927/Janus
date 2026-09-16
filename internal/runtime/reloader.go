@@ -21,9 +21,12 @@ type FileReloader struct {
 	interval time.Duration
 	logger   *zap.Logger
 
-	mu       sync.Mutex
-	lastHash [sha256.Size]byte
-	hasHash  bool
+	reloadMu         sync.Mutex
+	mu               sync.Mutex
+	lastAppliedHash  [sha256.Size]byte
+	hasAppliedHash   bool
+	lastReportedHash [sha256.Size]byte
+	hasReportedHash  bool
 }
 
 // NewFileReloader validates the current file and records its hash as the
@@ -44,30 +47,37 @@ func NewFileReloader(r *Runtime, path string, interval time.Duration, logger *za
 	}
 	return &FileReloader{
 		runtime: r, path: path, interval: interval, logger: logger,
-		lastHash: hash, hasHash: true,
+		lastAppliedHash: hash, hasAppliedHash: true,
 	}, nil
 }
 
 // ReloadOnce checks the file once. Invalid or startup-changing content is
-// reported and ignored; the last good generation remains active. The changed
-// content hash is remembered so an unchanged bad file does not spam logs.
+// reported and ignored; the last good generation remains active. Only a
+// successfully published hash is skipped on later polls, so transient
+// candidate failures can recover without an operator rewriting the file.
 func (f *FileReloader) ReloadOnce() error {
+	f.reloadMu.Lock()
+	defer f.reloadMu.Unlock()
+
 	c, hash, err := config.LoadFileSnapshot(f.path)
 	if err != nil {
 		f.runtime.metrics.RecordReload("rejected")
-		if f.remember(hash) {
+		if f.shouldReport(hash) {
 			f.logger.Error("configuration reload rejected", zap.String("path", f.path), zap.Error(err))
 		}
 		return err
 	}
-	if !f.remember(hash) {
+	if f.isApplied(hash) {
 		return nil
 	}
 	if err := f.runtime.Replace(c); err != nil {
 		f.runtime.metrics.RecordReload("rejected")
-		f.logger.Error("configuration reload rejected", zap.String("path", f.path), zap.Error(err))
+		if f.shouldReport(hash) {
+			f.logger.Error("configuration reload rejected", zap.String("path", f.path), zap.Error(err))
+		}
 		return err
 	}
+	f.markApplied(hash)
 	f.runtime.metrics.RecordReload("success")
 	f.logger.Info("configuration reloaded", zap.String("path", f.path))
 	return nil
@@ -89,13 +99,29 @@ func (f *FileReloader) Run(ctx context.Context) error {
 	}
 }
 
-func (f *FileReloader) remember(hash [sha256.Size]byte) bool {
+func (f *FileReloader) isApplied(hash [sha256.Size]byte) bool {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if f.hasHash && f.lastHash == hash {
+	return f.hasAppliedHash && f.lastAppliedHash == hash
+}
+
+func (f *FileReloader) markApplied(hash [sha256.Size]byte) {
+	f.mu.Lock()
+	f.lastAppliedHash = hash
+	f.hasAppliedHash = true
+	// A successful publication starts a new reporting window. If this hash
+	// later fails after a future source change, it should be observable again.
+	f.hasReportedHash = false
+	f.mu.Unlock()
+}
+
+func (f *FileReloader) shouldReport(hash [sha256.Size]byte) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.hasReportedHash && f.lastReportedHash == hash {
 		return false
 	}
-	f.lastHash = hash
-	f.hasHash = true
+	f.lastReportedHash = hash
+	f.hasReportedHash = true
 	return true
 }
