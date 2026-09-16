@@ -6,11 +6,13 @@ package limen
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"net"
 	"net/http"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"janus/internal/config"
 	"janus/internal/protocol"
@@ -179,6 +181,9 @@ func serverTLSConfig(binding config.LimenConfig, protocols *http.Protocols) (*tl
 	if err != nil {
 		return nil, nil, fmt.Errorf("load limen TLS certificate: %w", err)
 	}
+	if err := validateServerCertificate(cert); err != nil {
+		return nil, nil, fmt.Errorf("validate limen TLS certificate: %w", err)
+	}
 	minVersion := uint16(tls.VersionTLS12)
 	if binding.TLS.MinVersion == "1.3" || binding.TLS.MinVersion == "TLS1.3" {
 		minVersion = tls.VersionTLS13
@@ -216,7 +221,49 @@ func (l *Limen) RotateCertificate(certFile, keyFile string) error {
 	if err != nil {
 		return fmt.Errorf("load rotated limen TLS certificate: %w", err)
 	}
+	if err := validateServerCertificate(cert); err != nil {
+		return fmt.Errorf("validate rotated limen TLS certificate: %w", err)
+	}
 	l.cert.Store(&cert)
+	return nil
+}
+
+func validateServerCertificate(cert tls.Certificate) error {
+	if len(cert.Certificate) == 0 {
+		return fmt.Errorf("certificate chain is empty")
+	}
+	now := time.Now()
+	var leaf *x509.Certificate
+	for index, der := range cert.Certificate {
+		parsed, err := x509.ParseCertificate(der)
+		if err != nil {
+			return fmt.Errorf("parse certificate %d: %w", index, err)
+		}
+		if now.Before(parsed.NotBefore) {
+			return fmt.Errorf("certificate %d is not valid before %s", index, parsed.NotBefore.Format(time.RFC3339))
+		}
+		if !now.Before(parsed.NotAfter) {
+			return fmt.Errorf("certificate %d expired at %s", index, parsed.NotAfter.Format(time.RFC3339))
+		}
+		if index == 0 {
+			leaf = parsed
+		}
+	}
+	if leaf.KeyUsage != 0 && leaf.KeyUsage&x509.KeyUsageDigitalSignature == 0 {
+		return fmt.Errorf("leaf certificate does not allow digital signatures")
+	}
+	if len(leaf.ExtKeyUsage) != 0 {
+		serverAuth := false
+		for _, usage := range leaf.ExtKeyUsage {
+			if usage == x509.ExtKeyUsageServerAuth || usage == x509.ExtKeyUsageAny {
+				serverAuth = true
+				break
+			}
+		}
+		if !serverAuth {
+			return fmt.Errorf("leaf certificate does not allow server authentication")
+		}
+	}
 	return nil
 }
 

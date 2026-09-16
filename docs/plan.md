@@ -223,7 +223,8 @@ require restart.
 
 Coverage includes invalid and partial config updates, startup-setting rejection,
 generation replacement, malformed certificate-pair retention, successful
-certificate rotation, and bounded configuration input. Full H1/H2 response
+certificate rotation, certificate validity rejection, and bounded configuration
+input. Full H1/H2 response
 capability and GOAWAY qualification remain in later protocol work.
 
 ## Phase 2E: long-lived HTTP protocols — complete

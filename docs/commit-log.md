@@ -5,6 +5,32 @@ repository commit. Add a new dated section before every future commit.
 
 ## 2026-09-16
 
+### Validate TLS certificate validity before publication
+
+Commit message: `fix(security): validate TLS certificate validity`
+
+Scope:
+
+- Validated every configured certificate-chain entry for parseability and
+  current validity before startup or atomic rotation.
+- Required the leaf certificate to support digital signatures and server
+  authentication when those extensions are present, preventing an unusable
+  replacement identity from being published.
+- Added startup and rotation regression coverage and documented the stronger
+  certificate contract.
+
+Verification:
+
+- `gofmt` on touched Go files
+- `go test -count=5 ./internal/limen -run 'TestLimenRejectsInvalidServerCertificateValidity|TestCertificateReloaderPublishesOnlyValidatedPairs|TestHTTP3CertificateRotationKeepsExistingConnectionAndUpdatesNewHandshake'`
+- `go test -count=2 ./...`
+- `go vet ./...`
+- `go build -o bin/janus.exe ./cmd/janus`
+- `git diff --check`
+
+Scope note: certificate validity and usage checks do not replace chain trust,
+hostname coverage, dependency review or production security qualification.
+
 ### Close HTTP/3 packet on Limen serve failure
 
 Commit message: `fix(lifecycle): close HTTP/3 packet on serve failure`

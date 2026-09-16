@@ -16,6 +16,11 @@ import (
 )
 
 func writeTestCertificate(t *testing.T) (certFile, keyFile string, roots *x509.CertPool) {
+	now := time.Now()
+	return writeTestCertificateWithValidity(t, now.Add(-time.Minute), now.Add(time.Hour))
+}
+
+func writeTestCertificateWithValidity(t *testing.T, notBefore, notAfter time.Time) (certFile, keyFile string, roots *x509.CertPool) {
 	t.Helper()
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
@@ -28,8 +33,8 @@ func writeTestCertificate(t *testing.T) (certFile, keyFile string, roots *x509.C
 	template := &x509.Certificate{
 		SerialNumber:          serial,
 		Subject:               pkix.Name{CommonName: "localhost"},
-		NotBefore:             time.Now().Add(-time.Minute),
-		NotAfter:              time.Now().Add(time.Hour),
+		NotBefore:             notBefore,
+		NotAfter:              notAfter,
 		BasicConstraintsValid: true,
 		IsCA:                  true,
 		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageDigitalSignature,

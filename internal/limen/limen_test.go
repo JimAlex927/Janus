@@ -43,6 +43,31 @@ func TestLimenListenReportsBindFailure(t *testing.T) {
 	}
 }
 
+func TestLimenRejectsInvalidServerCertificateValidity(t *testing.T) {
+	now := time.Now()
+	expiredCert, expiredKey, _ := writeTestCertificateWithValidity(t, now.Add(-2*time.Hour), now.Add(-time.Hour))
+	if _, err := NewBinding("public", config.LimenConfig{
+		Address:   "127.0.0.1:8443",
+		Protocols: []string{config.ProtocolHTTP1},
+		TLS:       &config.TLSSettings{CertFile: expiredCert, KeyFile: expiredKey},
+	}, http.NotFoundHandler(), config.DefaultSettings()); err == nil {
+		t.Fatal("expired certificate was accepted at startup")
+	}
+
+	validCert, validKey, _ := writeTestCertificate(t)
+	l, err := NewBinding("public", config.LimenConfig{
+		Address:   "127.0.0.1:8443",
+		Protocols: []string{config.ProtocolHTTP1},
+		TLS:       &config.TLSSettings{CertFile: validCert, KeyFile: validKey},
+	}, http.NotFoundHandler(), config.DefaultSettings())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := l.RotateCertificate(expiredCert, expiredKey); err == nil {
+		t.Fatal("expired certificate was accepted during rotation")
+	}
+}
+
 func TestLimenServeFailureClosesHTTP3Packet(t *testing.T) {
 	certFile, keyFile, _ := writeTestCertificate(t)
 	reserved, err := net.ListenPacket("udp", "127.0.0.1:0")
