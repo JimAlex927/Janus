@@ -75,6 +75,7 @@ rollback is reproducible.
 
 This artifact is syntax-checked and cross-compiled by the repository's release
 checks, but it has not been run here because the development host does not have
-Docker or a Linux systemd environment. Linux signal/socket behavior, resource
-limits, load, soak, and canary rollback still require CI or a representative
-deployment host before production certification.
+Docker or a Linux systemd environment. The repository CI provides Linux Go
+test/race/vet/static-build checks; Linux signal/socket behavior, systemd
+resource limits, load, soak, and canary rollback still require a successful CI
+run or representative deployment host before production certification.

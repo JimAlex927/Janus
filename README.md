@@ -54,6 +54,9 @@ go build -o bin/janus ./cmd/janus
 The race detector needs a supported C toolchain. On Windows, build to
 `bin/janus.exe` for a directly executable artifact.
 
+The repository CI workflow runs the same test suite and race detector on
+Ubuntu, where the required C toolchain and Linux socket behavior are available.
+
 ## What exists
 
 ```text
@@ -74,6 +77,7 @@ configs/janus-health.example.json     active upstream health-check example
 examples/backend/     local test service
 docs/                  architecture, delivery plan, protocol learning guide
 deploy/systemd/        native Linux non-root systemd deployment artifact
+.github/workflows/     Linux test, race, vet and static-build gates
 ```
 
 Rules use exact, case-insensitive host matching with the incoming port removed.

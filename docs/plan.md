@@ -357,10 +357,12 @@ in Phase 4 also need retirement/reload tests when introduced.
 
 ## Phase 6 tasks
 
-Run the release gates below, including Linux signal/socket tests and the race
-detector (Windows race validation remains outstanding). Test malformed framing,
-ambiguous paths, middleware composition, and repeated failed/successful reloads.
-Perform representative load, a 24-hour soak, and a canary with rollback criteria.
+The repository now defines a pinned Ubuntu CI job for the release gates: full
+tests, the race detector, vet, and a static Linux build. A real CI run is still
+required before treating those checks as release evidence. Add Linux
+signal/socket tests, malformed framing, ambiguous paths, middleware composition,
+and repeated failed/successful reload coverage. Perform representative load, a
+24-hour soak, and a canary with rollback criteria.
 
 ## Suggested implementation commits
 

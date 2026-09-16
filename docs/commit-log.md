@@ -5,6 +5,29 @@ repository commit. Add a new dated section before every future commit.
 
 ## 2026-09-16
 
+### Add pinned Linux CI release gates
+
+Commit message: `ci: add pinned Linux test and build gates`
+
+Scope:
+
+- Added an Ubuntu 24.04 GitHub Actions workflow pinned to Go 1.25.1.
+- The workflow runs full tests twice, the race detector, `go vet`, a static
+  Linux amd64 build and whitespace/artifact checks.
+- Documented that the workflow is a defined gate, not evidence until it has
+  actually run successfully; Linux systemd, load, soak and canary checks remain
+  outside this change.
+
+Verification:
+
+- `git diff --check`
+- Local Windows `go test -count=2 ./...`
+- Local Windows `go vet ./...`
+- Local Windows Windows and Linux amd64 builds
+
+Scope note: the hosted Linux workflow has not been executed from this local
+turn, and its existence does not certify production behavior.
+
 ### Add safe effective configuration inspection and native systemd artifact
 
 Commit message: `feat(ops): add effective config inspection and systemd artifact`
