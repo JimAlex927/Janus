@@ -123,9 +123,10 @@ still require restart. Legacy configurations remain startup-only.
   upgraded connections are tracked for bounded Limen drain, while QUIC
   connections receive the HTTP/3 server's graceful GOAWAY/close treatment.
 - HTTP/3 uses a separately bound UDP socket, advertises `Alt-Svc` from the TCP
-  path, disables 0-RTT, and reuses the rotated TLS identity. H3 forwarding and
-  local UDP behavior are tested; Linux interop, load/soak, and deployment
-  qualification remain outstanding.
+  path, disables 0-RTT, reuses the rotated TLS identity, and applies the
+  bounded `limen.http3.max_concurrent_streams` setting (default 100). H3
+  forwarding and local UDP behavior are tested; Linux interop, load/soak, and
+  deployment qualification remain outstanding.
 - Unknown JSON fields and duplicate route matches fail validation. Go's JSON
   decoder still accepts duplicate object keys using its normal semantics; a
   stricter duplicate-key policy is a production configuration task.

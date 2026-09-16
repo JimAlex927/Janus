@@ -221,8 +221,9 @@ Enable TCP HTTPS and UDP HTTP/3 together on a named TLS Limen, normally the same
 numeric port. The current adapter binds both before readiness, advertises the
 actual UDP port (including `:0`), shares the certificate rotation callback,
 keeps HTTP/1.1 and HTTP/2 available for fallback, and leaves 0-RTT disabled.
-Startup cleanup and coordinated drain are implemented; fault-injection and
-public-port deployment tests remain.
+The validated `http3.max_concurrent_streams` setting bounds bidirectional
+request streams per QUIC connection. Startup cleanup and coordinated drain are
+implemented; fault-injection and public-port deployment tests remain.
 
 Test negotiated H3, stream cancellation isolation, stream/connection flow-control
 limits, handshake/idle/drain budgets, TLS pair rotation, reload on existing QUIC

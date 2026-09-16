@@ -338,7 +338,8 @@ in Phase 4 also need retirement/reload tests when introduced.
    sockets, disables 0-RTT, handles `:0` UDP advertisement, and cleans up
    startup failures; coordinated fault and deployment tests remain.
 3. Partially complete: local H3 stream isolation, client cancellation, and
-   forwarding pass on the supported development platform. H3 limits,
+   forwarding pass on the supported development platform. The bounded H3
+   bidirectional stream limit is now wired and configuration-tested; H3 limits,
    buffer/stream response semantics, reload on existing connections,
    certificate rotation, coordinated bounded shutdown and Linux interop remain.
 4. Ship a minimal deployment artifact, verified CA roots, non-root execution,

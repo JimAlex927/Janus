@@ -1,6 +1,6 @@
 // Package limen owns Janus's inbound protocol boundary and HTTP server
-// lifecycle. It currently serves plaintext HTTP/1.x and TLS HTTP/1.x/HTTP/2;
-// HTTP/3 is added later without changing the handler it serves.
+// lifecycle. It serves plaintext HTTP/1.x, TLS HTTP/1.x/HTTP/2, and opt-in TLS
+// HTTP/3 without changing the handler it serves.
 package limen
 
 import (
@@ -70,6 +70,10 @@ func NewBinding(name string, binding config.LimenConfig, handler http.Handler, s
 	}
 	var h3Server *http3.Server
 	if hasProtocol(binding.Protocols, config.ProtocolHTTP3) {
+		h3Settings := config.HTTP3Settings{}.WithDefaults()
+		if binding.HTTP3 != nil {
+			h3Settings = binding.HTTP3.WithDefaults()
+		}
 		h3TLS := tlsConfig.Clone()
 		h3TLS.MinVersion = tls.VersionTLS13
 		h3Server = &http3.Server{
@@ -79,7 +83,10 @@ func NewBinding(name string, binding config.LimenConfig, handler http.Handler, s
 			IdleTimeout:    settings.Server.IdleTimeout.Duration(),
 			// 0-RTT is intentionally disabled: Janus does not have a replay-safe
 			// request policy for arbitrary backend operations.
-			QUICConfig: &quic.Config{Allow0RTT: false},
+			QUICConfig: &quic.Config{
+				Allow0RTT:          false,
+				MaxIncomingStreams: h3Settings.MaxConcurrentStreams,
+			},
 		}
 		// Advertise H3 only from the TCP response path after the UDP listener
 		// has been bound and the QUIC server has started.

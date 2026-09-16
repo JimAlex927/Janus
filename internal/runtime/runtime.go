@@ -226,6 +226,10 @@ func cloneLimens(source map[string]config.LimenConfig) map[string]config.LimenCo
 			tls := *binding.TLS
 			binding.TLS = &tls
 		}
+		if binding.HTTP3 != nil {
+			http3 := *binding.HTTP3
+			binding.HTTP3 = &http3
+		}
 		clone[name] = binding
 	}
 	return clone

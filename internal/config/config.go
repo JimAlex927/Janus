@@ -44,16 +44,44 @@ const (
 // LimenConfig describes one inbound protocol binding. HTTP/2 is enabled only
 // over TLS in the first native multi-protocol profile.
 type LimenConfig struct {
-	Address        string       `json:"address"`
-	Protocols      []string     `json:"protocols"`
-	TrustedProxies []string     `json:"trusted_proxies,omitempty"`
-	TLS            *TLSSettings `json:"tls,omitempty"`
+	Address        string         `json:"address"`
+	Protocols      []string       `json:"protocols"`
+	TrustedProxies []string       `json:"trusted_proxies,omitempty"`
+	TLS            *TLSSettings   `json:"tls,omitempty"`
+	HTTP3          *HTTP3Settings `json:"http3,omitempty"`
 }
 
 type TLSSettings struct {
 	CertFile   string `json:"cert_file"`
 	KeyFile    string `json:"key_file"`
 	MinVersion string `json:"min_version,omitempty"`
+}
+
+// HTTP3Settings controls the inbound QUIC stream budget for an HTTP/3 Limen.
+// The setting is intentionally small: HTTP/3 connection idle and header
+// budgets are inherited from the validated server settings.
+type HTTP3Settings struct {
+	MaxConcurrentStreams int64 `json:"max_concurrent_streams"`
+}
+
+const (
+	DefaultHTTP3MaxConcurrentStreams int64 = 100
+	MaxHTTP3ConcurrentStreams              = 1_000_000
+)
+
+func (s HTTP3Settings) WithDefaults() HTTP3Settings {
+	if s.MaxConcurrentStreams == 0 {
+		s.MaxConcurrentStreams = DefaultHTTP3MaxConcurrentStreams
+	}
+	return s
+}
+
+func (s HTTP3Settings) Validate() error {
+	s = s.WithDefaults()
+	if s.MaxConcurrentStreams < 1 || s.MaxConcurrentStreams > MaxHTTP3ConcurrentStreams {
+		return fmt.Errorf("http3.max_concurrent_streams must be between 1 and %d", MaxHTTP3ConcurrentStreams)
+	}
+	return nil
 }
 
 // Middleware is a named, typed route/service middleware definition.
@@ -436,6 +464,16 @@ func (c Config) validateLimenBindings() (map[string]LimenConfig, error) {
 				return nil, fmt.Errorf("limen %q enables protocol %q more than once", name, protocol)
 			}
 			seen[protocol] = true
+		}
+		if binding.HTTP3 != nil {
+			if !seen[ProtocolHTTP3] {
+				return nil, fmt.Errorf("limen %q configures http3 settings without enabling HTTP/3", name)
+			}
+			http3 := binding.HTTP3.WithDefaults()
+			if err := http3.Validate(); err != nil {
+				return nil, fmt.Errorf("limen %q: %w", name, err)
+			}
+			binding.HTTP3 = &http3
 		}
 		if (seen[ProtocolHTTP2] || seen[ProtocolHTTP3]) && binding.TLS == nil {
 			return nil, fmt.Errorf("limen %q: HTTP/2 and HTTP/3 require TLS", name)

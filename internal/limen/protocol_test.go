@@ -47,11 +47,15 @@ func TestLimenServesHTTP3AndAdvertisesUDPPort(t *testing.T) {
 		Address:   "127.0.0.1:0",
 		Protocols: []string{config.ProtocolHTTP1, config.ProtocolHTTP3},
 		TLS:       &config.TLSSettings{CertFile: certFile, KeyFile: keyFile},
+		HTTP3:     &config.HTTP3Settings{MaxConcurrentStreams: 7},
 	}, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.WriteString(w, r.Proto)
 	}), config.DefaultSettings())
 	if err != nil {
 		t.Fatal(err)
+	}
+	if l.http3.QUICConfig.Allow0RTT || l.http3.QUICConfig.MaxIncomingStreams != 7 {
+		t.Fatalf("HTTP/3 QUIC settings = %+v", l.http3.QUICConfig)
 	}
 	tcpListener, err := l.Listen()
 	if err != nil {

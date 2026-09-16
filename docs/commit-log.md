@@ -5,6 +5,28 @@ repository commit. Add a new dated section before every future commit.
 
 ## 2026-09-17
 
+### Bound HTTP/3 bidirectional streams
+
+Commit message: `feat(protocol): bound HTTP/3 concurrent streams`
+
+Scope:
+
+- Added the consumed `limen.http3.max_concurrent_streams` setting with a
+  default of 100 and a bounded upper limit.
+- Applied the value to quic-go's inbound bidirectional stream budget while
+  retaining the separate global/service request admission limits.
+- Added configuration, default, upper-bound and wrong-scope validation tests;
+  updated the H3 protocol and delivery documentation.
+
+Verification:
+
+- `gofmt` on touched Go files
+- `go test -count=3 ./internal/config ./internal/limen ./internal/runtime`
+- H3 integration test asserts the configured QUIC stream budget and 0-RTT is off
+
+Scope note: this bounds per-connection bidirectional streams; it does not
+complete H3 Linux interop, fault-injection, load/soak or deployment gates.
+
 ### Qualify local HTTP/3 stream behavior
 
 Commit message: `test(protocol): qualify HTTP/3 stream lifecycle`

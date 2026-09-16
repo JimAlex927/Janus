@@ -135,6 +135,11 @@ balancer can still terminate public TLS and forward HTTP/1.1 to Janus. Outbound
 TLS must verify certificates and hostnames; never ship `InsecureSkipVerify` to
 make a deployment work. Plan CA rotation and mTLS separately if required.
 
+The optional `limen.http3.max_concurrent_streams` setting bounds the number of
+simultaneous bidirectional request streams a peer can open on one QUIC
+connection. It defaults to 100 and is validated before a listener binds; it is
+separate from Janus's global/service request admission limits.
+
 gRPC requires a deliberate HTTP/2 path, trailer preservation, deadline and
 cancellation semantics, gRPC status visibility and streaming tests. HTTPS
 upstream HTTP/2 capability alone is not a gRPC support claim. Janus supports SSE

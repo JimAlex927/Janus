@@ -225,9 +225,22 @@ func TestVersionedLimenConfigRejectsInvalidBindings(t *testing.T) {
 }
 
 func TestVersionedLimenConfigAcceptsHTTP3WithTLSAndTCPFallback(t *testing.T) {
-	body := `{"version":1,"limens":{"public":{"address":"127.0.0.1:8443","protocols":["http1","http3"],"tls":{"cert_file":"server.crt","key_file":"server.key"}}},"services":{"s":{"upstreams":["http://localhost:9000"]}},"routes":[{"name":"r","limen":"public","path_prefix":"/api","service":"s"}]}`
-	if _, err := Load(strings.NewReader(body)); err != nil {
+	body := `{"version":1,"limens":{"public":{"address":"127.0.0.1:8443","protocols":["http1","http3"],"tls":{"cert_file":"server.crt","key_file":"server.key"},"http3":{"max_concurrent_streams":7}}},"services":{"s":{"upstreams":["http://localhost:9000"]}},"routes":[{"name":"r","limen":"public","path_prefix":"/api","service":"s"}]}`
+	c, err := Load(strings.NewReader(body))
+	if err != nil {
 		t.Fatal(err)
+	}
+	if got := c.LimenBindings()["public"].HTTP3.MaxConcurrentStreams; got != 7 {
+		t.Fatalf("HTTP/3 max concurrent streams = %d, want 7", got)
+	}
+	for _, bad := range []string{
+		strings.Replace(body, `"max_concurrent_streams":7`, `"max_concurrent_streams":-1`, 1),
+		strings.Replace(body, `"max_concurrent_streams":7`, `"max_concurrent_streams":1000001`, 1),
+		strings.Replace(body, `"http1","http3"`, `"http1"`, 1),
+	} {
+		if _, err := Load(strings.NewReader(bad)); err == nil {
+			t.Fatal("expected invalid HTTP/3 setting")
+		}
 	}
 }
 

@@ -8,6 +8,9 @@
         "cert_file": "certs/janus.crt",
         "key_file": "certs/janus.key",
         "min_version": "1.2"
+      },
+      "http3": {
+        "max_concurrent_streams": 100
       }
     }
   },
