@@ -7,6 +7,7 @@ import (
 	"net/url"
 
 	"janus/internal/config"
+	"janus/internal/health"
 	"janus/internal/middleware"
 	"janus/internal/proxy"
 	"janus/internal/router"
@@ -20,6 +21,7 @@ type Gateway struct {
 	standalone     http.Handler
 	transport      *http.Transport
 	ownedTransport *http.Transport
+	checkers       []*health.Checker
 }
 
 func New(c config.Config, logger *zap.Logger) (*Gateway, error) {
@@ -53,6 +55,19 @@ func NewWithTransportAndLimiters(c config.Config, logger *zap.Logger, transport 
 		ownedTransport = proxy.NewTransport(c.Settings.Backend)
 		transport = ownedTransport
 	}
+	checkers := make([]*health.Checker, 0)
+	committed := false
+	defer func() {
+		if committed {
+			return
+		}
+		for _, checker := range checkers {
+			checker.Close()
+		}
+		if ownedTransport != nil {
+			ownedTransport.CloseIdleConnections()
+		}
+	}()
 	services := make(map[string]http.Handler, len(c.Services))
 	for name, service := range c.Services {
 		targets := make([]*url.URL, 0, len(service.Upstreams))
@@ -67,7 +82,34 @@ func NewWithTransportAndLimiters(c config.Config, logger *zap.Logger, transport 
 		//pool is slice contains all the upstream url corresponding to a service
 		// pool 就是一个service的upstream的切片 然后有一个next方法 可以round robin的方式返回下一个url
 		// 这样就可以负载均衡
-		pool, err := upstream.New(targets)
+		var healthChecker *health.Checker
+		var pool *upstream.Pool
+		var err error
+		if service.HealthCheck != nil {
+			check := service.HealthCheck.WithDefaults()
+			healthTargets := make([]url.URL, len(targets))
+			for i, target := range targets {
+				healthTargets[i] = *target
+			}
+			healthChecker, err = health.New(healthTargets, health.Settings{
+				Path:               check.Path,
+				Interval:           check.Interval.Duration(),
+				Timeout:            check.Timeout.Duration(),
+				Jitter:             check.Jitter.Duration(),
+				UnhealthyThreshold: check.UnhealthyThreshold,
+				HealthyThreshold:   check.HealthyThreshold,
+				ExpectedStatus:     check.ExpectedStatus,
+			}, transport, logger.With(zap.String("service", name)))
+			if err != nil {
+				return nil, fmt.Errorf("service %q health check: %w", name, err)
+			}
+			checkers = append(checkers, healthChecker)
+		}
+		if healthChecker != nil {
+			pool, err = upstream.NewWithHealth(targets, healthChecker.Store())
+		} else {
+			pool, err = upstream.New(targets)
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -99,6 +141,7 @@ func NewWithTransportAndLimiters(c config.Config, logger *zap.Logger, transport 
 	// Every Route has a handler . So if the request has matched a route, the handler corresponding to the route will handler the request.
 	// And will only use the shared transport
 	routeHandler := router.New(routes)
+	committed = true
 	return &Gateway{
 		handler: routeHandler,
 		standalone: middleware.Chain(
@@ -110,6 +153,7 @@ func NewWithTransportAndLimiters(c config.Config, logger *zap.Logger, transport 
 		),
 		transport:      ownedTransport,
 		ownedTransport: ownedTransport,
+		checkers:       checkers,
 	}, nil
 }
 
@@ -152,6 +196,9 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (g *Gateway) Handler() http.Handler { return g.handler }
 
 func (g *Gateway) Close() {
+	for _, checker := range g.checkers {
+		checker.Close()
+	}
 	if g.ownedTransport != nil {
 		g.ownedTransport.CloseIdleConnections()
 	}

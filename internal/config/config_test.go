@@ -94,6 +94,36 @@ func TestServiceMiddlewareConfig(t *testing.T) {
 	}
 }
 
+func TestServiceHealthCheckConfigAndDefaults(t *testing.T) {
+	body := `{"listen":"127.0.0.1:8080","services":{"s":{"upstreams":["http://localhost:9000"],"health_check":{"path":"/healthz","jitter":"250ms","unhealthy_threshold":3,"healthy_threshold":2,"expected_status":204}}},"routes":[{"name":"r","path_prefix":"/api","service":"s"}]}`
+	c, err := Load(strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	check := c.Services["s"].HealthCheck
+	if check == nil || check.Interval.Duration() != 30*time.Second || check.Timeout.Duration() != 5*time.Second || check.Jitter.Duration() != 250*time.Millisecond || check.UnhealthyThreshold != 3 || check.HealthyThreshold != 2 || check.ExpectedStatus != 204 {
+		t.Fatalf("health check defaults/configuration = %+v", check)
+	}
+
+	base := `{"listen":"127.0.0.1:8080","services":{"s":{"upstreams":["http://localhost:9000"],"health_check":{"path":"/healthz"}}},"routes":[{"name":"r","path_prefix":"/api","service":"s"}]}`
+	for _, tc := range []struct {
+		name string
+		body string
+	}{
+		{"missing path", strings.Replace(base, `"path":"/healthz"`, `"path":""`, 1)},
+		{"timeout exceeds interval", strings.Replace(base, `"path":"/healthz"`, `"path":"/healthz","interval":"1s","timeout":"2s"`, 1)},
+		{"jitter exceeds interval", strings.Replace(base, `"path":"/healthz"`, `"path":"/healthz","interval":"1s","jitter":"2s"`, 1)},
+		{"invalid threshold", strings.Replace(base, `"path":"/healthz"`, `"path":"/healthz","unhealthy_threshold":101`, 1)},
+		{"invalid status", strings.Replace(base, `"path":"/healthz"`, `"path":"/healthz","expected_status":199`, 1)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := Load(strings.NewReader(tc.body)); err == nil {
+				t.Fatal("expected health check validation error")
+			}
+		})
+	}
+}
+
 func TestInFlightMiddlewareConfig(t *testing.T) {
 	valid := `{"listen":"127.0.0.1:8080","middlewares":{"cap":{"in_flight":{"max_concurrent":2}}},"services":{"s":{"upstreams":["http://localhost:9000"],"middlewares":["cap"]}},"routes":[{"name":"r","path_prefix":"/api","service":"s"}]}`
 	if _, err := Load(strings.NewReader(valid)); err != nil {

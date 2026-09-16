@@ -17,9 +17,9 @@ constructs each router, service proxies, pools, and route middleware generation.
 The fixed global protocol guard, admission cap, request observation and overall
 deadline are applied once by runtime. The route-level `buffer`, route/service
 `body_limit`, service `in_flight`, versioned routing reload, TLS
-certificate-content rotation, and protocol-scoped streaming routes are
-implemented; admin liveness/readiness is wired at process scope, while health
-probes remain planned.
+certificate-content rotation, protocol-scoped streaming routes, and
+service-owned active health probes are implemented; admin liveness/readiness is
+wired at process scope, while trusted forwarding and metrics remain planned.
 
 The concrete multi-protocol and reload design is in
 [limen-runtime.md](limen-runtime.md). Limen owns protocol servers, runtime owns
@@ -115,7 +115,7 @@ response through a generic panic-recovery wrapper.
 | `routes[].middlewares` | Ordered policies for the matched route; route-level `buffer` is implemented first | Phase 1/2 |
 | `services.<name>.middlewares` | Ordered policies on the shared service handler | Phase 2 |
 | Global admission, drain and admin settings | Process/listener lifecycle | Admission, admin health, bounded removal delay and total drain budget implemented |
-| Health probes | Per-service resource lifecycle | Phase 4 |
+| Health probes | Per-service resource lifecycle | Phase 4 complete |
 | Trusted proxy CIDRs and identity rules | Listener trust policy with proxy rewrite integration | Phase 4 |
 | Routing file and generation publication | Runtime; strict build-before-swap transaction | 2B/2D |
 | Certificate/key pair rotation | Limen; validated identity for new handshakes | 2D |
@@ -238,10 +238,10 @@ files below are responsibilities, not empty directories to scaffold immediately.
 | `internal/middleware` | `chain.go`, `timeout.go`, then IDs, observation, body limits and admission | 1–3 |
 | `internal/router` | Immutable host/path matching against prebuilt `http.Handler` | Existing |
 | `internal/proxy` | ReverseProxy, outbound transport, trusted-header rewrite, error mapping | Existing |
-| `internal/upstream` | Concurrent target selection; later health-based eligibility | Existing; health in 4 |
+| `internal/upstream` | Concurrent target selection and health-based eligibility | Existing; active health in 4 |
 | `internal/telemetry` | Request outcome type and access logging; later metrics exporters | 2 and 4 |
 | `internal/admin` | Private liveness/readiness handlers; later metrics endpoint | 3 |
-| `internal/health` | Bounded scheduled probes and recovery state transitions | 4 |
+| `internal/health` | Bounded scheduled probes and recovery state transitions | 4 complete |
 | `internal/runtime` | Stable dispatcher, generation publication, request references, file reload and resource retirement | 2D complete |
 | `test/integration`, `test/load`, `deploy` | Cross-package scenarios, load evidence, deployment artifacts | As scenarios arrive |
 

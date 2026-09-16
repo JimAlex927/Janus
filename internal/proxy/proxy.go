@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httputil"
+	"net/url"
 	"strings"
 
 	"janus/internal/config"
@@ -67,11 +68,15 @@ func New(pool *upstream.Pool, transport http.RoundTripper, logger *zap.Logger) h
 	if logger == nil {
 		logger = zap.NewNop()
 	}
-	return &httputil.ReverseProxy{
+	reverseProxy := &httputil.ReverseProxy{
 		Transport: transport,
 		Rewrite: func(r *httputil.ProxyRequest) {
-			//pool再次出现 是之前每个service对应的下游切片 这里是每个service返回一个reverse proxy
-			target := pool.Next()
+			target, ok := targetFromContext(r.In.Context())
+			if !ok {
+				// Keep the ReverseProxy safe for direct embedding while the
+				// normal handler selects a target before entering it.
+				target = pool.Next()
+			}
 			r.SetURL(&target)
 			// Rewrite already removes the standard forwarding headers. Remove
 			// alternate identity hints too; v0 trusts only its immediate peer.
@@ -107,4 +112,24 @@ func New(pool *upstream.Pool, transport http.RoundTripper, logger *zap.Logger) h
 			http.Error(w, http.StatusText(status), status)
 		},
 	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		target, ok := pool.NextHealthy()
+		if !ok {
+			telemetry.MarkError(r.Context(), "all_unhealthy")
+			http.Error(w, "no healthy upstream is available", http.StatusServiceUnavailable)
+			return
+		}
+		reverseProxy.ServeHTTP(w, r.WithContext(withTarget(r.Context(), target)))
+	})
+}
+
+type targetKey struct{}
+
+func withTarget(ctx context.Context, target url.URL) context.Context {
+	return context.WithValue(ctx, targetKey{}, target)
+}
+
+func targetFromContext(ctx context.Context) (url.URL, bool) {
+	target, ok := ctx.Value(targetKey{}).(url.URL)
+	return target, ok
 }

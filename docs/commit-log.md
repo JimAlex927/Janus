@@ -5,6 +5,36 @@ repository commit. Add a new dated section before every future commit.
 
 ## 2026-09-16
 
+### Add service active health probes
+
+Commit message: `feat(health): add active service upstream checks`
+
+Scope:
+
+- Added optional service `health_check` configuration with bounded interval,
+  timeout, jitter, failure/recovery thresholds and expected status.
+- Added a service-owned bounded probe worker pool and synchronized health store;
+  probes close/drain bounded response data and are canceled with generation
+  retirement.
+- Made upstream selection skip excluded targets and return 503 when every
+  target is unhealthy. Initial eligibility remains healthy until probe evidence
+  says otherwise; only active checks are implemented, not passive failure
+  marking.
+- Added configuration, threshold, cancellation, selection and gateway
+  integration tests, plus a runnable health-check example.
+
+Verification:
+
+- `gofmt` on touched Go files
+- `go test ./...`
+- `go vet ./...`
+- `go build -o bin/janus.exe ./cmd/janus`
+- `go run ./cmd/janus -check` for the runnable configuration examples
+- `git diff --check`
+
+Scope note: trusted proxy identity, metrics and overall production
+qualification remain future work.
+
 ### Stop admission before bounded shutdown removal delay
 
 Commit message: `feat(lifecycle): add admission-aware removal delay`

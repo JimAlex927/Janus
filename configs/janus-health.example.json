@@ -1,0 +1,20 @@
+{
+  "listen": "127.0.0.1:8080",
+  "services": {
+    "example": {
+      "upstreams": ["http://127.0.0.1:9000"],
+      "health_check": {
+        "path": "/healthz",
+        "interval": "10s",
+        "timeout": "3s",
+        "jitter": "1s",
+        "unhealthy_threshold": 3,
+        "healthy_threshold": 2,
+        "expected_status": 204
+      }
+    }
+  },
+  "routes": [
+    { "name": "example-api", "path_prefix": "/api", "service": "example" }
+  ]
+}

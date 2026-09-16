@@ -8,11 +8,13 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 )
 
 const MaxConfigBytes = 1 << 20
@@ -71,8 +73,46 @@ type InFlightSettings struct {
 }
 
 type Service struct {
-	Upstreams   []string `json:"upstreams"`
-	Middlewares []string `json:"middlewares"`
+	Upstreams   []string             `json:"upstreams"`
+	Middlewares []string             `json:"middlewares"`
+	HealthCheck *HealthCheckSettings `json:"health_check,omitempty"`
+}
+
+// HealthCheckSettings controls optional active HTTP health probes for every
+// upstream in a service. A nil value leaves the service in round-robin mode.
+// Zero values are filled by WithDefaults when the check is enabled.
+type HealthCheckSettings struct {
+	Path               string   `json:"path"`
+	Interval           Duration `json:"interval"`
+	Timeout            Duration `json:"timeout"`
+	Jitter             Duration `json:"jitter"`
+	UnhealthyThreshold int      `json:"unhealthy_threshold"`
+	HealthyThreshold   int      `json:"healthy_threshold"`
+	ExpectedStatus     int      `json:"expected_status"`
+}
+
+const (
+	DefaultHealthCheckInterval = Duration(30 * time.Second)
+	DefaultHealthCheckTimeout  = Duration(5 * time.Second)
+	DefaultHealthCheckFailures = 1
+	DefaultHealthCheckPasses   = 1
+	MaxHealthCheckThreshold    = 100
+)
+
+func (s HealthCheckSettings) WithDefaults() HealthCheckSettings {
+	if s.Interval == 0 {
+		s.Interval = DefaultHealthCheckInterval
+	}
+	if s.Timeout == 0 {
+		s.Timeout = DefaultHealthCheckTimeout
+	}
+	if s.UnhealthyThreshold == 0 {
+		s.UnhealthyThreshold = DefaultHealthCheckFailures
+	}
+	if s.HealthyThreshold == 0 {
+		s.HealthyThreshold = DefaultHealthCheckPasses
+	}
+	return s
 }
 
 type Route struct {
@@ -178,6 +218,11 @@ func (c Config) Validate() error {
 	for name, s := range c.Services {
 		if name == "" || len(s.Upstreams) == 0 {
 			return fmt.Errorf("service %q needs a name and upstreams", name)
+		}
+		if s.HealthCheck != nil {
+			if err := validateHealthCheck(name, s.HealthCheck.WithDefaults()); err != nil {
+				return err
+			}
 		}
 		seen := map[string]bool{}
 		for _, raw := range s.Upstreams {
@@ -304,6 +349,37 @@ func (c Config) Validate() error {
 	return nil
 }
 
+func validateHealthCheck(service string, check HealthCheckSettings) error {
+	if check.Path == "" || !strings.HasPrefix(check.Path, "/") || strings.ContainsAny(check.Path, "?#%\\ \t\r\n") {
+		return fmt.Errorf("service %q health_check.path must be an unescaped absolute path", service)
+	}
+	if err := validateDuration("health_check.interval", check.Interval); err != nil {
+		return fmt.Errorf("service %q: %w", service, err)
+	}
+	if err := validateDuration("health_check.timeout", check.Timeout); err != nil {
+		return fmt.Errorf("service %q: %w", service, err)
+	}
+	if check.Timeout.Duration() > check.Interval.Duration() {
+		return fmt.Errorf("service %q health_check.timeout must not exceed interval", service)
+	}
+	if check.Jitter.Duration() < 0 || check.Jitter.Duration() > MaxSettingDuration {
+		return fmt.Errorf("service %q health_check.jitter must be between 0s and %s", service, MaxSettingDuration)
+	}
+	if check.Jitter.Duration() > check.Interval.Duration() {
+		return fmt.Errorf("service %q health_check.jitter must not exceed interval", service)
+	}
+	if check.UnhealthyThreshold < 1 || check.UnhealthyThreshold > MaxHealthCheckThreshold {
+		return fmt.Errorf("service %q health_check.unhealthy_threshold must be between 1 and %d", service, MaxHealthCheckThreshold)
+	}
+	if check.HealthyThreshold < 1 || check.HealthyThreshold > MaxHealthCheckThreshold {
+		return fmt.Errorf("service %q health_check.healthy_threshold must be between 1 and %d", service, MaxHealthCheckThreshold)
+	}
+	if check.ExpectedStatus != 0 && (check.ExpectedStatus < http.StatusOK || check.ExpectedStatus > 599) {
+		return fmt.Errorf("service %q health_check.expected_status must be 0 or between 200 and 599", service)
+	}
+	return nil
+}
+
 // LimenBindings returns the validated inbound bindings. Legacy configurations
 // are normalized to one plaintext HTTP/1 binding named "default".
 func (c Config) LimenBindings() map[string]LimenConfig {
@@ -389,6 +465,17 @@ func validateTLSSettings(name string, settings *TLSSettings) error {
 // profile. Explicit non-zero values are preserved for validation.
 func (c Config) WithDefaults() Config {
 	c.Settings = c.Settings.WithDefaults()
+	if len(c.Services) > 0 {
+		services := make(map[string]Service, len(c.Services))
+		for name, service := range c.Services {
+			if service.HealthCheck != nil {
+				check := service.HealthCheck.WithDefaults()
+				service.HealthCheck = &check
+			}
+			services[name] = service
+		}
+		c.Services = services
+	}
 	return c
 }
 

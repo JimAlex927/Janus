@@ -65,6 +65,7 @@ internal/proxy/        reverse proxy and shared outbound transport
 internal/runtime/      stable generations and versioned file reload
 configs/janus.json     local example configuration
 configs/janus-streaming.example.json  SSE/WebSocket route example
+configs/janus-health.example.json     active upstream health-check example
 examples/backend/     local test service
 docs/                  architecture, delivery plan, protocol learning guide
 ```
@@ -85,10 +86,14 @@ still require restart. Legacy configurations remain startup-only.
 
 ## Current limits
 
-- No health-based removal: failed backends remain in round-robin rotation.
+- Optional service-owned active HTTP health checks remove failed upstreams from
+  rotation and re-add them after the configured recovery threshold. Checks use
+  bounded workers, per-probe timeouts, optional jitter and status-only success;
+  a service with no eligible upstream returns 503. Passive failure marking and
+  application-level health semantics are not enabled.
 - No application retry loop. Go's transport can still retry certain replayable
   requests on connection failures; see the protocol guide.
-- No metrics or health probes yet. An optional loopback-only admin listener
+- Metrics are not exposed yet. An optional loopback-only admin listener
   exposes `/livez` and `/readyz`; readiness is cleared before graceful drain. A fixed non-waiting global
   admission cap defaults to 1024 requests and named `in_flight` middleware adds
   a service-scoped cap; saturated requests receive 503 without queueing. Named

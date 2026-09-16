@@ -20,8 +20,8 @@ The composition contract, package ownership, and proposed configuration are in
 They do not imply configuration compatibility with Traefik.
 
 This document separates implemented work from future phases. The accepted
-configuration now includes consumed timeout, admission, admin and named
-middleware fields; remaining phases add health, metrics and deployment
+configuration now includes consumed timeout, admission, admin, named middleware
+and service health-check fields; remaining phases add trusted identity, metrics
 qualification rather than speculative unused settings.
 
 ## Current baseline and the original item1
@@ -31,8 +31,9 @@ streaming reverse proxying, HTTPS certificate verification, typed server and
 transport settings, a startup-built middleware chain, request-context
 cancellation, the `internal/limen` HTTP/1 lifecycle, and native TLS/HTTP/2
 bindings. Shutdown uses a validated configurable drain budget. Body limits,
-admission, access observation and optional admin endpoints are implemented;
-health checks are not. Versioned routing reload and TLS certificate rotation are
+admission, access observation, optional admin endpoints and service-owned active
+health checks are implemented; trusted forwarding and metrics are not. Versioned
+routing reload and TLS certificate rotation are
 now implemented; legacy single-file mode remains startup-only.
 
 The original item1 was settings/deadline configuration, not all of Phase 1.
@@ -102,7 +103,7 @@ Phase 0 profile; Phase 2C now adds native TLS/H2 startup support.
 | Identity and authorization | The backend owns business authorization. Until a trusted-proxy policy exists, Janus trusts only the immediate peer and rewrites forwarding headers from that hop. |
 | Routing | Exact case-insensitive host rules without ports take precedence over hostless rules; the longest segment-bounded path prefix wins. No prefix stripping or path normalization is performed. |
 | Time budgets | The starter profile uses 5s header read, 30s request read, 30s overall context, 35s server write, and 10s backend response-header budgets. `server.write_timeout` stays greater than the overall budget. |
-| Size and overload | Header/body size bounds and fixed/service admission are implemented. Health-based removal remains a later-phase policy; drain is configurable and bounded. |
+| Size and overload | Header/body size bounds, fixed/service admission and active health-based removal are implemented; drain is configurable and bounded. |
 | Composition and ownership | A fixed global chain wraps the router; matched routes use ordered route middleware; each service owns one shared proxy/pool; the transport is shared by services with the same policy. |
 | Failure semantics | Unmatched requests are 404, unsupported CONNECT/Upgrade requests are 501, upstream failures are 502, and pre-commitment overall timeouts are 504 when the socket is writable. Committed responses are never rewritten. |
 
@@ -291,8 +292,9 @@ gateway for production; Phase 6 qualification remains required.
 3. The separate loopback/private admin listener with `/livez` and `/readyz` is
    implemented. Readiness becomes true only after all configured business
    listeners bind and start, and is cleared before graceful drain. Admin health
-   requests bypass business admission; one unhealthy service does not make the
-   whole gateway unready until Phase 4 health integration exists.
+   requests bypass business admission; service health affects target selection,
+   not process readiness, so one unhealthy service does not make the whole
+   gateway unready.
 4. Configurable drain budget is implemented through
    `settings.shutdown.drain_timeout`; omitted values follow `server.write_timeout`
    and shorter values are rejected. Shutdown marks readiness false and stops
@@ -302,9 +304,11 @@ gateway for production; Phase 6 qualification remains required.
 
 ## Phase 4 tasks
 
-1. Add service-owned active probes with interval, timeout, jitter, consecutive
-   failure/recovery thresholds, and all-unhealthy 503 behavior. Close response
-   bodies and bound worker count. Probe lifecycle is independent of requests.
+1. Complete: service-owned active probes use interval, timeout, jitter,
+   consecutive failure/recovery thresholds, and all-unhealthy 503 behavior.
+   Response bodies are closed after a bounded drain, worker count is capped,
+   and probe lifecycle is independent of requests. Candidate generations start
+   probes before publication and stop them when their resources retire.
 2. Add trusted-proxy CIDRs with a reviewed multi-hop identity policy. Derive
    identity from the immediate peer and validated headers, then let proxy rewrite
    emit canonical headers. Test untrusted spoofing, malformed chains, and HTTPS

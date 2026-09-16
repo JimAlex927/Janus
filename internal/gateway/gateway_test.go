@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -493,5 +494,53 @@ func TestServiceBodyLimitAppliesToAllRoutes(t *testing.T) {
 	case <-called:
 		t.Fatal("service body limit allowed an oversized request to reach the backend")
 	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+func TestAllUnhealthyServiceReturns503WithoutForwarding(t *testing.T) {
+	var userCalls atomic.Int64
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/healthz" {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		userCalls.Add(1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer backend.Close()
+	g := testGatewayWithConfig(t, config.Config{
+		Listen: "127.0.0.1:8080",
+		Services: map[string]config.Service{
+			"s": {
+				Upstreams: []string{backend.URL},
+				HealthCheck: &config.HealthCheckSettings{
+					Path:               "/healthz",
+					Interval:           config.Duration(20 * time.Millisecond),
+					Timeout:            config.Duration(10 * time.Millisecond),
+					UnhealthyThreshold: 1,
+					HealthyThreshold:   1,
+				},
+			},
+		},
+		Routes: []config.Route{{Name: "api", PathPrefix: "/api", Service: "s"}},
+	})
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		w := httptest.NewRecorder()
+		g.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "http://gateway/api", nil))
+		if w.Code == http.StatusServiceUnavailable {
+			break
+		}
+		// Targets start eligible until the first probe completes. Ignore that
+		// expected warm-up request and assert no forwarding after exclusion.
+		userCalls.Store(0)
+		if time.Now().After(deadline) {
+			t.Fatalf("service never became unavailable; last status=%d", w.Code)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if got := userCalls.Load(); got != 0 {
+		t.Fatalf("unhealthy service forwarded %d user requests", got)
 	}
 }
