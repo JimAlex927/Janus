@@ -2,19 +2,19 @@ package gateway
 
 import (
 	"io"
-	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
+	"go.uber.org/zap"
 	"janus/internal/config"
 )
 
 func testGateway(t *testing.T, upstream string) *Gateway {
 	t.Helper()
-	g, err := New(config.Config{Listen: "127.0.0.1:8080", Services: map[string]config.Service{"s": {Upstreams: []string{upstream}}}, Routes: []config.Route{{Name: "api", PathPrefix: "/api", Service: "s"}}}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	g, err := New(config.Config{Listen: "127.0.0.1:8080", Services: map[string]config.Service{"s": {Upstreams: []string{upstream}}}, Routes: []config.Route{{Name: "api", PathPrefix: "/api", Service: "s"}}}, zap.NewNop())
 	if err != nil {
 		t.Fatal(err)
 	}

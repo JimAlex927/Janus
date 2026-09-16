@@ -27,6 +27,7 @@ func New(targets []*url.URL) (*Pool, error) {
 }
 
 // Next returns a copy so a caller cannot mutate the shared configuration.
+// 这里是round robin式的取出下游链接 还有其他负载均衡的方式 TODO
 func (p *Pool) Next() url.URL {
 	return p.targets[(p.next.Add(1)-1)%uint64(len(p.targets))]
 }

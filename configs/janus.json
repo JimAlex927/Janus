@@ -1,9 +1,10 @@
 {
   "listen": "127.0.0.1:8080",
-  "services": {
-    "example": { "upstreams": ["http://127.0.0.1:9000"] }
-  },
   "routes": [
     { "name": "example-api", "host": "", "path_prefix": "/api", "service": "example" }
-  ]
+  ],
+  "services": {
+    "example": { "upstreams": ["http://127.0.0.1:9000"] }
+  }
+
 }

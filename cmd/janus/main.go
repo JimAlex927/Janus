@@ -5,7 +5,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -15,25 +14,36 @@ import (
 
 	"janus/internal/config"
 	"janus/internal/gateway"
+	appLogger "janus/pkg/logger"
+
+	"go.uber.org/zap"
 )
 
 func main() {
 
-	//----------1、parse the argument in the exe command-----------
+	//1、parse the argument in the exe command-----------
 	path := flag.String("config", "configs/janus.json", "configuration file")
 	check := flag.Bool("check", false, "validate configuration and exit")
 	flag.Parse()
-	//--------------------------------------------------------------
-	logger := slog.New(slog.NewJSONHandler(os.Stderr, nil))
+	//2、logger init---------------------------------
+	logger, cleanup, err := appLogger.New(appLogger.DefaultConfig())
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "initialize logger: %v\n", err)
+		os.Exit(1)
+	}
+	defer func() { _ = cleanup() }()
+	//3、graceful exit preparation.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	//4、Run : the core logics
 	if err := run(ctx, *path, *check, logger); err != nil {
-		logger.Error("janus stopped", "error", err)
+		logger.Error("janus stopped", zap.Error(err))
 		os.Exit(1)
 	}
 }
 
-func run(ctx context.Context, path string, check bool, logger *slog.Logger) error {
+func run(ctx context.Context, path string, check bool, logger *zap.Logger) error {
+	//open the janus json config file
 	f, err := os.Open(path)
 	if err != nil {
 		return err
@@ -43,22 +53,27 @@ func run(ctx context.Context, path string, check bool, logger *slog.Logger) erro
 	if err != nil {
 		return err
 	}
+	//check is used for what? TODO
 	if check {
 		logger.Info("configuration valid")
 		return nil
 	}
-	g, err := gateway.New(c, logger)
+	// construct gateway ,gateway is constructed with routers, router contain reverse handler.
+	gatewayWithinHandlers, err := gateway.New(c, logger)
 	if err != nil {
 		return err
 	}
-	defer g.Close()
-	srv := gateway.NewServer(c.Listen, g)
+	defer gatewayWithinHandlers.Close()
+	//Start the server
+	srv := gateway.NewServer(c.Listen, gatewayWithinHandlers)
+	//listen the specified network  and address.
 	ln, err := net.Listen("tcp", c.Listen)
 	if err != nil {
 		return err
 	}
-	logger.Info("janus listening", "address", ln.Addr().String())
+	logger.Info("janus listening", zap.String("address", ln.Addr().String()))
 	done := make(chan error, 1)
+	//bind the server to the net listening
 	go func() { done <- srv.Serve(ln) }()
 	select {
 	case err := <-done:

@@ -3,14 +3,13 @@ package proxy
 import (
 	"context"
 	"errors"
-	"io"
-	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"testing"
 	"time"
 
+	"go.uber.org/zap"
 	"janus/internal/upstream"
 )
 
@@ -30,7 +29,7 @@ func TestErrorMapping(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			pool, _ := upstream.New([]*url.URL{u})
-			p := New(pool, roundTripFunc(func(*http.Request) (*http.Response, error) { return nil, tc.err }), slog.New(slog.NewTextHandler(io.Discard, nil)))
+			p := New(pool, roundTripFunc(func(*http.Request) (*http.Response, error) { return nil, tc.err }), zap.NewNop())
 			w := httptest.NewRecorder()
 			p.ServeHTTP(w, httptest.NewRequest("GET", "http://gateway/", nil))
 			if w.Code != tc.status {
@@ -52,7 +51,7 @@ func TestCancellationReachesBackend(t *testing.T) {
 	pool, _ := upstream.New([]*url.URL{u})
 	transport := NewTransport()
 	defer transport.CloseIdleConnections()
-	p := New(pool, transport, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	p := New(pool, transport, zap.NewNop())
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	r := httptest.NewRequest("GET", "http://gateway/", nil).WithContext(ctx)
