@@ -21,7 +21,7 @@ They do not imply configuration compatibility with Traefik.
 
 This document separates implemented work from future phases. The accepted
 configuration now includes consumed timeout, admission, admin, named middleware,
-service health-check and trusted-proxy fields; remaining phases add metrics and deployment
+service health-check, trusted-proxy and metrics fields; remaining phases add deployment
 qualification rather than speculative unused settings.
 
 ## Current baseline and the original item1
@@ -32,7 +32,7 @@ transport settings, a startup-built middleware chain, request-context
 cancellation, the `internal/limen` HTTP/1 lifecycle, and native TLS/HTTP/2
 bindings. Shutdown uses a validated configurable drain budget. Body limits,
 admission, access observation, optional admin endpoints and service-owned active
-health checks and trusted forwarding are implemented; metrics are not. Versioned
+health checks, trusted forwarding and metrics are implemented. Versioned
 routing reload and TLS certificate rotation are
 now implemented; legacy single-file mode remains startup-only.
 
@@ -79,11 +79,11 @@ not just configuration types. Size effort after each phase's exit review.
 | 2E: long-lived HTTP protocols | Explicit SSE and classic HTTP/1 WebSocket route modes | Complete: event flush, upgrade/frame forwarding, timeout bypass, and bounded upgraded-connection drain pass |
 | 2F: usable request policies | Named body-limit policies, request IDs, access observation | Policies compose in order; early rejection, upload limits, trailers, and incomplete responses covered on H1/H2 |
 | 3: bounded operation | Global/service admission, admin readiness, configurable drain | Complete: overload, shared service limits, readiness-first stop-admission, bounded removal delay and total shutdown budget |
-| 4: backend and trust policy | Active health checks, trusted forwarding identity, metrics | In progress: health and trust are complete; metrics and telemetry export remain |
+| 4: backend and trust policy | Active health checks, trusted forwarding identity, metrics | Complete for the bounded HTTP metrics/trust scope; production qualification remains Phase 6 |
 | 5: HTTP/3 and deployment lifecycle | QUIC adapter reusing runtime; deployment artifacts | H3 forwarding, reload, cancellation, TLS rotation, UDP failure/fallback and coordinated drain tests pass |
 | 6: production qualification | Linux CI, security review, realistic load/soak tests, canary | All release gates pass for a named build and environment |
 
-Completed order is 1Q -> 2A -> 2B -> 2C -> 2D -> 2E -> 2F -> 3. Phase 4 health/trust is complete in part; next delivery is metrics, then Phase 5 -> 6.
+Completed order is 1Q -> 2A -> 2B -> 2C -> 2D -> 2E -> 2F -> 3. Phase 4 bounded health/trust/metrics is complete; next delivery is Phase 5 -> 6.
 Phase 2C delivers the first native H1/H2 milestone; Phase 2D adds dynamic-file
 updates and certificate rotation.
 Phase 5 adds H3. All production claims still require Phase 6 qualification for
@@ -314,10 +314,11 @@ gateway for production; Phase 6 qualification remains required.
    right-to-left multi-hop chain; proxy rewrite emits canonical XFF/XFP/XFH.
    Untrusted spoofing, malformed chains, trusted HTTPS scheme propagation and
    reload-safe limen policy comparisons are covered.
-3. Add `/metrics` to the admin listener: requests, errors, duration, in-flight,
-   rejections, backend health, drain duration, and the Phase 2D reload outcomes.
-   Labels use bounded route/service/error identifiers; never raw paths, hosts,
-   user IDs, or request IDs. Reuse the access observation outcome model.
+3. Complete: `/metrics` on the private admin listener reports requests, errors,
+   duration, in-flight, rejections, backend health, drain duration and reload
+   outcomes. Labels use bounded route/service/error identifiers and target
+   indexes; raw paths, hosts, user IDs and request IDs are excluded. It reuses
+   the access observation outcome model.
 
 ## Phase 5: HTTP/3 and deployment lifecycle
 

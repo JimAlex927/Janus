@@ -18,9 +18,9 @@ The fixed global protocol guard, admission cap, request observation and overall
 deadline are applied once by runtime. The route-level `buffer`, route/service
 `body_limit`, service `in_flight`, versioned routing reload, TLS
 certificate-content rotation, protocol-scoped streaming routes, and
-service-owned active health probes, and explicit per-limen trusted forwarding
-are implemented; admin liveness/readiness is wired at process scope, while
-metrics remain planned.
+service-owned active health probes, explicit per-limen trusted forwarding and
+the private admin metrics endpoint are implemented; admin liveness/readiness is
+wired at process scope.
 
 The concrete multi-protocol and reload design is in
 [limen-runtime.md](limen-runtime.md). Limen owns protocol servers, runtime owns
@@ -241,8 +241,8 @@ files below are responsibilities, not empty directories to scaffold immediately.
 | `internal/proxy` | ReverseProxy, outbound transport, trusted-header rewrite, error mapping | Existing |
 | `internal/forwarding` | Per-limen trusted CIDR matching and canonical forwarded identity | Phase 4 complete |
 | `internal/upstream` | Concurrent target selection and health-based eligibility | Existing; active health complete |
-| `internal/telemetry` | Request outcome type and access logging; later metrics exporters | 2 and 4 |
-| `internal/admin` | Private liveness/readiness handlers; later metrics endpoint | 3 |
+| `internal/telemetry` | Request outcome type, access logging and bounded metrics registry | 2 and 4 complete |
+| `internal/admin` | Private liveness/readiness and metrics handlers | 3/4 complete |
 | `internal/health` | Bounded scheduled probes and recovery state transitions | 4 complete |
 | `internal/runtime` | Stable dispatcher, generation publication, request references, file reload and resource retirement | 2D complete |
 | `test/integration`, `test/load`, `deploy` | Cross-package scenarios, load evidence, deployment artifacts | As scenarios arrive |

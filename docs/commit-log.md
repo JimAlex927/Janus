@@ -5,6 +5,36 @@ repository commit. Add a new dated section before every future commit.
 
 ## 2026-09-16
 
+### Add bounded admin metrics
+
+Commit message: `feat(observability): add bounded admin metrics`
+
+Scope:
+
+- Added one process-owned telemetry registry for request totals/errors/duration,
+  in-flight permits, admission rejections, reload outcomes and shutdown drain
+  duration.
+- Added `/metrics` to the optional loopback admin listener with Prometheus text
+  output and GET/HEAD method handling. Active-generation backend health is
+  exposed by service and target index only.
+- Capped metric series and label length; raw paths, hosts, request IDs, user
+  identifiers and upstream URLs are never stored or emitted. Reload and
+  generation replacement do not create duplicate registries.
+- Added formatter, admin endpoint, label-bound, admission and active health
+  integration coverage, plus lifecycle documentation.
+
+Verification:
+
+- `gofmt` on touched Go files
+- `go test ./...`
+- `go vet ./...`
+- `go build -o bin/janus.exe ./cmd/janus`
+- `go run ./cmd/janus -check` for the runnable configuration examples
+- `git diff --check`
+
+Scope note: metrics are operational telemetry, not production qualification;
+Linux/race/load/soak/security gates remain future work.
+
 ### Add per-limen trusted forwarded identity
 
 Commit message: `feat(security): add trusted proxy identity policy`

@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -65,6 +66,10 @@ func TestFileReloaderPublishesChangedGenerationAndKeepsLastGood(t *testing.T) {
 	}
 	if err := reloader.ReloadOnce(); err == nil {
 		t.Fatal("expected unchanged invalid configuration error")
+	}
+	metrics := string(r.Metrics().Render(nil))
+	if !strings.Contains(metrics, `janus_config_reload_total{result="success"} 1`) || !strings.Contains(metrics, `janus_config_reload_total{result="rejected"} 2`) {
+		t.Fatalf("reload metrics = %s", metrics)
 	}
 }
 

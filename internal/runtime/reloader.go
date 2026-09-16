@@ -54,6 +54,7 @@ func NewFileReloader(r *Runtime, path string, interval time.Duration, logger *za
 func (f *FileReloader) ReloadOnce() error {
 	c, hash, err := config.LoadFileSnapshot(f.path)
 	if err != nil {
+		f.runtime.metrics.RecordReload("rejected")
 		if f.remember(hash) {
 			f.logger.Error("configuration reload rejected", zap.String("path", f.path), zap.Error(err))
 		}
@@ -63,9 +64,11 @@ func (f *FileReloader) ReloadOnce() error {
 		return nil
 	}
 	if err := f.runtime.Replace(c); err != nil {
+		f.runtime.metrics.RecordReload("rejected")
 		f.logger.Error("configuration reload rejected", zap.String("path", f.path), zap.Error(err))
 		return err
 	}
+	f.runtime.metrics.RecordReload("success")
 	f.logger.Info("configuration reloaded", zap.String("path", f.path))
 	return nil
 }

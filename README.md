@@ -95,8 +95,9 @@ still require restart. Legacy configurations remain startup-only.
   application-level health semantics are not enabled.
 - No application retry loop. Go's transport can still retry certain replayable
   requests on connection failures; see the protocol guide.
-- Metrics are not exposed yet. An optional loopback-only admin listener
-  exposes `/livez` and `/readyz`; readiness is cleared before graceful drain. A fixed non-waiting global
+- An optional loopback-only admin listener exposes `/livez`, `/readyz` and
+  `/metrics`; readiness is cleared before graceful drain. Metrics use bounded
+  route/service/error labels and target indexes, never raw paths, hosts or IDs. A fixed non-waiting global
   admission cap defaults to 1024 requests and named `in_flight` middleware adds
   a service-scoped cap; saturated requests receive 503 without queueing. Named
   `body_limit` middleware bounds request bodies at route or service scope; multiple

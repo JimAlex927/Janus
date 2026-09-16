@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strconv"
 
 	"janus/internal/config"
 	"janus/internal/forwarding"
@@ -12,17 +13,19 @@ import (
 	"janus/internal/middleware"
 	"janus/internal/proxy"
 	"janus/internal/router"
+	"janus/internal/telemetry"
 	"janus/internal/upstream"
 
 	"go.uber.org/zap"
 )
 
 type Gateway struct {
-	handler        http.Handler
-	standalone     http.Handler
-	transport      *http.Transport
-	ownedTransport *http.Transport
-	checkers       []*health.Checker
+	handler         http.Handler
+	standalone      http.Handler
+	transport       *http.Transport
+	ownedTransport  *http.Transport
+	checkers        []*health.Checker
+	healthByService map[string]*health.Checker
 }
 
 func New(c config.Config, logger *zap.Logger) (*Gateway, error) {
@@ -57,6 +60,7 @@ func NewWithTransportAndLimiters(c config.Config, logger *zap.Logger, transport 
 		transport = ownedTransport
 	}
 	checkers := make([]*health.Checker, 0)
+	healthByService := make(map[string]*health.Checker)
 	committed := false
 	defer func() {
 		if committed {
@@ -113,6 +117,7 @@ func NewWithTransportAndLimiters(c config.Config, logger *zap.Logger, transport 
 				return nil, fmt.Errorf("service %q health check: %w", name, err)
 			}
 			checkers = append(checkers, healthChecker)
+			healthByService[name] = healthChecker
 		}
 		if healthChecker != nil {
 			pool, err = upstream.NewWithHealth(targets, healthChecker.Store())
@@ -160,9 +165,10 @@ func NewWithTransportAndLimiters(c config.Config, logger *zap.Logger, transport 
 			middleware.Timeout(c.Settings.Request.MaximumDuration.Duration()),
 			middleware.ClearStreamingWriteDeadline,
 		),
-		transport:      ownedTransport,
-		ownedTransport: ownedTransport,
-		checkers:       checkers,
+		transport:       ownedTransport,
+		ownedTransport:  ownedTransport,
+		checkers:        checkers,
+		healthByService: healthByService,
 	}, nil
 }
 
@@ -203,6 +209,25 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // Handler returns the route/service graph for embedding in a stable runtime
 // dispatcher. It intentionally excludes process-global middleware.
 func (g *Gateway) Handler() http.Handler { return g.handler }
+
+// HealthSnapshot returns only bounded service and target-index state for the
+// active generation. It intentionally does not expose upstream URLs.
+func (g *Gateway) HealthSnapshot() []telemetry.BackendHealth {
+	if g == nil {
+		return nil
+	}
+	result := make([]telemetry.BackendHealth, 0)
+	for service, checker := range g.healthByService {
+		for _, target := range checker.Store().Snapshot() {
+			result = append(result, telemetry.BackendHealth{
+				Service: service,
+				Target:  strconv.Itoa(target.Index),
+				Healthy: target.Healthy,
+			})
+		}
+	}
+	return result
+}
 
 func (g *Gateway) Close() {
 	for _, checker := range g.checkers {

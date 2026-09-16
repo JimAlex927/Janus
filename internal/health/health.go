@@ -40,6 +40,12 @@ type Store struct {
 	targets []targetState
 }
 
+// TargetStatus is a bounded scrape-time view of one target's state.
+type TargetStatus struct {
+	Index   int
+	Healthy bool
+}
+
 type targetState struct {
 	healthy  atomic.Bool
 	failures atomic.Int32
@@ -72,6 +78,19 @@ func (s *Store) AllUnhealthy() bool {
 		}
 	}
 	return true
+}
+
+// Snapshot returns target indexes and current eligibility without exposing
+// configured URLs to callers or metrics.
+func (s *Store) Snapshot() []TargetStatus {
+	if s == nil {
+		return nil
+	}
+	result := make([]TargetStatus, len(s.targets))
+	for i := range s.targets {
+		result[i] = TargetStatus{Index: i, Healthy: s.Healthy(i)}
+	}
+	return result
 }
 
 // Record applies one probe result and returns whether the eligibility state

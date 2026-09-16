@@ -84,7 +84,7 @@ func run(ctx context.Context, path string, check bool, reloadInterval time.Durat
 	if address := c.Settings.Admin.Address; address != "" {
 		adminState = admin.NewState()
 		adminServer = &http.Server{
-			Handler:           admin.NewHandler(adminState),
+			Handler:           admin.NewHandlerWithMetrics(adminState, requestRuntime.Metrics(), requestRuntime.HealthSnapshot),
 			ReadHeaderTimeout: c.Settings.Server.ReadHeaderTimeout.Duration(),
 			WriteTimeout:      c.Settings.Server.WriteTimeout.Duration(),
 			IdleTimeout:       c.Settings.Server.IdleTimeout.Duration(),
@@ -166,6 +166,8 @@ func run(ctx context.Context, path string, check bool, reloadInterval time.Durat
 		return err
 	case <-ctx.Done():
 		logger.Info("draining requests")
+		drainStarted := time.Now()
+		defer func() { requestRuntime.Metrics().RecordDrainDuration(time.Since(drainStarted)) }()
 		if adminState != nil {
 			adminState.SetReady(false)
 		}

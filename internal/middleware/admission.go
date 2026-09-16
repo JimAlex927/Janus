@@ -15,9 +15,18 @@ type Limiter struct {
 	limit     int
 	active    int
 	accepting bool
+	metrics   *telemetry.Metrics
+	scope     string
+	service   string
 }
 
 func NewLimiter(limit int) *Limiter { return &Limiter{limit: limit, accepting: true} }
+
+// NewLimiterWithMetrics creates an admission gate that also exports its
+// current permit gauge and rejection count.
+func NewLimiterWithMetrics(limit int, metrics *telemetry.Metrics, scope, service string) *Limiter {
+	return &Limiter{limit: limit, accepting: true, metrics: metrics, scope: scope, service: service}
+}
 
 func (l *Limiter) SetLimit(limit int) {
 	if l == nil {
@@ -45,9 +54,15 @@ func (l *Limiter) Acquire() bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if !l.accepting || l.limit < 1 || l.active >= l.limit {
+		if l.metrics != nil {
+			l.metrics.RecordRejection(l.scope, l.service, "capacity")
+		}
 		return false
 	}
 	l.active++
+	if l.metrics != nil {
+		l.metrics.AddInFlight(l.scope, l.service, 1)
+	}
 	return true
 }
 
@@ -58,6 +73,9 @@ func (l *Limiter) Release() {
 	l.mu.Lock()
 	if l.active > 0 {
 		l.active--
+		if l.metrics != nil {
+			l.metrics.AddInFlight(l.scope, l.service, -1)
+		}
 	}
 	l.mu.Unlock()
 }

@@ -578,4 +578,8 @@ func TestAllUnhealthyServiceReturns503WithoutForwarding(t *testing.T) {
 	if got := userCalls.Load(); got != 0 {
 		t.Fatalf("unhealthy service forwarded %d user requests", got)
 	}
+	snapshot := g.HealthSnapshot()
+	if len(snapshot) != 1 || snapshot[0].Healthy {
+		t.Fatalf("health snapshot = %+v, want one unhealthy target", snapshot)
+	}
 }

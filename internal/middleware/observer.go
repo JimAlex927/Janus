@@ -21,8 +21,15 @@ var fallbackRequestID uint64
 
 // Observe creates a request ID, records bounded request/response metadata and
 // emits one access entry after the wrapped handler returns. Client-supplied
-// request IDs are deliberately overwritten until a trusted-proxy policy exists.
+// request IDs are deliberately overwritten at the gateway boundary.
 func Observe(logger *zap.Logger) Middleware {
+	return ObserveWithMetrics(logger, nil)
+}
+
+// ObserveWithMetrics is the process-level observer with optional metrics
+// recording. Metrics are recorded after the same bounded outcome used for the
+// access log, so both surfaces share classification and labels.
+func ObserveWithMetrics(logger *zap.Logger, metrics *telemetry.Metrics) Middleware {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
@@ -51,7 +58,7 @@ func Observe(logger *zap.Logger) Middleware {
 						observation.MarkError("handler_panic")
 					}
 				}
-				logOutcome(logger, r, observation)
+				logOutcome(logger, r, observation, metrics)
 				if recovered != nil {
 					panic(recovered)
 				}
@@ -62,10 +69,13 @@ func Observe(logger *zap.Logger) Middleware {
 	}
 }
 
-func logOutcome(logger *zap.Logger, r *http.Request, observation *telemetry.Observation) {
+func logOutcome(logger *zap.Logger, r *http.Request, observation *telemetry.Observation, metrics *telemetry.Metrics) {
 	outcome := observation.Outcome()
 	if outcome.ErrorClass == "" {
 		outcome.ErrorClass = defaultErrorClass(outcome)
+	}
+	if metrics != nil {
+		metrics.RecordRequest(outcome, outcome.ErrorClass, time.Since(outcome.Started))
 	}
 	fields := []zap.Field{
 		zap.String("request_id", outcome.RequestID),

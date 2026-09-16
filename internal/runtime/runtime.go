@@ -13,6 +13,7 @@ import (
 	"janus/internal/gateway"
 	"janus/internal/middleware"
 	"janus/internal/proxy"
+	"janus/internal/telemetry"
 
 	"go.uber.org/zap"
 )
@@ -55,6 +56,7 @@ type Runtime struct {
 	transport *http.Transport
 	global    *middleware.Limiter
 	services  *serviceLimiterRegistry
+	metrics   *telemetry.Metrics
 	handler   http.Handler
 }
 
@@ -89,7 +91,8 @@ func NewWithBuilder(c config.Config, logger *zap.Logger, builder Builder) (*Runt
 	}
 
 	transport := proxy.NewTransport(c.Settings.Backend)
-	services := newServiceLimiterRegistry()
+	metrics := telemetry.NewMetrics()
+	services := newServiceLimiterRegistry(metrics)
 	initial, err := buildGeneration(builder, c, transport, logger, services)
 	if err != nil {
 		transport.CloseIdleConnections()
@@ -105,15 +108,16 @@ func NewWithBuilder(c config.Config, logger *zap.Logger, builder Builder) (*Runt
 		builder:   builder,
 		logger:    logger,
 		transport: transport,
-		global:    middleware.NewLimiter(c.Settings.Request.MaxInFlight),
+		global:    middleware.NewLimiterWithMetrics(c.Settings.Request.MaxInFlight, metrics, "global", ""),
 		services:  services,
+		metrics:   metrics,
 	}
 	// This chain is process-owned and is deliberately outside the replaceable
 	// generation. Its order preserves the existing behavior: observation wraps
 	// protocol guards, timeout, and active-generation dispatch.
 	r.handler = middleware.Chain(
 		http.HandlerFunc(r.dispatch),
-		middleware.Observe(logger),
+		middleware.ObserveWithMetrics(logger, metrics),
 		middleware.RejectUnsupportedProtocols,
 		middleware.Admission(r.global),
 		middleware.Timeout(c.Settings.Request.MaximumDuration.Duration()),
@@ -129,6 +133,27 @@ func DefaultBuilder(c config.Config, transport http.RoundTripper, logger *zap.Lo
 
 // Handler returns the stable dispatcher to install in Protocol Limen.
 func (r *Runtime) Handler() http.Handler { return r.handler }
+
+// Metrics returns the process-owned metrics registry used by the stable
+// observer, admission gates and lifecycle components.
+func (r *Runtime) Metrics() *telemetry.Metrics { return r.metrics }
+
+// HealthSnapshot protects the active generation while copying its bounded
+// service/target health state for the admin metrics endpoint.
+func (r *Runtime) HealthSnapshot() []telemetry.BackendHealth {
+	ref, ok := r.acquire()
+	if !ok {
+		return nil
+	}
+	defer r.release(ref)
+	snapshotter, ok := ref.generation.(interface {
+		HealthSnapshot() []telemetry.BackendHealth
+	})
+	if !ok {
+		return nil
+	}
+	return snapshotter.HealthSnapshot()
+}
 
 // ServeHTTP delegates to the stable dispatcher.
 func (r *Runtime) ServeHTTP(w http.ResponseWriter, req *http.Request) {
@@ -306,6 +331,16 @@ type managedGeneration struct {
 	once    sync.Once
 }
 
+func (g *managedGeneration) HealthSnapshot() []telemetry.BackendHealth {
+	snapshotter, ok := g.Generation.(interface {
+		HealthSnapshot() []telemetry.BackendHealth
+	})
+	if !ok {
+		return nil
+	}
+	return snapshotter.HealthSnapshot()
+}
+
 func (g *managedGeneration) Close() {
 	g.once.Do(func() {
 		defer g.release()
@@ -316,6 +351,7 @@ func (g *managedGeneration) Close() {
 type serviceLimiterRegistry struct {
 	mu      sync.Mutex
 	entries map[string]*serviceLimiterEntry
+	metrics *telemetry.Metrics
 }
 
 type serviceLimiterEntry struct {
@@ -323,8 +359,8 @@ type serviceLimiterEntry struct {
 	refs    int
 }
 
-func newServiceLimiterRegistry() *serviceLimiterRegistry {
-	return &serviceLimiterRegistry{entries: make(map[string]*serviceLimiterEntry)}
+func newServiceLimiterRegistry(metrics *telemetry.Metrics) *serviceLimiterRegistry {
+	return &serviceLimiterRegistry{entries: make(map[string]*serviceLimiterEntry), metrics: metrics}
 }
 
 func (r *serviceLimiterRegistry) acquire(c config.Config) (map[string]*middleware.Limiter, func(), func()) {
@@ -339,7 +375,7 @@ func (r *serviceLimiterRegistry) acquire(c config.Config) (map[string]*middlewar
 		}
 		entry := r.entries[name]
 		if entry == nil {
-			entry = &serviceLimiterEntry{limiter: middleware.NewLimiter(limit)}
+			entry = &serviceLimiterEntry{limiter: middleware.NewLimiterWithMetrics(limit, r.metrics, "service", name)}
 			r.entries[name] = entry
 		}
 		entry.refs++
