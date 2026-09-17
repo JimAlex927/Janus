@@ -147,8 +147,9 @@ through the normal HTTP response path and proxies classic HTTP/1 WebSocket
 upgrades through `ReverseProxy`; HTTP/3 uses the same `http.Handler` contract
 for ordinary requests and SSE. WebSocket extended CONNECT over HTTP/2 or H3 is
 not enabled. WebSocket routes must be explicitly declared with
-`"protocols": ["websocket"]`; SSE routes use `"protocols": ["sse"]`. The
-route-level buffer policy bypasses both streaming modes so it cannot delay
+`"protocols": ["websocket"]`; SSE routes use `"protocols": ["sse"]`. Both
+protocol classifiers require the standard `GET` request method. The route-level
+buffer policy bypasses both streaming modes so it cannot delay
 events or break the upgrade handshake.
 
 ## Reading list

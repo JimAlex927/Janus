@@ -104,7 +104,7 @@ document, with:
   document; route attachments may reference named Limens.
 - Route protocol modes: omitted or `http` for ordinary requests, `sse` for
   EventSource responses, and `websocket` for classic HTTP/1 upgrades. A route
-  must opt into the long-lived modes explicitly.
+  must opt into the long-lived modes explicitly; both modes require `GET`.
 - TLS identity: one configured certificate/key pair per TLS Limen initially.
   Multi-certificate SNI selection, mTLS policy reload, and ACME come later.
 

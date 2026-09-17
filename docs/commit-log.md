@@ -5,6 +5,27 @@ repository commit. Add a new dated section before every future commit.
 
 ## 2026-09-17
 
+### Require GET for long-lived protocol classification
+
+Commit message: `fix(protocol): require GET for SSE and WebSocket modes`
+
+Scope:
+
+- Restricted SSE and classic HTTP/1 WebSocket detection to the standard GET
+  method, preventing arbitrary POST requests from bypassing finite API timeout
+  and write-deadline policies.
+- Added protocol unit tests for both accepted GET and rejected POST cases.
+- Documented the method requirement in the protocol and Limen runtime guides.
+
+Verification:
+
+- `gofmt -w internal/protocol/context.go internal/protocol/context_test.go`
+- `go test ./internal/protocol ./internal/router ./internal/middleware ./internal/gateway`
+- `git diff --check`
+
+Scope note: this keeps HTTP/2 extended CONNECT, gRPC and arbitrary tunnels
+outside the supported protocol contract.
+
 ### Retry rejected TLS certificate fingerprints
 
 Commit message: `fix(reload): retry rejected certificate pairs`

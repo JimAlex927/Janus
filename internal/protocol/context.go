@@ -28,14 +28,14 @@ func LimenID(r *http.Request) string {
 // IsWebSocketRequest recognizes the RFC 6455 HTTP/1.1 opening handshake. The
 // HTTP/2 extended CONNECT form is intentionally not part of this milestone.
 func IsWebSocketRequest(r *http.Request) bool {
-	return r != nil && r.ProtoMajor == 1 && hasToken(r.Header.Values("Connection"), "upgrade") &&
+	return r != nil && r.Method == http.MethodGet && r.ProtoMajor == 1 && hasToken(r.Header.Values("Connection"), "upgrade") &&
 		strings.EqualFold(strings.TrimSpace(r.Header.Get("Upgrade")), "websocket")
 }
 
 // WantsSSE recognizes the standard EventSource request preference. SSE uses a
 // normal HTTP response and therefore remains compatible with HTTP/1 and H2.
 func WantsSSE(r *http.Request) bool {
-	if r == nil {
+	if r == nil || r.Method != http.MethodGet {
 		return false
 	}
 	for _, value := range r.Header.Values("Accept") {
