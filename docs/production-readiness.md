@@ -10,11 +10,11 @@ cross-compilation do not satisfy Linux execution or deployment gates.
 
 | Gate | Candidate evidence | Still required |
 | --- | --- | --- |
-| Accepted requests survive graceful drain | H3 client completes during shutdown; forced-drain tests retained; process-level lifecycle test exercises a real TCP client and bounded context cancellation | Execute on target Linux with concurrent TCP/UDP traffic |
+| Accepted requests survive graceful drain | H3 client completes during shutdown; forced-drain tests retained; process-level lifecycle test exercises a real TCP client and bounded context cancellation; Linux-only child-process H3 drain test added | Execute on target Linux with concurrent TCP/UDP traffic |
 | Stream timeouts release resources | Slow TCP reader terminates; H1/H2/H3 proxy tests assert body failure before client deadline, backend cancellation and released admission; HTTP/3 stream timeout closes a slow request body | Target Linux slow readers/uploads and concurrent sibling streams under load |
 | Reload matches published bytes | Startup hash comes from the runtime input snapshot; certificate hash/parse/publication use the same bounded bytes; startup race regressions | Repeated route/certificate replacement and rollback during load |
 | Correct timeout response | 103 followed by deadline returns final 504 | Protocol fault-injection campaign |
-| Linux/race | Pinned CI definition; Linux process SIGTERM test added and cross-compiled; Windows full test/vet plus repeated full tests and race pass | Actual full test/race/vet runs on VM; preserve logs |
+| Linux/race | Pinned CI definition; Linux process SIGTERM tests now cover TCP and H3 and cross-compile; Windows full test/vet plus repeated full tests and race pass | Actual full test/race/vet runs on VM; preserve logs |
 | Deployment | Native systemd unit and runbook | Install as non-root on VM, readiness, restart, ports, CA roots and resource caps |
 | Capacity | Configuration limits exist | Agree workload, measure overload and 24h soak |
 | Canary | Not started | Name non-core business, traffic split, baseline and rollback target; qualify first |
@@ -86,3 +86,7 @@ At commit `65375b8`, the full suite and full race suite were rerun after
 adding the process test, and
 `go test -count=50 -run '^TestRunLifecycle$' ./cmd/janus` passed to check
 for startup/reload/shutdown flakiness.
+The Linux-only H3 child-process test now also cross-compiles in
+`go test -c -o bin/janus-linux-tests ./cmd/janus` with
+`GOOS=linux GOARCH=amd64 CGO_ENABLED=0`. It has not been executed on Linux
+from this development host; the Linux VM gate remains open.

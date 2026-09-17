@@ -1373,3 +1373,30 @@ Follow-up stability verification:
 - `go test -count=1 ./...`
 - `go test -race -count=1 ./...`
 - `go vet ./...`
+
+## 2026-09-17
+
+### Add Linux process-level HTTP/3 drain coverage
+
+Commit message: `test(linux): cover process HTTP3 signal drain`
+
+Scope:
+
+- Added a Linux-only child-process test that binds real TCP and UDP sockets,
+  sends an HTTP/3 request through the built Janus binary, sends SIGTERM,
+  verifies readiness becomes unavailable, and verifies the accepted response
+  and process exit complete within the drain budget.
+- Added isolated test certificate generation and a shared-port reservation
+  helper for the real HTTP/3 process test.
+
+Verification:
+
+- `gofmt -w cmd/janus/lifecycle_linux_test.go`
+- `go test -c -o bin/janus-linux-tests ./cmd/janus` with
+  `GOOS=linux GOARCH=amd64 CGO_ENABLED=0`
+- `go test -count=1 ./...`
+- `go test -race -count=1 ./...`
+- `go vet ./...`
+
+Qualification note: the new Linux-only test was cross-compiled but not run
+until a Linux VM is available.
