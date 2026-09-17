@@ -1451,6 +1451,30 @@ Verification:
 
 ## 2026-09-17
 
+### Add a comprehensive configuration example
+
+Commit message: `docs(config): add comprehensive example profile`
+
+Scope:
+
+- Added `configs/janus-comprehensive.example.json` covering two Limens,
+  plaintext HTTP/1, TLS HTTP/1.1 and HTTP/2, HTTP/3, trusted proxy CIDRs,
+  request/server/backend/shutdown settings, the admin endpoint, health checks,
+  service-level in-flight admission, response buffering, request body limits,
+  ordinary HTTP, combined HTTP/SSE, SSE-only, and WebSocket routes.
+- Documented the new example in the repository README.
+- TLS files and internal upstream names are intentionally placeholders; replace
+  them with deployment-specific values before starting Janus.
+
+Verification:
+
+- JSON syntax parsed successfully with PowerShell `ConvertFrom-Json`.
+- Full repository tests and the TLS asset-dependent `-check` command remain
+  separate release checks; the example cannot pass the latter until its
+  certificate and key files are supplied.
+
+## 2026-09-17
+
 ### Record the first local forwarding smoke
 
 Commit message: `docs: record local qualification smoke`

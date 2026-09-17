@@ -72,6 +72,7 @@ internal/forwarding/   trusted proxy CIDRs and canonical identity headers
 internal/health/       bounded active upstream probes
 internal/runtime/      stable generations and versioned file reload
 configs/janus.json     local example configuration
+configs/janus-comprehensive.example.json  multi-Limen, TLS/HTTP2/HTTP3, middleware and streaming example
 configs/janus-streaming.example.json  SSE/WebSocket route example
 configs/janus-health.example.json     active upstream health-check example
 examples/backend/     local test service
