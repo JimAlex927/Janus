@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"net/http"
 	"net/url"
 	"testing"
@@ -56,9 +57,9 @@ func TestParseHeadersAndRedactTarget(t *testing.T) {
 
 func TestWorkerStatsPercentilesAreBoundedByBuckets(t *testing.T) {
 	stats := newWorkerStats()
-	stats.record(http.StatusOK, 10, 2*time.Millisecond, nil)
-	stats.record(http.StatusOK, 20, 20*time.Millisecond, nil)
-	stats.record(http.StatusBadGateway, 0, 200*time.Millisecond, nil)
+	stats.record(http.StatusOK, 10, 2*time.Millisecond, nil, false)
+	stats.record(http.StatusOK, 20, 20*time.Millisecond, nil, false)
+	stats.record(http.StatusBadGateway, 0, 200*time.Millisecond, nil, false)
 	if stats.completed != 3 || stats.bytes != 30 {
 		t.Fatalf("stats = %#v", stats)
 	}
@@ -70,5 +71,9 @@ func TestWorkerStatsPercentilesAreBoundedByBuckets(t *testing.T) {
 	}
 	if got := meanMilliseconds(stats.total, stats.completed); got != 74.0 {
 		t.Fatalf("mean latency = %vms, want 74ms", got)
+	}
+	stats.record(0, 0, time.Millisecond, context.Canceled, true)
+	if stats.cancelled != 1 || stats.errors != 0 {
+		t.Fatalf("end-of-window cancellation classification = %#v", stats)
 	}
 }

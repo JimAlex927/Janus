@@ -66,6 +66,7 @@ type workerStats struct {
 	success   uint64
 	non2xx    uint64
 	errors    uint64
+	cancelled uint64
 	bytes     uint64
 	total     time.Duration
 	maximum   time.Duration
@@ -76,9 +77,11 @@ func newWorkerStats() workerStats {
 	return workerStats{buckets: make([]uint64, len(latencyBounds))}
 }
 
-func (s *workerStats) record(status int, bodyBytes int64, latency time.Duration, err error) {
+func (s *workerStats) record(status int, bodyBytes int64, latency time.Duration, err error, cancelledAtEnd bool) {
 	s.completed++
-	if err != nil {
+	if cancelledAtEnd {
+		s.cancelled++
+	} else if err != nil {
 		s.errors++
 	} else if status >= http.StatusOK && status < http.StatusMultipleChoices {
 		s.success++
@@ -106,6 +109,7 @@ func (s *workerStats) merge(other workerStats) {
 	s.success += other.success
 	s.non2xx += other.non2xx
 	s.errors += other.errors
+	s.cancelled += other.cancelled
 	s.bytes += other.bytes
 	s.total += other.total
 	if other.maximum > s.maximum {
@@ -127,6 +131,7 @@ type report struct {
 	Successful2xx     uint64  `json:"successful_2xx"`
 	Non2xx            uint64  `json:"non_2xx"`
 	Errors            uint64  `json:"errors"`
+	CancelledAtEnd    uint64  `json:"cancelled_at_measurement_end"`
 	Dropped           uint64  `json:"dropped_before_start"`
 	ResponseBytes     uint64  `json:"response_bytes"`
 	RequestsPerSecond float64 `json:"completed_per_second"`
@@ -334,7 +339,7 @@ func runWorker(ctx context.Context, client *http.Client, target *url.URL, method
 				}
 			}
 		}
-		stats.record(status, responseBytes, time.Since(started), err)
+		stats.record(status, responseBytes, time.Since(started), err, err != nil && ctx.Err() != nil)
 	}
 }
 
@@ -350,6 +355,7 @@ func makeReport(target *url.URL, duration time.Duration, concurrency int, rate f
 		Successful2xx:    stats.success,
 		Non2xx:           stats.non2xx,
 		Errors:           stats.errors,
+		CancelledAtEnd:   stats.cancelled,
 		Dropped:          dropped,
 		ResponseBytes:    stats.bytes,
 		MeanMilliseconds: meanMilliseconds(stats.total, stats.completed),

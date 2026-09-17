@@ -1427,3 +1427,24 @@ Verification:
 
 Qualification note: local smoke output validates the tool only; it is not a
 production capacity claim.
+
+## 2026-09-17
+
+### Classify measurement-window cancellations separately
+
+Commit message: `fix(qualification): classify end-of-window cancellations`
+
+Scope:
+
+- Added `cancelled_at_measurement_end` to load-test output so requests stopped
+  by the generator's own measurement deadline are not mixed with backend or
+  transport errors.
+- Added regression coverage for the classification and kept the mean-latency
+  correction discovered during the first smoke run.
+
+Verification:
+
+- `go test -count=5 ./cmd/janus-loadtest`
+- `go test -race -count=1 ./cmd/janus-loadtest`
+- `go vet ./cmd/janus-loadtest`
+- Direct-backend and Janus forwarding smoke runs with a 100 request/s target
