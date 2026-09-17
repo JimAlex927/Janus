@@ -44,6 +44,23 @@ recovery after overload, client cancellation, slow clients and backend failures.
 Run the agreed representative mix for 24 hours, including reload and certificate
 rotation; retain raw time-series and check for sustained resource growth.
 
+The repository includes `cmd/janus-loadtest`, a separate standard-library
+generator for ordinary HTTP capacity runs. Build it independently from Janus:
+
+```sh
+go build -trimpath -o bin/janus-loadtest ./cmd/janus-loadtest
+./bin/janus-loadtest -url http://backend:9000/api \
+  -duration 60s -concurrency 64 -rate 500 -timeout 5s > direct-backend.json
+./bin/janus-loadtest -url http://janus:8080/api \
+  -duration 60s -concurrency 64 -rate 500 -timeout 5s > janus-steady.json
+```
+
+Run the generator outside the gateway process, repeat each scenario after
+warmup, and retain the JSON output alongside OS-level CPU/RSS/socket samples.
+The tool deliberately reports ordinary HTTP only; SSE and WebSocket scenarios
+need protocol-aware clients and must be added to the same workload mix rather
+than inferred from ordinary-request results.
+
 ## Linux execution sequence
 
 1. Record VM identity/specifications and install the pinned Go toolchain and a

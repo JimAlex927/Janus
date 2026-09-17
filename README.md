@@ -77,6 +77,7 @@ configs/janus-health.example.json     active upstream health-check example
 examples/backend/     local test service
 docs/                  architecture, delivery plan, protocol learning guide
 deploy/systemd/        native Linux non-root systemd deployment artifact
+cmd/janus-loadtest/    separate qualification workload generator
 .github/workflows/     Linux test, race, vet and static-build gates
 ```
 

@@ -1400,3 +1400,30 @@ Verification:
 
 Qualification note: the new Linux-only test was cross-compiled but not run
 until a Linux VM is available.
+
+## 2026-09-17
+
+### Add a separate capacity qualification generator
+
+Commit message: `feat(qualification): add independent HTTP load generator`
+
+Scope:
+
+- Added `cmd/janus-loadtest`, a dependency-free workload generator supporting
+  fixed concurrency or bounded target arrival rate, request bodies, headers,
+  per-request timeout, bounded response reads, status/error counts, bytes, and
+  latency mean/p50/p95/p99/max JSON output.
+- Kept the generator outside Janus request code so gateway resource measurements
+  are not mixed with an in-process client. It refuses URL credentials and
+  redacts query strings from its report target.
+- Added validation, percentile, header parsing, and statistic regression tests.
+
+Verification:
+
+- `go test -count=5 ./cmd/janus-loadtest`
+- `go test -race -count=1 ./cmd/janus-loadtest`
+- `go vet ./cmd/janus-loadtest`
+- Fixed-concurrency and target-rate local backend smoke runs
+
+Qualification note: local smoke output validates the tool only; it is not a
+production capacity claim.
