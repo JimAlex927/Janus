@@ -45,3 +45,23 @@ func TestMetricsBoundsLabelSeries(t *testing.T) {
 		t.Fatalf("metric series = %d, want <= %d", got, maxMetricSeries)
 	}
 }
+
+func TestMetricsCountersAccumulateExistingSeries(t *testing.T) {
+	m := NewMetrics()
+	for i := 0; i < 3; i++ {
+		m.RecordRequest(Outcome{Route: "api", Service: "orders", Status: 502}, "upstream", time.Millisecond)
+		m.RecordRejection("service", "orders", "capacity")
+	}
+
+	output := string(m.Render(nil))
+	for _, expected := range []string{
+		`janus_requests_total{route="api",service="orders",status="502"} 3`,
+		`janus_request_errors_total{route="api",service="orders",error="upstream"} 3`,
+		`janus_request_rejections_total{scope="service",service="orders",reason="capacity"} 3`,
+		`janus_request_duration_seconds_count{route="api",service="orders"} 3`,
+	} {
+		if !strings.Contains(output, expected) {
+			t.Fatalf("metrics missing accumulated value %q in:\n%s", expected, output)
+		}
+	}
+}

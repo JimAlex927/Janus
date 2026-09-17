@@ -346,6 +346,81 @@ func TestLimenHTTP3TimeoutClosesSlowRequestBody(t *testing.T) {
 	}
 }
 
+func TestLimenHTTP3StreamTimeoutClosesRequestBody(t *testing.T) {
+	certFile, keyFile, roots := writeTestCertificate(t)
+	started, bodyDone := make(chan struct{}), make(chan error, 1)
+	handler := middleware.StreamTimeout(100*time.Millisecond, 0)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(started)
+		_, readErr := io.Copy(io.Discard, r.Body)
+		bodyDone <- readErr
+	}))
+	l, err := NewBinding("public", config.LimenConfig{
+		Address:   "127.0.0.1:0",
+		Protocols: []string{config.ProtocolHTTP1, config.ProtocolHTTP3},
+		TLS:       &config.TLSSettings{CertFile: certFile, KeyFile: keyFile},
+	}, handler, config.DefaultSettings())
+	if err != nil {
+		t.Fatal(err)
+	}
+	tcpListener, err := l.Listen()
+	if err != nil {
+		t.Fatal(err)
+	}
+	udpListener, err := l.ListenPacket()
+	if err != nil {
+		_ = tcpListener.Close()
+		t.Fatal(err)
+	}
+	serveDone := make(chan error, 1)
+	go func() { serveDone <- l.Serve(tcpListener) }()
+	t.Cleanup(func() {
+		_ = l.Close()
+		if err := <-serveDone; err != nil && !errors.Is(err, http.ErrServerClosed) {
+			t.Errorf("limen stopped: %v", err)
+		}
+	})
+
+	transport := &http3.Transport{
+		TLSClientConfig: &tls.Config{RootCAs: roots, ServerName: "localhost"},
+		QUICConfig:      &quic.Config{Allow0RTT: false},
+	}
+	defer transport.Close()
+	body := &slowRequestBody{released: make(chan struct{})}
+	request, err := http.NewRequest(http.MethodGet, "https://"+udpListener.LocalAddr().String()+"/events", body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.ContentLength = -1
+	request.Header.Set("Accept", "text/event-stream")
+	requestDone := make(chan error, 1)
+	go func() {
+		response, requestErr := (&http.Client{Transport: transport}).Do(request)
+		if response != nil {
+			response.Body.Close()
+		}
+		requestDone <- requestErr
+	}()
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("HTTP/3 stream request handler did not start")
+	}
+	select {
+	case readErr := <-bodyDone:
+		if readErr == nil {
+			t.Fatal("stream timeout ended the request body without a close error")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("stream timeout did not close the request body")
+	}
+	close(body.released)
+	select {
+	case <-requestDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("HTTP/3 stream request did not finish")
+	}
+}
+
 type slowRequestBody struct {
 	sent     bool
 	released chan struct{}

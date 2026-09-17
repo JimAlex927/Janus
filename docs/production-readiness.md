@@ -1,6 +1,8 @@
 # First production release acceptance
 
-Status: candidate under qualification; not yet approved for production.
+Status: candidate under qualification; code-level blockers found in the
+September 17 review have been repaired, but the release is not yet approved
+for production.
 The target Linux VM is being prepared by the operator. Windows tests and Linux
 cross-compilation do not satisfy Linux execution or deployment gates.
 
@@ -9,10 +11,10 @@ cross-compilation do not satisfy Linux execution or deployment gates.
 | Gate | Candidate evidence | Still required |
 | --- | --- | --- |
 | Accepted requests survive graceful drain | H3 client completes during shutdown; forced-drain tests retained | Execute on target Linux with concurrent TCP/UDP traffic |
-| Stream timeouts release resources | Slow TCP reader terminates; H1/H2/H3 proxy tests assert body failure before client deadline, backend cancellation and released admission | Target Linux slow readers/uploads and concurrent sibling streams under load |
+| Stream timeouts release resources | Slow TCP reader terminates; H1/H2/H3 proxy tests assert body failure before client deadline, backend cancellation and released admission; HTTP/3 stream timeout closes a slow request body | Target Linux slow readers/uploads and concurrent sibling streams under load |
 | Reload matches published bytes | Startup hash comes from the runtime input snapshot; certificate hash/parse/publication use the same bounded bytes; startup race regressions | Repeated route/certificate replacement and rollback during load |
 | Correct timeout response | 103 followed by deadline returns final 504 | Protocol fault-injection campaign |
-| Linux/race | Pinned CI definition; Linux process SIGTERM test added and cross-compiled | Actual full test/race/vet runs on VM; preserve logs |
+| Linux/race | Pinned CI definition; Linux process SIGTERM test added and cross-compiled; Windows full test/vet plus targeted race pass | Actual full test/race/vet runs on VM; preserve logs |
 | Deployment | Native systemd unit and runbook | Install as non-root on VM, readiness, restart, ports, CA roots and resource caps |
 | Capacity | Configuration limits exist | Agree workload, measure overload and 24h soak |
 | Canary | Not started | Name non-core business, traffic split, baseline and rollback target; qualify first |

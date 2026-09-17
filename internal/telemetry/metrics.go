@@ -99,13 +99,18 @@ func (m *Metrics) RecordRequest(outcome Outcome, errorClass string, duration tim
 		status = 200
 	}
 	m.mu.Lock()
-	if !m.hasSeries(requestMetricKey{route: route, service: service, status: status}) {
-		m.requests[requestMetricKey{route: route, service: service, status: status}]++
+	requestKey := requestMetricKey{route: route, service: service, status: status}
+	if _, ok := m.requests[requestKey]; ok {
+		m.requests[requestKey]++
+	} else if m.seriesCount() < maxMetricSeries {
+		m.requests[requestKey] = 1
 	}
 	if errorClass != "" {
 		key := errorMetricKey{route: route, service: service, err: boundedLabel(errorClass)}
-		if !m.hasSeries(key) {
+		if _, ok := m.errors[key]; ok {
 			m.errors[key]++
+		} else if m.seriesCount() < maxMetricSeries {
+			m.errors[key] = 1
 		}
 	}
 	durationKey := durationMetricKey{route: route, service: service}
@@ -150,8 +155,10 @@ func (m *Metrics) RecordRejection(scope, service, reason string) {
 	}
 	key := rejectionMetricKey{scope: boundedLabel(scope), service: boundedLabel(service), reason: boundedLabel(reason)}
 	m.mu.Lock()
-	if !m.hasSeries(key) {
+	if _, ok := m.rejections[key]; ok {
 		m.rejections[key]++
+	} else if m.seriesCount() < maxMetricSeries {
+		m.rejections[key] = 1
 	}
 	m.mu.Unlock()
 }
@@ -237,24 +244,6 @@ func (m *Metrics) Render(health []BackendHealth) []byte {
 
 func (m *Metrics) seriesCount() int {
 	return len(m.requests) + len(m.errors) + len(m.durations) + len(m.inFlight) + len(m.rejections)
-}
-
-func (m *Metrics) hasSeries(key any) bool {
-	switch value := key.(type) {
-	case requestMetricKey:
-		if _, ok := m.requests[value]; ok {
-			return true
-		}
-	case errorMetricKey:
-		if _, ok := m.errors[value]; ok {
-			return true
-		}
-	case rejectionMetricKey:
-		if _, ok := m.rejections[value]; ok {
-			return true
-		}
-	}
-	return m.seriesCount() >= maxMetricSeries
 }
 
 func boundedLabel(value string) string {

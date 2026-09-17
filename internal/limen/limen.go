@@ -120,7 +120,9 @@ func NewBinding(name string, binding config.LimenConfig, handler http.Handler, s
 		//这里是非h3的server  也就是http  server还没启动  还要单独启动tls的server
 		server: &http.Server{
 			Addr: binding.Address, Handler: handler,
-			//这里 net/http支持  http/1 和 http/2    相当于开启了http服务，但是如果有tls，会先开启tls服务，然后tls服务把请求转发到这个server？
+			// net/http serves HTTP/1 and HTTP/2 on the TCP listener. TLS, when
+			// configured, wraps that listener before it is passed to net/http;
+			// it is not a second server forwarding requests to this one.
 			Protocols:         protocols,
 			ReadHeaderTimeout: settings.Server.ReadHeaderTimeout.Duration(),
 			ReadTimeout:       settings.Request.ReadTimeout.Duration(),

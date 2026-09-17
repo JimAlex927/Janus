@@ -26,6 +26,14 @@ func StreamTimeout(maxDuration, idleTimeout time.Duration) Middleware {
 			}
 			//如果是sse或者websocket
 			ctx, cancel := context.WithCancelCause(r.Context())
+			if r.Body != nil && r.Body != http.NoBody {
+				// Stream requests can still carry a request body. Closing the
+				// original body on expiry interrupts a blocked HTTP/2 or HTTP/3
+				// read and releases the admission permit held by the caller.
+				body := r.Body
+				stopBody := context.AfterFunc(ctx, func() { _ = body.Close() })
+				defer stopBody()
+			}
 			control := newStreamControl()
 			control.writer = http.NewResponseController(w)
 			activity := make(chan struct{}, 1)

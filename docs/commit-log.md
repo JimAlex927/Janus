@@ -5,6 +5,31 @@ repository commit. Add a new dated section before every future commit.
 
 ## 2026-09-17
 
+### Repair metrics accumulation and stream request-body cancellation
+
+Commit message: `fix: repair metrics counters and stream body cancellation`
+
+Scope:
+
+- Made existing request, error, rejection, and duration series accumulate
+  samples while retaining the bounded metric-series limit.
+- Closed stream request bodies when SSE or WebSocket lifetime cancellation
+  fires, releasing blocked HTTP/2 and HTTP/3 reads and their admission permits.
+- Added regression coverage for repeated metric samples and an actual HTTP/3
+  SSE request with a slow request body.
+- Clarified that TLS wraps the TCP listener used by `net/http`; it is not a
+  second forwarding server.
+
+Verification:
+
+- `go test -count=1 ./...` passed on Windows/amd64.
+- `go test -race ./internal/telemetry ./internal/limen ./internal/middleware ./internal/runtime` passed.
+- `go vet ./...`, Windows build, Linux test cross-compilation and
+  `git diff --check` passed.
+
+Qualification: target Linux execution, capacity/soak evidence and canary/
+rollback evidence remain required.
+
 ### Clarify runtime construction and protocol lifecycle
 
 Commit message: `docs: clarify runtime and protocol construction`
