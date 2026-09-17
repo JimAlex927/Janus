@@ -5,6 +5,32 @@ repository commit. Add a new dated section before every future commit.
 
 ## 2026-09-17
 
+### Harden rule parsing and route matching regression coverage
+
+Commit message: `fix(router): harden rule parser and matcher tests`
+
+Scope:
+
+- Fixed invalid trailing characters and unterminated literals being confused
+  with end-of-expression during rule parsing.
+- Added expression size, nesting-depth, and argument-count limits to bound
+  configuration parsing work.
+- Made matcher construction and nil request facts fail safely, including
+  rejecting custom compilers that return a nil predicate without an error.
+- Added coverage for all built-in predicates, path/host boundaries, complex
+  expression fallback, route priority, invalid expressions, and fuzzed
+  compile/match inputs.
+
+Verification:
+
+- `go test -count=1 ./...`
+- `go test -race -count=1 ./...`
+- `go test -count=20 ./internal/rules ./internal/router`
+- `go vet ./...`
+- `go test -fuzz=FuzzCompileAndMatchNeverPanics -fuzztime=30s ./internal/rules`
+
+## 2026-09-17
+
 ### Migrate configuration examples to match/action routes
 
 Commit message: `docs(config): migrate examples to current route format`

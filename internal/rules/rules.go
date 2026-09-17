@@ -11,6 +11,12 @@ import (
 	"unicode"
 )
 
+const (
+	MaxExpressionBytes = 16 << 10
+	MaxExpressionDepth = 64
+	MaxRuleArguments   = 32
+)
+
 // Facts contains the request attributes that a rule may inspect. The router
 // creates one value per request and normalizes the expensive pieces once.
 type Facts struct {
@@ -83,8 +89,14 @@ type IndexHints struct {
 }
 
 func (r *Registry) Compile(expression string) (*Matcher, error) {
+	if r == nil {
+		r = DefaultRegistry()
+	}
 	if strings.TrimSpace(expression) == "" {
 		return nil, fmt.Errorf("match expression is empty")
+	}
+	if len(expression) > MaxExpressionBytes {
+		return nil, fmt.Errorf("match expression exceeds %d bytes", MaxExpressionBytes)
 	}
 	p := parser{lexer: newLexer(expression), registry: r}
 	root, err := p.parseExpression()
@@ -100,7 +112,7 @@ func (r *Registry) Compile(expression string) (*Matcher, error) {
 func DefaultRegistry() *Registry { return NewRegistry() }
 
 func (m *Matcher) Match(facts *Facts) bool {
-	return m != nil && m.root != nil && m.root.match(facts)
+	return m != nil && m.root != nil && facts != nil && m.root.match(facts)
 }
 
 func (m *Matcher) IndexHints() IndexHints {
@@ -364,6 +376,7 @@ type tokenKind uint8
 
 const (
 	tokenEOF tokenKind = iota
+	tokenInvalid
 	tokenName
 	tokenLiteral
 	tokenOpen
@@ -433,7 +446,7 @@ func (l *lexer) next() token {
 			}
 			b.WriteByte(ch)
 		}
-		return token{kind: tokenEOF, text: "unterminated literal", pos: start}
+		return token{kind: tokenInvalid, text: "unterminated literal", pos: start}
 	}
 	for l.offset < len(l.input) {
 		ch := l.input[l.offset]
@@ -445,7 +458,7 @@ func (l *lexer) next() token {
 	}
 	if l.offset == start {
 		l.offset++
-		return token{kind: tokenEOF, text: string(l.input[start]), pos: start}
+		return token{kind: tokenInvalid, text: string(l.input[start]), pos: start}
 	}
 	return token{kind: tokenName, text: l.input[start:l.offset], pos: start}
 }
@@ -455,6 +468,7 @@ type parser struct {
 	registry   *Registry
 	current    token
 	hasCurrent bool
+	depth      int
 }
 
 func (p *parser) take() token {
@@ -510,6 +524,11 @@ func (p *parser) parseAnd() (node, error) {
 }
 
 func (p *parser) parseUnary() (node, error) {
+	if p.depth >= MaxExpressionDepth {
+		return nil, fmt.Errorf("match expression exceeds maximum nesting depth %d", MaxExpressionDepth)
+	}
+	p.depth++
+	defer func() { p.depth-- }()
 	if p.peek().kind == tokenNot {
 		p.take()
 		child, err := p.parseUnary()
@@ -548,6 +567,9 @@ func (p *parser) parseCall() (node, error) {
 				return nil, fmt.Errorf("rule %q arguments must be quoted at position %d", name.text, arg.pos)
 			}
 			args = append(args, arg.text)
+			if len(args) > MaxRuleArguments {
+				return nil, fmt.Errorf("rule %q has more than %d arguments", name.text, MaxRuleArguments)
+			}
 			if p.peek().kind != tokenComma {
 				break
 			}
@@ -564,6 +586,9 @@ func (p *parser) parseCall() (node, error) {
 	predicate, err := compiler(args)
 	if err != nil {
 		return nil, fmt.Errorf("rule %q: %w", name.text, err)
+	}
+	if predicate == nil {
+		return nil, fmt.Errorf("rule %q compiler returned a nil predicate", name.text)
 	}
 	return predicateNode{predicate: predicate}, nil
 }

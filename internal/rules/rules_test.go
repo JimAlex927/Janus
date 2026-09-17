@@ -3,6 +3,7 @@ package rules
 import (
 	"net/http"
 	"net/url"
+	"strings"
 	"testing"
 )
 
@@ -12,7 +13,7 @@ func TestCompileAndMatchBooleanExpression(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, test := range []struct {
-		name string
+		name  string
 		facts Facts
 		want  bool
 	}{
@@ -67,6 +68,68 @@ func TestCustomRuleRegistration(t *testing.T) {
 	if !m.Match(&facts) {
 		t.Fatal("custom rule did not match")
 	}
+}
+
+func TestMatcherNilFactsAndNilCustomPredicateAreSafe(t *testing.T) {
+	m, err := DefaultRegistry().Compile("Path(`/api`)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.Match(nil) {
+		t.Fatal("nil facts unexpectedly matched")
+	}
+	registry := DefaultRegistry()
+	if err := registry.Register("NilRule", func([]string) (Predicate, error) { return nil, nil }); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := registry.Compile("NilRule(`x`)"); err == nil {
+		t.Fatal("nil custom predicate was accepted")
+	}
+}
+
+func TestCompileRejectsTrailingInvalidCharacter(t *testing.T) {
+	for _, expression := range []string{
+		"Path(`/api`) &",
+		"Path(`/api`) $",
+		"Path(`/api`) )",
+		"Path(`/api`)",
+	}[:3] {
+		if _, err := DefaultRegistry().Compile(expression); err == nil {
+			t.Fatalf("Compile(%q) accepted an invalid trailing character", expression)
+		}
+	}
+}
+
+func TestCompileBoundsExpressionComplexity(t *testing.T) {
+	deep := "Path(`/`)"
+	for i := 0; i < MaxExpressionDepth+1; i++ {
+		deep = "!(" + deep + ")"
+	}
+	if _, err := DefaultRegistry().Compile(deep); err == nil {
+		t.Fatal("deep expression was accepted")
+	}
+	if _, err := DefaultRegistry().Compile(strings.Repeat("x", MaxExpressionBytes+1)); err == nil {
+		t.Fatal("oversized expression was accepted")
+	}
+}
+
+func FuzzCompileAndMatchNeverPanics(f *testing.F) {
+	f.Add("Host(`api.example.com`) && PathPrefix(`/api`) && Method(`GET`)")
+	f.Add("!(Protocol(`websocket`) || Header(`X-Blocked`, `true`))")
+	f.Fuzz(func(t *testing.T, expression string) {
+		matcher, err := DefaultRegistry().Compile(expression)
+		if err != nil {
+			return
+		}
+		matcher.Match(&Facts{
+			Host:     "api.example.com",
+			Path:     "/api/users",
+			Method:   http.MethodGet,
+			Header:   make(http.Header),
+			Query:    make(url.Values),
+			Protocol: "http",
+		})
+	})
 }
 
 type customValuePredicate string

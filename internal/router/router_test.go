@@ -141,3 +141,57 @@ func TestComplexRuleFallsBackWithoutLosingMatch(t *testing.T) {
 		t.Fatalf("got %d %q, want 200 matched", w.Code, w.Body.String())
 	}
 }
+
+func TestCompiledMatchPredicates(t *testing.T) {
+	rt, err := New([]Route{{
+		Name:    "match",
+		Match:   "Host(`api.example.com`) && PathPrefix(`/api`) && Method(`GET`) && Header(`X-Tenant`, `blue`) && Query(`version`, `2`) && Protocol(`http`)",
+		Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("matched")) }),
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		name       string
+		host       string
+		path       string
+		method     string
+		tenant     string
+		query      string
+		wantStatus int
+		wantBody   string
+	}{
+		{"all predicates", "API.EXAMPLE.COM:8443", "/api/items?version=2", http.MethodGet, "blue", "", http.StatusOK, "matched"},
+		{"wrong method", "api.example.com", "/api/items?version=2", http.MethodPost, "blue", "", http.StatusNotFound, "404 page not found\n"},
+		{"wrong header", "api.example.com", "/api/items?version=2", http.MethodGet, "red", "", http.StatusNotFound, "404 page not found\n"},
+		{"wrong query", "api.example.com", "/api/items?version=3", http.MethodGet, "blue", "", http.StatusNotFound, "404 page not found\n"},
+		{"path boundary", "api.example.com", "/apix?version=2", http.MethodGet, "blue", "", http.StatusNotFound, "404 page not found\n"},
+		{"trailing dot", "api.example.com.", "/api?version=2", http.MethodGet, "blue", "", http.StatusOK, "matched"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			r := httptest.NewRequest(test.method, "http://"+test.host+test.path, nil)
+			r.Header.Set("X-Tenant", test.tenant)
+			w := httptest.NewRecorder()
+			rt.ServeHTTP(w, r)
+			if w.Code != test.wantStatus || w.Body.String() != test.wantBody {
+				t.Fatalf("got %d %q, want %d %q", w.Code, w.Body.String(), test.wantStatus, test.wantBody)
+			}
+		})
+	}
+}
+
+func TestComplexRoutePriorityIsDeterministic(t *testing.T) {
+	rt, err := New([]Route{
+		{Name: "broad", Match: "Host(`api.example.com`) || PathPrefix(`/public`)", Priority: 10, Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("broad")) })},
+		{Name: "specific", Match: "Host(`api.example.com`) && PathPrefix(`/api/users`)", Priority: 20, Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("specific")) })},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := httptest.NewRequest(http.MethodGet, "http://api.example.com/api/users/1", nil)
+	w := httptest.NewRecorder()
+	rt.ServeHTTP(w, r)
+	if got := w.Body.String(); got != "specific" {
+		t.Fatalf("body = %q, want specific", got)
+	}
+}
