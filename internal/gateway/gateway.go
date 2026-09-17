@@ -148,15 +148,22 @@ func NewWithTransportAndLimiters(c config.Config, logger *zap.Logger, transport 
 		if err != nil {
 			return nil, err
 		}
-		routeHandler := middleware.Chain(services[r.Service], routeMiddlewares...)
-		routeHandler = middleware.RouteMetadata(r.Name, r.Service)(routeHandler)
-		routes = append(routes, router.Route{Name: r.Name, Limen: r.Limen, Protocols: r.Protocols, Host: r.Host, PathPrefix: r.PathPrefix, Handler: routeHandler})
+		actionHandler, serviceName, err := buildRouteAction(r, services)
+		if err != nil {
+			return nil, err
+		}
+		routeHandler := middleware.Chain(actionHandler, routeMiddlewares...)
+		routeHandler = middleware.RouteMetadata(r.Name, serviceName)(routeHandler)
+		routes = append(routes, router.Route{Name: r.Name, Limen: r.Limen, Match: r.Match, Priority: r.Priority, Protocols: r.Protocols, Host: r.Host, PathPrefix: r.PathPrefix, Handler: routeHandler})
 	}
 	//http.Handler is an interface.
 	// Router itself is a loop of match. It contains
 	// Every Route has a handler . So if the request has matched a route, the handler corresponding to the route will handler the request.
 	// And will only use the shared transport
-	routeHandler := router.New(routes)
+	routeHandler, err := router.New(routes)
+	if err != nil {
+		return nil, err
+	}
 	committed = true
 	return &Gateway{
 		handler: routeHandler,
@@ -173,6 +180,51 @@ func NewWithTransportAndLimiters(c config.Config, logger *zap.Logger, transport 
 		checkers:        checkers,
 		healthByService: healthByService,
 	}, nil
+}
+
+func buildRouteAction(route config.Route, services map[string]http.Handler) (http.Handler, string, error) {
+	if route.Action == nil || route.Action.Forward != nil {
+		serviceName := route.Service
+		if route.Action != nil && route.Action.Forward != nil {
+			serviceName = route.Action.Forward.Service
+		}
+		handler := services[serviceName]
+		if handler == nil {
+			return nil, "", fmt.Errorf("route %q references missing service %q", route.Name, serviceName)
+		}
+		return handler, serviceName, nil
+	}
+	if route.Action.Redirect != nil {
+		status := route.Action.Redirect.Status
+		if status == 0 {
+			status = http.StatusTemporaryRedirect
+		}
+		location := route.Action.Redirect.Location
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			http.Redirect(w, r, location, status)
+		}), "direct", nil
+	}
+	if route.Action.Respond != nil {
+		status := route.Action.Respond.Status
+		if status == 0 {
+			status = http.StatusOK
+		}
+		headers := make(http.Header, len(route.Action.Respond.Headers))
+		for name, value := range route.Action.Respond.Headers {
+			headers.Set(name, value)
+		}
+		body := []byte(route.Action.Respond.Body)
+		return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			for name, values := range headers {
+				for _, value := range values {
+					w.Header().Add(name, value)
+				}
+			}
+			w.WriteHeader(status)
+			_, _ = w.Write(body)
+		}), "direct", nil
+	}
+	return nil, "", fmt.Errorf("route %q has no supported action", route.Name)
 }
 
 func configuredServiceLimit(c config.Config, service config.Service) (int, bool) {

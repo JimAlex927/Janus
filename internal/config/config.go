@@ -15,6 +15,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"janus/internal/rules"
 )
 
 const (
@@ -151,13 +153,40 @@ func (s HealthCheckSettings) WithDefaults() HealthCheckSettings {
 }
 
 type Route struct {
-	Name        string   `json:"name"`
-	Limen       string   `json:"limen,omitempty"`
-	Protocols   []string `json:"protocols,omitempty"`
-	Host        string   `json:"host"`
-	PathPrefix  string   `json:"path_prefix"`
-	Service     string   `json:"service"`
-	Middlewares []string `json:"middlewares"`
+	Name        string       `json:"name"`
+	Limen       string       `json:"limen,omitempty"`
+	Match       string       `json:"match,omitempty"`
+	Priority    int          `json:"priority,omitempty"`
+	Protocols   []string     `json:"protocols,omitempty"`
+	Host        string       `json:"host,omitempty"`
+	PathPrefix  string       `json:"path_prefix,omitempty"`
+	Service     string       `json:"service,omitempty"`
+	Middlewares []string     `json:"middlewares,omitempty"`
+	Action      *RouteAction `json:"action,omitempty"`
+}
+
+// RouteAction describes what happens after a route matches. Exactly one
+// action is allowed when Action is present; an omitted action keeps the
+// programmatic legacy forward path while new files should use forward.
+type RouteAction struct {
+	Forward  *ForwardAction  `json:"forward,omitempty"`
+	Redirect *RedirectAction `json:"redirect,omitempty"`
+	Respond  *RespondAction  `json:"respond,omitempty"`
+}
+
+type ForwardAction struct {
+	Service string `json:"service"`
+}
+
+type RedirectAction struct {
+	Status   int    `json:"status,omitempty"`
+	Location string `json:"location"`
+}
+
+type RespondAction struct {
+	Status  int               `json:"status,omitempty"`
+	Body    string            `json:"body,omitempty"`
+	Headers map[string]string `json:"headers,omitempty"`
 }
 
 func Load(r io.Reader) (Config, error) {
@@ -331,8 +360,18 @@ func (c Config) Validate() error {
 	if err := settings.Validate(); err != nil {
 		return err
 	}
-	if len(c.Services) == 0 || len(c.Routes) == 0 {
-		return fmt.Errorf("at least one service and route are required")
+	if len(c.Routes) == 0 {
+		return fmt.Errorf("at least one route is required")
+	}
+	if len(c.Services) == 0 {
+		for _, route := range c.Routes {
+			if serviceName, err := routeServiceName(route); err != nil || serviceName != "" {
+				if err != nil {
+					return err
+				}
+				return fmt.Errorf("route %q requires a service", route.Name)
+			}
+		}
 	}
 	for name, s := range c.Services {
 		if name == "" || len(s.Upstreams) == 0 {
@@ -380,8 +419,14 @@ func (c Config) Validate() error {
 			return fmt.Errorf("route names must be nonempty and unique: %q", r.Name)
 		}
 		names[r.Name] = true
-		if _, ok := c.Services[r.Service]; !ok {
-			return fmt.Errorf("route %q references missing service %q", r.Name, r.Service)
+		serviceName, err := routeServiceName(r)
+		if err != nil {
+			return fmt.Errorf("route %q: %w", r.Name, err)
+		}
+		if serviceName != "" {
+			if _, ok := c.Services[serviceName]; !ok {
+				return fmt.Errorf("route %q references missing service %q", r.Name, serviceName)
+			}
 		}
 		if r.Limen == "" {
 			if len(bindings) > 1 {
@@ -416,15 +461,24 @@ func (c Config) Validate() error {
 				return fmt.Errorf("route %q cannot use service-only in_flight middleware %q", r.Name, middlewareName)
 			}
 		}
-		if !strings.HasPrefix(r.PathPrefix, "/") || strings.ContainsAny(r.PathPrefix, "?#%\\ \t\r\n") {
-			return fmt.Errorf("route %q needs an unescaped absolute path prefix", r.Name)
-		}
-		if r.PathPrefix != "/" && strings.HasSuffix(r.PathPrefix, "/") {
-			return fmt.Errorf("route %q: omit trailing slash from path_prefix", r.Name)
-		}
-		// Exact DNS names only in v0; no ports, wildcards, or IPv6 host rules.
-		if strings.ContainsAny(r.Host, ":/*?#@\\ \t\r\n") {
-			return fmt.Errorf("route %q host must be an exact hostname without port", r.Name)
+		if r.Match != "" {
+			if r.Host != "" || r.PathPrefix != "" || len(r.Protocols) != 0 {
+				return fmt.Errorf("route %q cannot combine match with host, path_prefix, or protocols", r.Name)
+			}
+			if _, err := rules.DefaultRegistry().Compile(r.Match); err != nil {
+				return fmt.Errorf("route %q match: %w", r.Name, err)
+			}
+		} else {
+			if !strings.HasPrefix(r.PathPrefix, "/") || strings.ContainsAny(r.PathPrefix, "?#%\\ \t\r\n") {
+				return fmt.Errorf("route %q needs an unescaped absolute path prefix", r.Name)
+			}
+			if r.PathPrefix != "/" && strings.HasSuffix(r.PathPrefix, "/") {
+				return fmt.Errorf("route %q: omit trailing slash from path_prefix", r.Name)
+			}
+			// Exact DNS names only in the original structured route fields.
+			if strings.ContainsAny(r.Host, ":/*?#@\\ \t\r\n") {
+				return fmt.Errorf("route %q host must be an exact hostname without port", r.Name)
+			}
 		}
 		scope := r.Limen
 		if scope == "" && len(bindings) == 1 {
@@ -432,7 +486,7 @@ func (c Config) Validate() error {
 				scope = name
 			}
 		}
-		key := scope + "\x00" + strings.ToLower(r.Host) + "\x00" + r.PathPrefix
+		key := scope + "\x00" + r.Match + "\x00" + strings.ToLower(r.Host) + "\x00" + r.PathPrefix
 		if matches[key] {
 			return fmt.Errorf("duplicate host/path match on route %q", r.Name)
 		}
@@ -466,6 +520,49 @@ func (c Config) Validate() error {
 		}
 	}
 	return nil
+}
+
+func routeServiceName(route Route) (string, error) {
+	if route.Action == nil {
+		return route.Service, nil
+	}
+	defined := 0
+	if route.Action.Forward != nil {
+		defined++
+	}
+	if route.Action.Redirect != nil {
+		defined++
+	}
+	if route.Action.Respond != nil {
+		defined++
+	}
+	if defined != 1 {
+		return "", fmt.Errorf("action must define exactly one of forward, redirect, or respond")
+	}
+	if route.Action.Forward != nil {
+		if route.Action.Forward.Service == "" {
+			return "", fmt.Errorf("action.forward.service cannot be empty")
+		}
+		if route.Service != "" {
+			return "", fmt.Errorf("service cannot be combined with action.forward")
+		}
+		return route.Action.Forward.Service, nil
+	}
+	if route.Service != "" {
+		return "", fmt.Errorf("service cannot be combined with a direct route action")
+	}
+	if route.Action.Redirect != nil {
+		if route.Action.Redirect.Location == "" {
+			return "", fmt.Errorf("action.redirect.location cannot be empty")
+		}
+		if route.Action.Redirect.Status != 0 && (route.Action.Redirect.Status < 300 || route.Action.Redirect.Status > 399) {
+			return "", fmt.Errorf("action.redirect.status must be between 300 and 399")
+		}
+	}
+	if route.Action.Respond != nil && route.Action.Respond.Status != 0 && (route.Action.Respond.Status < 100 || route.Action.Respond.Status > 599) {
+		return "", fmt.Errorf("action.respond.status must be between 100 and 599")
+	}
+	return "", nil
 }
 
 func validateHealthCheck(service string, check HealthCheckSettings) error {

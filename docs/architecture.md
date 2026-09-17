@@ -70,6 +70,28 @@ Requests rejected before routing have an explicit unmatched route/service value.
 Malformed requests rejected by `net/http` before handler entry need server-level
 error reporting; middleware cannot observe every parser-level rejection.
 
+## Compiled route matching and actions
+
+Routes may provide a small boolean match expression such as
+``Host(`api.example.com`) && PathPrefix(`/api`) && Method(`GET`)``. The expression
+is parsed and validated while a generation is built. The request path creates
+one normalized `RequestFacts` value, looks up candidates through the Limen and
+Host indexes and a segment-aware path tree, then evaluates the compiled
+conditions. Expressions containing complex `OR` or `NOT` branches remain in a
+safe fallback candidate set until a matcher planner can index them without
+omitting a possible match.
+
+Every route has one terminal action. `forward` enters the named service and its
+service middleware, while `redirect` and `respond` produce a direct HTTP
+response. Route middleware still wraps the action, and route metadata is set
+before that chain runs. This keeps matching, policy composition and terminal
+behavior separate.
+
+The route priority is explicit. Higher `priority` wins; equal priorities use
+host specificity, path length and then configuration order as deterministic
+tie-breakers. Index construction must only reduce the candidate set; it must
+never change that ordering or the final result.
+
 ## Composition contract
 
 The initial API is deliberately small:

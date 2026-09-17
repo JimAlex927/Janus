@@ -71,6 +71,7 @@ internal/proxy/        reverse proxy and shared outbound transport
 internal/forwarding/   trusted proxy CIDRs and canonical identity headers
 internal/health/       bounded active upstream probes
 internal/runtime/      stable generations and versioned file reload
+internal/rules/        compiled request rule expressions and extensions
 configs/janus.json     local example configuration
 configs/janus-comprehensive.example.json  multi-Limen, TLS/HTTP2/HTTP3, middleware and streaming example
 configs/janus-streaming.example.json  SSE/WebSocket route example

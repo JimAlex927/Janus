@@ -13,12 +13,15 @@ func TestPrecedenceAndPathBoundaries(t *testing.T) {
 	handler := func(id string) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, id) })
 	}
-	rt := New([]Route{
+	rt, err := New([]Route{
 		{PathPrefix: "/api", Handler: handler("generic")},
 		{Host: "example.com", PathPrefix: "/api", Handler: handler("specific")},
 		{Host: "example.com", PathPrefix: "/api/users", Handler: handler("users")},
 		{PathPrefix: "/api/longer", Handler: handler("generic-long")},
 	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, tc := range []struct {
 		host, path, want string
 		status           int
@@ -42,10 +45,13 @@ func TestPrecedenceAndPathBoundaries(t *testing.T) {
 }
 
 func TestLimenScopedRoutes(t *testing.T) {
-	rt := New([]Route{
+	rt, err := New([]Route{
 		{Limen: "public", PathPrefix: "/api", Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("public")) })},
 		{Limen: "admin", PathPrefix: "/api", Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("admin")) })},
 	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, tc := range []struct {
 		name, want string
 	}{
@@ -68,9 +74,12 @@ func TestLimenScopedRoutes(t *testing.T) {
 }
 
 func TestRouteProtocolScope(t *testing.T) {
-	rt := New([]Route{
+	rt, err := New([]Route{
 		{Protocols: []string{"sse"}, PathPrefix: "/events", Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("sse")) })},
 	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, tc := range []struct {
 		name, accept string
 		code, body   int
@@ -87,5 +96,48 @@ func TestRouteProtocolScope(t *testing.T) {
 				t.Fatalf("status = %d, want %d", w.Code, tc.code)
 			}
 		})
+	}
+}
+
+func TestCompiledMatchAndActionPrecedence(t *testing.T) {
+	handler := func(id string) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(id)) })
+	}
+	rt, err := New([]Route{
+		{Name: "fallback", Match: "Host(`api.example.com`) && PathPrefix(`/api`)", Priority: 1, Handler: handler("fallback")},
+		{Name: "read", Match: "Host(`api.example.com`) && PathPrefix(`/api`) && Method(`GET`)", Priority: 10, Handler: handler("read")},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		method, want string
+	}{
+		{method: http.MethodGet, want: "read"},
+		{method: http.MethodPost, want: "fallback"},
+	} {
+		r := httptest.NewRequest(test.method, "http://api.example.com/api/users", nil)
+		w := httptest.NewRecorder()
+		rt.ServeHTTP(w, r)
+		if got := w.Body.String(); got != test.want {
+			t.Fatalf("method %s: body = %q, want %q", test.method, got, test.want)
+		}
+	}
+}
+
+func TestComplexRuleFallsBackWithoutLosingMatch(t *testing.T) {
+	rt, err := New([]Route{{
+		Name:    "public",
+		Match:   "Host(`api.example.com`) || PathPrefix(`/public`)",
+		Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("matched")) }),
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := httptest.NewRequest(http.MethodGet, "http://other.example.com/public/item", nil)
+	w := httptest.NewRecorder()
+	rt.ServeHTTP(w, r)
+	if w.Code != http.StatusOK || w.Body.String() != "matched" {
+		t.Fatalf("got %d %q, want 200 matched", w.Code, w.Body.String())
 	}
 }

@@ -1,99 +1,267 @@
-// Package router matches immutable host/path rules against incoming requests.
+// Package router matches immutable request rules against compiled handlers.
 package router
 
 import (
+	"fmt"
 	"net"
 	"net/http"
-	"sort"
 	"strings"
 
-	"janus/internal/config"
 	"janus/internal/protocol"
+	"janus/internal/rules"
 	"janus/internal/telemetry"
 )
 
 type Route struct {
 	Name       string
 	Limen      string
+	Match      string
+	Priority   int
 	Protocols  []string
 	Host       string
 	PathPrefix string
 	Handler    http.Handler
 }
 
-type Router struct{ routes []Route }
-
-// New gives exact hosts precedence, then the longest segment prefix.
-// Callers must validate duplicate rules and non-nil handlers before construction.
-func New(routes []Route) *Router {
-	routes = append([]Route(nil), routes...)
-	for i := range routes {
-		routes[i].Host = strings.ToLower(routes[i].Host)
-	}
-	sort.SliceStable(routes, func(i, j int) bool {
-		if (routes[i].Host == "") != (routes[j].Host == "") {
-			return routes[i].Host != ""
-		}
-		return len(routes[i].PathPrefix) > len(routes[j].PathPrefix)
-	})
-	return &Router{routes: routes}
+type Router struct {
+	byLimen map[string]*routeIndex
+	any     *routeIndex
 }
 
-// This is the route Handler
+type routeIndex struct {
+	exactHosts map[string]*hostIndex
+	hostless   *hostIndex
+	fallback   []*compiledRoute
+}
+
+type hostIndex struct {
+	paths    *pathRadixTree
+	fallback []*compiledRoute
+}
+
+type compiledRoute struct {
+	route               Route
+	matcher             *rules.Matcher
+	hints               rules.IndexHints
+	order               int
+	hostScoped          bool
+	legacyProtocolCheck bool
+}
+
+// New compiles the route expressions and builds the immutable candidate
+// indexes. Configuration validation should normally catch expression errors;
+// returning the error here keeps programmatic construction safe as well.
+func New(routes []Route) (*Router, error) {
+	return NewWithRegistry(routes, rules.DefaultRegistry())
+}
+
+// NewWithRegistry is the extension point for source-controlled custom rules.
+// A registry is immutable by convention after the router is built.
+func NewWithRegistry(routes []Route, registry *rules.Registry) (*Router, error) {
+	rt := &Router{byLimen: make(map[string]*routeIndex), any: newRouteIndex()}
+	if registry == nil {
+		registry = rules.DefaultRegistry()
+	}
+	for order, route := range routes {
+		if route.Handler == nil {
+			return nil, fmt.Errorf("route %q has a nil handler", route.Name)
+		}
+		expression := route.Match
+		if expression == "" {
+			expression = legacyExpression(route)
+		}
+		matcher, err := registry.Compile(expression)
+		if err != nil {
+			return nil, fmt.Errorf("route %q: %w", route.Name, err)
+		}
+		hints := matcher.IndexHints()
+		compiled := &compiledRoute{route: route, matcher: matcher, hints: hints, order: order, hostScoped: hints.Host != "", legacyProtocolCheck: route.Match == ""}
+		index := rt.any
+		if route.Limen != "" {
+			index = rt.byLimen[route.Limen]
+			if index == nil {
+				index = newRouteIndex()
+				rt.byLimen[route.Limen] = index
+			}
+		}
+		rt.insert(index, compiled)
+	}
+	return rt, nil
+}
+
+func newRouteIndex() *routeIndex {
+	return &routeIndex{exactHosts: make(map[string]*hostIndex), hostless: newHostIndex()}
+}
+
+func newHostIndex() *hostIndex { return &hostIndex{paths: newPathRadixTree()} }
+
+func (rt *Router) insert(index *routeIndex, route *compiledRoute) {
+	if !route.hints.Safe || (route.hints.Host == "" && route.hints.PathPrefix == "") {
+		index.fallback = append(index.fallback, route)
+		return
+	}
+	bucket := index.hostless
+	if route.hints.Host != "" {
+		bucket = index.exactHosts[route.hints.Host]
+		if bucket == nil {
+			bucket = newHostIndex()
+			index.exactHosts[route.hints.Host] = bucket
+		}
+	}
+	if route.hints.PathPrefix == "" {
+		bucket.fallback = append(bucket.fallback, route)
+		return
+	}
+	bucket.paths.insert(route.hints.PathPrefix, route)
+}
+
+func legacyExpression(route Route) string {
+	parts := make([]string, 0, 2)
+	if route.Host != "" {
+		parts = append(parts, "Host(`"+route.Host+"`)")
+	}
+	path := route.PathPrefix
+	if path == "" {
+		path = "/"
+	}
+	parts = append(parts, "PathPrefix(`"+path+"`)")
+	return strings.Join(parts, " && ")
+}
+
+// ServeHTTP normalizes request facts once, obtains candidates from the Limen,
+// Host and path indexes, then selects the highest-priority complete match.
 func (rt *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	//从请求中提取出 host
+	facts := requestFacts(r)
+	var best *compiledRoute
+	for _, index := range rt.indexesFor(protocol.LimenID(r)) {
+		for _, candidate := range index.candidates(facts.Host, facts.Path) {
+			best = chooseCandidate(candidate, facts, best)
+		}
+	}
+	if best == nil {
+		telemetry.MarkError(r.Context(), "route_not_found")
+		http.NotFound(w, r)
+		return
+	}
+	if best.legacyProtocolCheck && !routeProtocolMatches(best.route.Protocols, facts.Protocol) {
+		telemetry.MarkError(r.Context(), "unsupported_protocol")
+		http.Error(w, "request protocol is not enabled for this route", http.StatusNotImplemented)
+		return
+	}
+	best.route.Handler.ServeHTTP(w, r)
+}
+
+func chooseCandidate(candidate *compiledRoute, facts *rules.Facts, best *compiledRoute) *compiledRoute {
+	if !candidate.matcher.Match(facts) {
+		return best
+	}
+	if best == nil || routePrecedes(candidate, best) {
+		best = candidate
+	}
+	return best
+}
+
+func (rt *Router) indexesFor(limen string) []*routeIndex {
+	result := make([]*routeIndex, 0, 2)
+	if index := rt.byLimen[limen]; index != nil {
+		result = append(result, index)
+	}
+	result = append(result, rt.any)
+	return result
+}
+
+func (index *routeIndex) candidates(host, path string) []*compiledRoute {
+	result := append([]*compiledRoute(nil), index.fallback...)
+	if bucket := index.exactHosts[host]; bucket != nil {
+		result = append(result, bucket.fallback...)
+		result = bucket.paths.collect(path, result)
+	}
+	result = append(result, index.hostless.fallback...)
+	result = index.hostless.paths.collect(path, result)
+	return result
+}
+
+func routePrecedes(a, b *compiledRoute) bool {
+	if a.route.Priority != b.route.Priority {
+		return a.route.Priority > b.route.Priority
+	}
+	if a.hostScoped != b.hostScoped {
+		return a.hostScoped
+	}
+	if len(a.hints.PathPrefix) != len(b.hints.PathPrefix) {
+		return len(a.hints.PathPrefix) > len(b.hints.PathPrefix)
+	}
+	return a.order < b.order
+}
+
+func requestFacts(r *http.Request) *rules.Facts {
 	host := r.Host
 	if h, _, err := net.SplitHostPort(host); err == nil {
 		host = h
 	}
-	host = strings.ToLower(host)
-	//Note: The core route loop
-	//这里是路由匹配循环
-	for _, route := range rt.routes {
-		if route.Limen != "" && route.Limen != protocol.LimenID(r) {
-			continue
-		}
-		//先匹配当前请求中的host
-		// 1、match the host to any host in the routes map first
-		if route.Host != "" && route.Host != host {
-			continue
-		}
-		// 2、 if matched host, then match the  PathPrefix to url.path of current request.
-		p := route.PathPrefix
-		if p == "/" || r.URL.Path == p || strings.HasPrefix(r.URL.Path, p+"/") {
-			if !routeProtocolMatches(route.Protocols, r) {
-				telemetry.MarkError(r.Context(), "unsupported_protocol")
-				http.Error(w, "request protocol is not enabled for this route", http.StatusNotImplemented)
-				return
-			}
-			route.Handler.ServeHTTP(w, r)
-			return
-		}
+	host = strings.ToLower(strings.TrimSuffix(host, "."))
+	applicationProtocol := "http"
+	if protocol.IsWebSocketRequest(r) {
+		applicationProtocol = "websocket"
+	} else if protocol.WantsSSE(r) {
+		applicationProtocol = "sse"
 	}
-	//If nothing matched. Return 404 not found
-	telemetry.MarkError(r.Context(), "route_not_found")
-	http.NotFound(w, r)
+	return &rules.Facts{Host: host, Path: r.URL.Path, Method: r.Method, Protocol: applicationProtocol, Header: r.Header, Query: r.URL.Query()}
 }
 
-func routeProtocolMatches(protocols []string, r *http.Request) bool {
+func routeProtocolMatches(protocols []string, actual string) bool {
 	if len(protocols) == 0 {
-		return !protocol.IsWebSocketRequest(r) && !protocol.WantsSSE(r)
+		return actual == "http"
 	}
 	for _, name := range protocols {
-		switch name {
-		case config.RouteProtocolHTTP:
-			if !protocol.IsWebSocketRequest(r) && !protocol.WantsSSE(r) {
-				return true
-			}
-		case config.RouteProtocolSSE:
-			if protocol.WantsSSE(r) {
-				return true
-			}
-		case config.RouteProtocolWebSocket:
-			if protocol.IsWebSocketRequest(r) {
-				return true
-			}
+		if name == actual {
+			return true
 		}
 	}
 	return false
+}
+
+type pathRadixTree struct{ root *pathNode }
+
+type pathNode struct {
+	children map[string]*pathNode
+	routes   []*compiledRoute
+}
+
+func newPathRadixTree() *pathRadixTree {
+	return &pathRadixTree{root: &pathNode{children: make(map[string]*pathNode)}}
+}
+
+func (tree *pathRadixTree) insert(prefix string, route *compiledRoute) {
+	node := tree.root
+	for _, segment := range pathSegments(prefix) {
+		child := node.children[segment]
+		if child == nil {
+			child = &pathNode{children: make(map[string]*pathNode)}
+			node.children[segment] = child
+		}
+		node = child
+	}
+	node.routes = append(node.routes, route)
+}
+
+func (tree *pathRadixTree) collect(path string, result []*compiledRoute) []*compiledRoute {
+	node := tree.root
+	result = append(result, node.routes...)
+	for _, segment := range pathSegments(path) {
+		child := node.children[segment]
+		if child == nil {
+			break
+		}
+		node = child
+		result = append(result, node.routes...)
+	}
+	return result
+}
+
+func pathSegments(path string) []string {
+	if path == "/" || path == "" {
+		return nil
+	}
+	return strings.Split(strings.TrimPrefix(path, "/"), "/")
 }

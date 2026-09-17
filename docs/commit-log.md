@@ -5,6 +5,32 @@ repository commit. Add a new dated section before every future commit.
 
 ## 2026-09-17
 
+### Add compiled route rules, indexes, and direct actions
+
+Commit message: `feat(router): add compiled matching and route actions`
+
+Scope:
+
+- Added the source-controlled rule registry and boolean matcher for `Host`,
+  `Path`, `PathPrefix`, `Method`, `Header`, `Query`, and application protocol
+  predicates, including `&&`, `||`, `!`, parentheses, and custom compiler
+  registration.
+- Reworked Router construction to compile rules into immutable Limen/Host
+  indexes and a segment-aware path tree, with a safe fallback for expressions
+  whose boolean structure cannot yet provide an index hint.
+- Added route priority selection and preserved the existing unsupported
+  protocol response for structured routes.
+- Added `forward`, `redirect`, and `respond` route actions and a comprehensive
+  configuration example using the new match/action form.
+- Added regression tests for boolean matching, custom rules, indexed and
+  fallback routes, priority selection, direct responses, and the example file.
+
+Verification:
+
+- `go test -count=1 ./...`
+
+## 2026-09-17
+
 ### Stabilize stream timing regression under race instrumentation
 
 Commit message: `test: stabilize stream timeout race coverage`

@@ -137,53 +137,65 @@
     {
       "name": "public-api",
       "limen": "public-http",
-      "host": "api.example.internal",
-      "path_prefix": "/api",
-      "protocols": ["http"],
-      "service": "api",
-      "middlewares": ["api-buffer"]
+      "match": "Host(`api.example.internal`) && PathPrefix(`/api`) && Protocol(`http`)",
+      "middlewares": ["api-buffer"],
+      "action": { "forward": { "service": "api" } }
     },
     {
       "name": "public-upload",
       "limen": "public-http",
-      "host": "api.example.internal",
-      "path_prefix": "/upload",
-      "protocols": ["http"],
-      "service": "storage",
-      "middlewares": ["upload-body-limit"]
+      "match": "Host(`api.example.internal`) && PathPrefix(`/upload`) && Protocol(`http`)",
+      "middlewares": ["upload-body-limit"],
+      "action": { "forward": { "service": "storage" } }
     },
     {
       "name": "secure-api",
       "limen": "secure-multiprotocol",
-      "host": "api.example.internal",
-      "path_prefix": "/api",
-      "protocols": ["http"],
-      "service": "api",
-      "middlewares": ["small-response-buffer"]
+      "match": "Host(`api.example.internal`) && PathPrefix(`/api`) && Protocol(`http`)",
+      "middlewares": ["small-response-buffer"],
+      "action": { "forward": { "service": "api" } }
     },
     {
       "name": "secure-notifications",
       "limen": "secure-multiprotocol",
-      "host": "stream.example.internal",
-      "path_prefix": "/notifications",
-      "protocols": ["http", "sse"],
-      "service": "streaming"
+      "match": "Host(`stream.example.internal`) && PathPrefix(`/notifications`) && (Protocol(`http`) || Protocol(`sse`))",
+      "action": { "forward": { "service": "streaming" } }
     },
     {
       "name": "secure-events",
       "limen": "secure-multiprotocol",
-      "host": "stream.example.internal",
-      "path_prefix": "/events",
-      "protocols": ["sse"],
-      "service": "streaming"
+      "match": "Host(`stream.example.internal`) && PathPrefix(`/events`) && Protocol(`sse`)",
+      "action": { "forward": { "service": "streaming" } }
     },
     {
       "name": "secure-websocket",
       "limen": "secure-multiprotocol",
-      "host": "stream.example.internal",
-      "path_prefix": "/socket",
-      "protocols": ["websocket"],
-      "service": "streaming"
+      "match": "Host(`stream.example.internal`) && PathPrefix(`/socket`) && Protocol(`websocket`)",
+      "action": { "forward": { "service": "streaming" } }
+    },
+    {
+      "name": "public-health",
+      "limen": "public-http",
+      "match": "Path(`/healthz`) && Method(`GET`)",
+      "action": {
+        "respond": {
+          "status": 200,
+          "body": "ok\n",
+          "headers": { "Content-Type": "text/plain; charset=utf-8" }
+        }
+      }
+    },
+    {
+      "name": "legacy-api-redirect",
+      "limen": "public-http",
+      "match": "Host(`api.example.internal`) && PathPrefix(`/v0`)",
+      "priority": 10,
+      "action": {
+        "redirect": {
+          "status": 308,
+          "location": "https://api.example.internal/api"
+        }
+      }
     }
   ]
 }

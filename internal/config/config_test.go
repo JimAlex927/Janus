@@ -3,10 +3,25 @@ package config
 import (
 	"bytes"
 	"encoding/json"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 )
+
+func TestComprehensiveExampleConfig(t *testing.T) {
+	path := filepath.Join("..", "..", "configs", "janus-comprehensive.example.json")
+	c, _, err := LoadFileSnapshot(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(c.Limens) != 2 || len(c.Routes) != 8 {
+		t.Fatalf("loaded limens/routes = %d/%d, want 2/8", len(c.Limens), len(c.Routes))
+	}
+	if c.Routes[0].Match == "" || c.Routes[0].Action == nil || c.Routes[0].Action.Forward == nil {
+		t.Fatal("comprehensive example did not load match and forward action")
+	}
+}
 
 func FuzzLoadNeverPanics(f *testing.F) {
 	f.Add([]byte(`{"listen":"127.0.0.1:8080","services":{"s":{"upstreams":["http://localhost:9000"]}},"routes":[{"name":"r","path_prefix":"/","service":"s"}]}`))
