@@ -7,6 +7,7 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -221,6 +222,13 @@ func (l *Limen) RotateCertificate(certFile, keyFile string) error {
 	if err != nil {
 		return fmt.Errorf("load rotated limen TLS certificate: %w", err)
 	}
+	return l.publishCertificate(cert)
+}
+
+func (l *Limen) publishCertificate(cert tls.Certificate) error {
+	if l.cert == nil {
+		return fmt.Errorf("limen does not use TLS")
+	}
 	if err := validateServerCertificate(cert); err != nil {
 		return fmt.Errorf("validate rotated limen TLS certificate: %w", err)
 	}
@@ -325,15 +333,29 @@ func (l *Limen) Serve(listener net.Listener) error {
 	go func() { h3Done <- l.http3.Serve(packet) }()
 	select {
 	case err := <-tcpDone:
+		if l.isGracefulStop(err) {
+			return err
+		}
 		l.closePacket()
 		l.startHTTP3Close()
 		return err
 	case err := <-h3Done:
+		if l.isGracefulStop(err) {
+			return err
+		}
 		_ = l.server.Close()
 		l.closePacket()
 		l.startHTTP3Close()
 		return err
 	}
+}
+
+// A listener stops accepting before Shutdown has finished draining handlers.
+// Only failures outside that normal lifecycle may force-close its sibling.
+func (l *Limen) isGracefulStop(err error) bool {
+	l.hijackedMu.Lock()
+	defer l.hijackedMu.Unlock()
+	return l.shuttingDown && errors.Is(err, http.ErrServerClosed)
 }
 
 // Shutdown stops accepting new connections and waits for active requests until
@@ -355,13 +377,11 @@ func (l *Limen) Shutdown(ctx context.Context) error {
 		h3Done <- nil
 	}
 	if err := <-serverDone; err != nil {
-		l.closeHijacked()
-		l.startHTTP3Close()
+		_ = l.Close()
 		return err
 	}
 	if err := <-h3Done; err != nil {
-		l.closeHijacked()
-		l.startHTTP3Close()
+		_ = l.Close()
 		return err
 	}
 	l.hijackedMu.Lock()
@@ -371,8 +391,7 @@ func (l *Limen) Shutdown(ctx context.Context) error {
 	case <-empty:
 		return nil
 	case <-ctx.Done():
-		l.closeHijacked()
-		l.startHTTP3Close()
+		_ = l.Close()
 		return ctx.Err()
 	}
 }

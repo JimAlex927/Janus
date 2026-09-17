@@ -5,6 +5,37 @@ repository commit. Add a new dated section before every future commit.
 
 ## 2026-09-17
 
+### Repair lifecycle and snapshot acceptance defects
+
+Commit message: `fix: repair stream drain and startup snapshot guarantees`
+
+Scope:
+
+- Distinguished graceful listener termination from sibling-protocol failure so
+  TCP/QUIC drain does not prematurely close accepted requests; deadline paths
+  force-close both transports.
+- Interrupted in-progress SSE writes on stream expiry, joined timer cleanup,
+  aborted already-committed incomplete responses and preserved 1xx semantics.
+- Passed the exact startup configuration hash to its watcher. Certificate polls
+  start without an assumed baseline and hash/parse/publish the same PEM bytes.
+- Added client/resource regressions for graceful H3, stalled TCP writes, startup
+  route/certificate updates, 103-to-504, and H1/H2/H3 SSE backend/admission release.
+  Strengthened second-event, peer EOF and idle-refresh assertions.
+- Added a Linux-only built-process SIGTERM regression, a production acceptance
+  record and a Chinese source-reading guide. Preserved the operator's main.go
+  comment separately from the implementation changes.
+
+Verification:
+
+- Targeted lifecycle, gateway, runtime and middleware tests on Windows/amd64.
+- Linux process test cross-compilation (execution awaits the target VM).
+- `GOTOOLCHAIN=go1.25.13+auto go test -count=1 ./...` passed.
+- `go vet ./...`, `go build -o bin/janus.exe ./cmd/janus` and
+  `git diff --check` passed.
+
+Qualification: target Linux race/deployment execution, agreed traffic/memory
+budgets, 24h soak and a real non-core canary/rollback remain unfulfilled gates.
+
 ### Deduplicate unreadable certificate reload errors
 
 Commit message: `fix(reload): deduplicate certificate read errors`

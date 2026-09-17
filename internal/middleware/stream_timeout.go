@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"janus/internal/protocol"
+	"janus/internal/telemetry"
 )
 
 // StreamTimeout bounds explicitly classified SSE and classic HTTP/1 WebSocket
@@ -26,26 +27,50 @@ func StreamTimeout(maxDuration, idleTimeout time.Duration) Middleware {
 
 			ctx, cancel := context.WithCancelCause(r.Context())
 			control := newStreamControl()
+			control.writer = http.NewResponseController(w)
 			activity := make(chan struct{}, 1)
-			go runStreamTimers(ctx, cancel, control, activity, maxDuration, idleTimeout)
+			timerDone := make(chan struct{})
+			go func() {
+				defer close(timerDone)
+				runStreamTimers(ctx, cancel, control, activity, maxDuration, idleTimeout)
+			}()
+			defer func() {
+				if !control.hijacked.Load() || control.closed.Load() {
+					control.stop()
+					cancel(nil)
+					// No timer may touch the response writer after ServeHTTP returns.
+					<-timerDone
+				}
+				if control.timedOut.Load() {
+					telemetry.MarkError(r.Context(), "timeout")
+				}
+			}()
 
 			wrapped := wrapStreamResponseWriter(w, ctx, control, activity)
 			next.ServeHTTP(wrapped, r.WithContext(ctx))
 
+			if control.timedOut.Load() {
+				<-timerDone
+			}
 			if control.timedOut.Load() && !control.committed.Load() {
+				// A pre-header timeout still has a bounded opportunity to send 504.
+				_ = control.writer.SetWriteDeadline(time.Now().Add(time.Second))
 				http.Error(w, http.StatusText(http.StatusGatewayTimeout), http.StatusGatewayTimeout)
 			}
-			if !control.hijacked.Load() || control.closed.Load() {
-				control.stop()
-				cancel(nil)
+			if control.timedOut.Load() && control.committed.Load() && !control.hijacked.Load() {
+				panic(http.ErrAbortHandler)
 			}
 		})
 	}
 }
 
 type streamControl struct {
-	connMu sync.Mutex
-	conn   net.Conn
+	ioMu    sync.Mutex
+	writer  *http.ResponseController
+	writing int
+	expired bool
+	connMu  sync.Mutex
+	conn    net.Conn
 
 	stopOnce sync.Once
 	stopCh   chan struct{}
@@ -54,6 +79,36 @@ type streamControl struct {
 	closed    atomic.Bool
 	committed atomic.Bool
 	timedOut  atomic.Bool
+}
+
+// Coordinate with timer cancellation: either an operation sees cancellation
+// before starting, or expiry interrupts its in-progress socket/stream write.
+func (c *streamControl) beginWrite(ctx context.Context) error {
+	c.ioMu.Lock()
+	defer c.ioMu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if c.expired {
+		return context.Canceled
+	}
+	c.writing++
+	return nil
+}
+
+func (c *streamControl) endWrite() {
+	c.ioMu.Lock()
+	c.writing--
+	c.ioMu.Unlock()
+}
+
+func (c *streamControl) interruptWrite() {
+	c.ioMu.Lock()
+	defer c.ioMu.Unlock()
+	c.expired = true
+	if c.writing > 0 && c.writer != nil {
+		_ = c.writer.SetWriteDeadline(time.Now())
+	}
 }
 
 func newStreamControl() *streamControl {
@@ -77,6 +132,7 @@ func (c *streamControl) setConn(conn net.Conn) {
 
 func (c *streamControl) closeConn() {
 	c.connMu.Lock()
+	c.closed.Store(true)
 	conn := c.conn
 	c.conn = nil
 	c.connMu.Unlock()
@@ -118,6 +174,7 @@ func runStreamTimers(ctx context.Context, cancel context.CancelCauseFunc, contro
 	for {
 		select {
 		case <-ctx.Done():
+			control.interruptWrite()
 			control.closeConn()
 			return
 		case <-control.stopCh:
@@ -125,11 +182,13 @@ func runStreamTimers(ctx context.Context, cancel context.CancelCauseFunc, contro
 		case <-maxCh:
 			control.timedOut.Store(true)
 			cancel(context.DeadlineExceeded)
+			control.interruptWrite()
 			control.closeConn()
 			return
 		case <-idleCh:
 			control.timedOut.Store(true)
 			cancel(context.DeadlineExceeded)
+			control.interruptWrite()
 			control.closeConn()
 			return
 		case <-activity:
@@ -157,17 +216,21 @@ type streamResponseWriter struct {
 func (w *streamResponseWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
 
 func (w *streamResponseWriter) WriteHeader(status int) {
-	if w.ctx.Err() != nil {
+	if w.control.beginWrite(w.ctx) != nil {
 		return
 	}
-	w.control.committed.Store(true)
+	defer w.control.endWrite()
+	if status < 100 || status >= 200 || status == http.StatusSwitchingProtocols {
+		w.control.committed.Store(true)
+	}
 	w.ResponseWriter.WriteHeader(status)
 }
 
 func (w *streamResponseWriter) Write(p []byte) (int, error) {
-	if err := w.ctx.Err(); err != nil {
+	if err := w.control.beginWrite(w.ctx); err != nil {
 		return 0, err
 	}
+	defer w.control.endWrite()
 	w.control.committed.Store(true)
 	n, err := w.ResponseWriter.Write(p)
 	if n > 0 {
@@ -184,9 +247,10 @@ func (w *streamResponseWriter) touch() {
 }
 
 func (w *streamResponseWriter) flush() {
-	if w.ctx.Err() != nil {
+	if w.control.beginWrite(w.ctx) != nil {
 		return
 	}
+	defer w.control.endWrite()
 	w.control.committed.Store(true)
 	if flusher, ok := w.ResponseWriter.(http.Flusher); ok {
 		flusher.Flush()

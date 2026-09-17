@@ -3,6 +3,7 @@ package limen
 import (
 	"context"
 	"crypto/sha256"
+	"crypto/tls"
 	"fmt"
 	"sort"
 	"sync"
@@ -40,9 +41,9 @@ type CertificateReloader struct {
 	logger   *zap.Logger
 }
 
-// NewCertificateReloader records the current certificate hashes as the
-// already-applied baseline. NewCertificateReloader expects startup to have
-// already loaded and validated each pair through NewBinding.
+// NewCertificateReloader starts without an assumed applied fingerprint.
+// NewBinding's active certificate may differ from files changed during startup.
+// The first poll validates and publishes its own complete snapshot.
 func NewCertificateReloader(bindings map[string]config.LimenConfig, servers map[string]*Limen, interval time.Duration, logger *zap.Logger) (*CertificateReloader, error) {
 	if interval <= 0 {
 		interval = time.Second
@@ -64,13 +65,8 @@ func NewCertificateReloader(bindings map[string]config.LimenConfig, servers map[
 			return nil, fmt.Errorf("TLS limen %q has no server", name)
 		}
 		settings := *bindings[name].TLS
-		fingerprint, err := fingerprintCertificate(settings)
-		if err != nil {
-			return nil, fmt.Errorf("limen %q: %w", name, err)
-		}
 		entries = append(entries, certificateEntry{
 			name: name, limen: server, settings: settings,
-			last: fingerprint, hasLast: true,
 		})
 	}
 	return &CertificateReloader{entries: entries, interval: interval, logger: logger}, nil
@@ -85,7 +81,7 @@ func (r *CertificateReloader) ReloadOnce() error {
 	var firstErr error
 	for i := range r.entries {
 		entry := &r.entries[i]
-		fingerprint, err := fingerprintCertificate(entry.settings)
+		certPEM, keyPEM, fingerprint, err := readCertificateSnapshot(entry.settings)
 		if err != nil {
 			if firstErr == nil {
 				firstErr = fmt.Errorf("limen %q: %w", entry.name, err)
@@ -97,7 +93,11 @@ func (r *CertificateReloader) ReloadOnce() error {
 			entry.hasError = false
 			continue
 		}
-		if err := entry.limen.RotateCertificate(entry.settings.CertFile, entry.settings.KeyFile); err != nil {
+		pair, err := tls.X509KeyPair(certPEM, keyPEM)
+		if err == nil {
+			err = entry.limen.publishCertificate(pair)
+		}
+		if err != nil {
 			if firstErr == nil {
 				firstErr = fmt.Errorf("limen %q: %w", entry.name, err)
 			}
@@ -139,14 +139,16 @@ func (r *CertificateReloader) Run(ctx context.Context) error {
 	}
 }
 
-func fingerprintCertificate(settings config.TLSSettings) (certificateFingerprint, error) {
+// Hash and parse the same bounded bytes so a second read cannot publish a
+// different identity than the fingerprint recorded as applied.
+func readCertificateSnapshot(settings config.TLSSettings) ([]byte, []byte, certificateFingerprint, error) {
 	cert, err := readTLSAsset(settings.CertFile, "certificate")
 	if err != nil {
-		return certificateFingerprint{}, err
+		return nil, nil, certificateFingerprint{}, err
 	}
 	key, err := readTLSAsset(settings.KeyFile, "private key")
 	if err != nil {
-		return certificateFingerprint{}, err
+		return nil, nil, certificateFingerprint{}, err
 	}
-	return certificateFingerprint{cert: sha256.Sum256(cert), key: sha256.Sum256(key)}, nil
+	return cert, key, certificateFingerprint{cert: sha256.Sum256(cert), key: sha256.Sum256(key)}, nil
 }

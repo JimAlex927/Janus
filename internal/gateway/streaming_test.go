@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"crypto/sha1"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -88,6 +89,10 @@ func TestSSEPassesEventsBeforeBackendCompletes(t *testing.T) {
 	if err != nil || second != "\n" {
 		t.Fatalf("event separator = %q, error %v", second, err)
 	}
+	second, err = reader.ReadString('\n')
+	if err != nil || second != "data: second\n" {
+		t.Fatalf("second event = %q, error %v", second, err)
+	}
 }
 
 func TestWebSocketUpgradeIsProxied(t *testing.T) {
@@ -153,7 +158,9 @@ func TestWebSocketUpgradeIsProxied(t *testing.T) {
 }
 
 func TestWebSocketStreamTimeoutClosesUpgradedConnection(t *testing.T) {
+	backendDone := make(chan struct{})
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer close(backendDone)
 		conn, buffered, err := w.(http.Hijacker).Hijack()
 		if err != nil {
 			t.Error(err)
@@ -165,7 +172,9 @@ func TestWebSocketStreamTimeoutClosesUpgradedConnection(t *testing.T) {
 			t.Error(err)
 			return
 		}
-		<-r.Context().Done()
+		// A hijacked backend request no longer gets net/http disconnect tracking.
+		// Read the actual connection to verify that the gateway closes its peer.
+		_, _ = io.Copy(io.Discard, buffered)
 	}))
 	defer backend.Close()
 	settings := config.Settings{
@@ -200,8 +209,13 @@ func TestWebSocketStreamTimeoutClosesUpgradedConnection(t *testing.T) {
 		t.Fatalf("upgrade status = %d", response.StatusCode)
 	}
 	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
-	if _, err := reader.ReadByte(); err == nil {
-		t.Fatal("upgraded connection remained open after idle timeout")
+	if _, err := reader.ReadByte(); !errors.Is(err, io.EOF) {
+		t.Fatalf("idle close = %v, want peer EOF rather than a client deadline", err)
+	}
+	select {
+	case <-backendDone:
+	case <-time.After(time.Second):
+		t.Fatal("gateway did not release the backend upgraded connection")
 	}
 }
 

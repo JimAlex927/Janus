@@ -25,16 +25,26 @@ func TestStreamTimeoutReturns504BeforeCommitment(t *testing.T) {
 
 func TestStreamIdleTimeoutResetsOnResponseActivity(t *testing.T) {
 	done := make(chan struct{})
-	h := StreamTimeout(time.Second, 50*time.Millisecond)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	h := StreamTimeout(2*time.Second, 200*time.Millisecond)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		flusher, ok := w.(http.Flusher)
 		if !ok {
 			t.Error("stream writer does not preserve Flusher")
 			return
 		}
-		_, _ = io.WriteString(w, "first")
-		flusher.Flush()
-		time.Sleep(10 * time.Millisecond)
-		_, _ = io.WriteString(w, "second")
+		// Remain active for longer than the initial idle budget. Without timer
+		// refresh this fails at 200ms, rather than passing after only 10ms.
+		for i := 0; i < 5; i++ {
+			if _, err := io.WriteString(w, "event"); err != nil {
+				t.Error(err)
+				return
+			}
+			flusher.Flush()
+			time.Sleep(60 * time.Millisecond)
+		}
+		if r.Context().Err() != nil {
+			t.Error("active SSE stream was canceled")
+			return
+		}
 		close(done)
 	}))
 	w := httptest.NewRecorder()
@@ -46,8 +56,8 @@ func TestStreamIdleTimeoutResetsOnResponseActivity(t *testing.T) {
 	default:
 		t.Fatal("stream handler did not finish")
 	}
-	if w.Code != http.StatusOK || w.Body.String() != "firstsecond" {
-		t.Fatalf("stream response = %d %q, want 200 firstsecond", w.Code, w.Body.String())
+	if w.Code != http.StatusOK || w.Body.String() != "eventeventeventeventevent" {
+		t.Fatalf("stream response = %d %q, want five events", w.Code, w.Body.String())
 	}
 }
 

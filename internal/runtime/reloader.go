@@ -29,15 +29,15 @@ type FileReloader struct {
 	hasReportedHash  bool
 }
 
-// NewFileReloader validates the current file and records its hash as the
-// already-applied baseline. Later polls only attempt changed content.
-func NewFileReloader(r *Runtime, path string, interval time.Duration, logger *zap.Logger) (*FileReloader, error) {
+// NewFileReloader optionally accepts the hash of the exact snapshot used to
+// build the runtime. Without that evidence the first poll must publish the
+// current file, even if it has not changed since watcher construction.
+func NewFileReloader(r *Runtime, path string, interval time.Duration, logger *zap.Logger, appliedHash ...[sha256.Size]byte) (*FileReloader, error) {
 	if r == nil {
 		return nil, fmt.Errorf("runtime is nil")
 	}
-	_, hash, err := config.LoadFileSnapshot(path)
-	if err != nil {
-		return nil, err
+	if len(appliedHash) > 1 {
+		return nil, fmt.Errorf("at most one applied snapshot hash is allowed")
 	}
 	if interval <= 0 {
 		interval = time.Second
@@ -45,10 +45,13 @@ func NewFileReloader(r *Runtime, path string, interval time.Duration, logger *za
 	if logger == nil {
 		logger = zap.NewNop()
 	}
-	return &FileReloader{
+	f := &FileReloader{
 		runtime: r, path: path, interval: interval, logger: logger,
-		lastAppliedHash: hash, hasAppliedHash: true,
-	}, nil
+	}
+	if len(appliedHash) == 1 {
+		f.lastAppliedHash, f.hasAppliedHash = appliedHash[0], true
+	}
+	return f, nil
 }
 
 // ReloadOnce checks the file once. Invalid or startup-changing content is

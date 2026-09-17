@@ -51,7 +51,7 @@ func main() {
 func run(ctx context.Context, path string, check, printEffective bool, reloadInterval time.Duration, logger *zap.Logger) error {
 	// Open and validate the Janus configuration. Versioned TLS paths are
 	// resolved relative to this file by LoadFile.
-	c, err := config.LoadFile(path)
+	c, startupHash, err := config.LoadFileSnapshot(path)
 	if err != nil {
 		return err
 	}
@@ -151,7 +151,7 @@ func run(ctx context.Context, path string, check, printEffective bool, reloadInt
 	reloadCtx, cancelReload := context.WithCancel(ctx)
 	defer cancelReload()
 	if c.Version == config.CurrentConfigVersion {
-		routeReloader, err := janusruntime.NewFileReloader(requestRuntime, path, reloadInterval, logger)
+		routeReloader, err := janusruntime.NewFileReloader(requestRuntime, path, reloadInterval, logger, startupHash)
 		if err != nil {
 			closeListeners(listeners)
 			closePacketListeners(packetListeners)

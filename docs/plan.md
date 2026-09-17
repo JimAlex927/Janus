@@ -366,6 +366,18 @@ in Phase 4 also need retirement/reload tests when introduced.
    canary rollback evidence remain. Add per-service transport/TLS policy only
    when required.
 
+## Reopened acceptance: September 17 review
+
+Implementation milestones above describe delivered functionality, not a
+production certification. Review reproduced premature H3 shutdown, blocked SSE
+writes surviving context cancellation, startup watcher snapshot loss, and 103
+being mistaken for final response commitment. These acceptance criteria were
+reopened. Repairs and client/resource regression tests are now present, including
+H1/H2/H3 SSE aborts, backend cancellation, admission release and graceful H3
+completion. Target Linux execution, capacity/soak evidence and canary/rollback
+remain mandatory before release. Track evidence in
+[production-readiness.md](production-readiness.md).
+
 ## Phase 6 tasks
 
 The repository now defines a pinned Ubuntu CI job for the release gates: full
