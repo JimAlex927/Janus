@@ -5,6 +5,31 @@ repository commit. Add a new dated section before every future commit.
 
 ## 2026-09-17
 
+### Deduplicate unreadable certificate reload errors
+
+Commit message: `fix(reload): deduplicate certificate read errors`
+
+Scope:
+
+- Deduplicated repeated certificate/key fingerprint-read failures by their
+  error identity, so a missing or temporarily unreadable asset does not emit
+  the same error on every polling tick.
+- Kept changed failure messages observable and preserved retry behavior; a
+  readable but rejected certificate pair is still retried until rotation
+  succeeds.
+- Added an observer-backed regression test for repeated unreadable and changed
+  certificate failures.
+
+Verification:
+
+- `gofmt -w internal/limen/cert_reloader.go internal/limen/cert_reloader_test.go`
+- `go test -count=5 ./internal/limen`
+- `git diff --check`
+
+Scope note: this bounds duplicate logging for certificate reload failures; it
+does not change certificate validation policy or complete the broader security
+and production qualification gates.
+
 ### Bound SSE and WebSocket stream lifetime
 
 Commit message: `feat(timeout): add stream lifetime and idle budgets`

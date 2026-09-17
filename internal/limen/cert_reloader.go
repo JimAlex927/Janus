@@ -21,6 +21,8 @@ type certificateEntry struct {
 	hasLast     bool
 	rejected    certificateFingerprint
 	hasRejected bool
+	lastError   string
+	hasError    bool
 }
 
 type certificateFingerprint struct {
@@ -88,27 +90,38 @@ func (r *CertificateReloader) ReloadOnce() error {
 			if firstErr == nil {
 				firstErr = fmt.Errorf("limen %q: %w", entry.name, err)
 			}
-			r.logger.Error("certificate reload rejected", zap.String("limen", entry.name), zap.Error(err))
+			r.logRejected(entry, err)
 			continue
 		}
 		if entry.hasLast && entry.last == fingerprint {
+			entry.hasError = false
 			continue
 		}
 		if err := entry.limen.RotateCertificate(entry.settings.CertFile, entry.settings.KeyFile); err != nil {
 			if firstErr == nil {
 				firstErr = fmt.Errorf("limen %q: %w", entry.name, err)
 			}
-			if !entry.hasRejected || entry.rejected != fingerprint {
+			if !entry.hasRejected || entry.rejected != fingerprint || entry.hasError && entry.lastError != err.Error() {
 				r.logger.Error("certificate reload rejected", zap.String("limen", entry.name), zap.Error(err))
 			}
 			entry.rejected, entry.hasRejected = fingerprint, true
+			entry.lastError, entry.hasError = err.Error(), true
 			continue
 		}
 		entry.last, entry.hasLast = fingerprint, true
 		entry.hasRejected = false
+		entry.hasError = false
 		r.logger.Info("certificate reloaded", zap.String("limen", entry.name))
 	}
 	return firstErr
+}
+
+func (r *CertificateReloader) logRejected(entry *certificateEntry, err error) {
+	message := err.Error()
+	if !entry.hasError || entry.lastError != message {
+		r.logger.Error("certificate reload rejected", zap.String("limen", entry.name), zap.Error(err))
+	}
+	entry.lastError, entry.hasError = message, true
 }
 
 // Run polls until ctx is cancelled. Certificate errors are non-fatal and do

@@ -15,6 +15,7 @@ import (
 	"github.com/quic-go/quic-go"
 	"github.com/quic-go/quic-go/http3"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
 )
 
 func TestCertificateReloaderPublishesOnlyValidatedPairs(t *testing.T) {
@@ -59,6 +60,44 @@ func TestCertificateReloaderPublishesOnlyValidatedPairs(t *testing.T) {
 		t.Fatal(err)
 	}
 	requestWithRoots(t, listener.Addr().String(), rootsTwo)
+}
+
+func TestCertificateReloaderDeduplicatesUnreadablePairErrors(t *testing.T) {
+	certFile, keyFile, _ := writeTestCertificate(t)
+	l, _ := startTestLimen(t, config.LimenConfig{
+		Address:   "127.0.0.1:0",
+		Protocols: []string{config.ProtocolHTTP1},
+		TLS:       &config.TLSSettings{CertFile: certFile, KeyFile: keyFile},
+	}, http.NotFoundHandler())
+	core, logs := observer.New(zap.ErrorLevel)
+	reloader, err := NewCertificateReloader(
+		map[string]config.LimenConfig{"public": {TLS: &config.TLSSettings{CertFile: certFile, KeyFile: keyFile}}},
+		map[string]*Limen{"public": l}, 0, zap.New(core),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(certFile); err != nil {
+		t.Fatal(err)
+	}
+	if err := reloader.ReloadOnce(); err == nil {
+		t.Fatal("expected missing certificate rejection")
+	}
+	if err := reloader.ReloadOnce(); err == nil {
+		t.Fatal("expected repeated missing certificate rejection")
+	}
+	if got := len(logs.All()); got != 1 {
+		t.Fatalf("repeated unreadable pair logged %d errors, want 1", got)
+	}
+	if err := os.WriteFile(certFile, []byte("not a certificate"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := reloader.ReloadOnce(); err == nil {
+		t.Fatal("expected malformed certificate rejection")
+	}
+	if got := len(logs.All()); got != 2 {
+		t.Fatalf("changed certificate failure logged %d errors, want 2", got)
+	}
 }
 
 func TestHTTP3CertificateRotationKeepsExistingConnectionAndUpdatesNewHandshake(t *testing.T) {
