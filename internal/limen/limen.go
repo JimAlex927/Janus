@@ -101,7 +101,8 @@ func NewBinding(name string, binding config.LimenConfig, handler http.Handler, s
 		// has been bound and the QUIC server has started.
 		next := handler
 		handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			//TODO 这里设置了一个什么请求头 然后再处理的请求 暂时对h3的协议不太了解
+			// Advertise the UDP port on the TCP response so capable clients can
+			// discover the HTTP/3 endpoint through Alt-Svc.
 			_ = h3Server.SetQUICHeaders(w.Header())
 			next.ServeHTTP(w, r)
 		})

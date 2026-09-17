@@ -1292,3 +1292,29 @@ Verification:
 
 Design note: future middleware composition in the style of Traefik is recorded
 as a direction for a later change; this commit does not implement it.
+
+## 2026-09-17
+
+### Wait for reload workers during shutdown
+
+Commit message: `fix: wait for reload workers during shutdown`
+
+Scope:
+
+- Wait for the route and certificate reloader goroutines to exit after
+  cancellation, so they cannot continue polling or logging while runtime and
+  logger resources are being closed.
+- Clarified the HTTP/3 Alt-Svc advertisement comment and removed stale TODOs
+  whose behavior is already enforced by configuration validation or whose
+  implementation needs a separately defined policy.
+
+Verification:
+
+- `gofmt -w cmd/janus/main.go internal/limen/limen.go internal/runtime/runtime.go internal/upstream/pool.go`
+- `go test -count=1 ./...`
+- `go test -race -count=1 ./...`
+- `go vet ./...`
+
+Release note: local code-level verification remains green; Linux process,
+systemd deployment, capacity, soak, canary, and rollback evidence are still
+required before production approval.

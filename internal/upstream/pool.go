@@ -36,7 +36,8 @@ func NewWithHealth(targets []*url.URL, store *health.Store) (*Pool, error) {
 }
 
 // Next returns a copy so a caller cannot mutate the shared configuration.
-// 这里是round robin式的取出下游链接 还有其他负载均衡的方式 TODO
+// 这里是 round-robin 式地取出下游连接；其他负载均衡策略需要单独定义
+// 健康、权重和故障切换语义后再实现。
 func (p *Pool) Next() url.URL {
 	return p.targets[(p.next.Add(1)-1)%uint64(len(p.targets))]
 }

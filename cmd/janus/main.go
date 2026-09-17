@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"sort"
+	"sync"
 	"syscall"
 	"time"
 
@@ -169,7 +170,11 @@ func run(ctx context.Context, path string, check, printEffective bool, reloadInt
 		}
 	}
 	reloadCtx, cancelReload := context.WithCancel(ctx)
-	defer cancelReload()
+	var reloadWG sync.WaitGroup
+	defer func() {
+		cancelReload()
+		reloadWG.Wait()
+	}()
 	if c.Version == config.CurrentConfigVersion {
 		//构建文件重载器
 		routeReloader, err := janusruntime.NewFileReloader(requestRuntime, path, reloadInterval, logger, startupHash)
@@ -188,8 +193,15 @@ func run(ctx context.Context, path string, check, printEffective bool, reloadInt
 			return err
 		}
 		//启动两个重载器 配置文件重载 和tls证书重载
-		go func() { _ = routeReloader.Run(reloadCtx) }()
-		go func() { _ = certificateReloader.Run(reloadCtx) }()
+		reloadWG.Add(2)
+		go func() {
+			defer reloadWG.Done()
+			_ = routeReloader.Run(reloadCtx)
+		}()
+		go func() {
+			defer reloadWG.Done()
+			_ = certificateReloader.Run(reloadCtx)
+		}()
 	}
 	done := make(chan error, len(servers)+1)
 	for i, server := range servers {

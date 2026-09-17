@@ -487,8 +487,6 @@ func (r *serviceLimiterRegistry) acquire(c config.Config) (map[string]*middlewar
 
 func serviceInFlightLimit(c config.Config, service config.Service) (int, bool) {
 	for _, name := range service.Middlewares {
-		//TODO 这里如果用户对同一个service 写了两个in_flight的middleware 只会用第一个 但是chain里面还是会保留
-		//TODO 应该需要强约束，如果一个service有多个in_flight的middleware 只应该保留第一个合法的，后续的都强制删除
 		if definition := c.Middlewares[name]; definition.InFlight != nil {
 			return definition.InFlight.MaxConcurrent, true
 		}
