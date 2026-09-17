@@ -101,6 +101,29 @@ func TestObserveKeepsResponseRequestIDAuthoritative(t *testing.T) {
 	}
 }
 
+func TestObserveBoundsLogFields(t *testing.T) {
+	core, logs := observer.New(zap.InfoLevel)
+	long := strings.Repeat("界", maxLogFieldBytes)
+	h := Observe(zap.New(core))(RouteMetadata(long, long)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, "ok")
+	})))
+	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "http://gateway/"+long, nil))
+
+	fields := logs.All()[0].ContextMap()
+	for _, key := range []string{"method", "path", "route", "service"} {
+		value, ok := fields[key].(string)
+		if !ok {
+			t.Fatalf("field %s = %#v, want string", key, fields[key])
+		}
+		if len(value) > maxLogFieldBytes {
+			t.Fatalf("field %s has %d bytes, want at most %d", key, len(value), maxLogFieldBytes)
+		}
+		if key != "method" && !strings.HasSuffix(value, "…") {
+			t.Fatalf("field %s = %q, want UTF-8 truncation marker", key, value)
+		}
+	}
+}
+
 func TestObserveLogsResponseCopyAbort(t *testing.T) {
 	core, logs := observer.New(zap.InfoLevel)
 	h := Observe(zap.New(core))(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

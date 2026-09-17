@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	"janus/internal/protocol"
 	"janus/internal/telemetry"
@@ -18,6 +19,8 @@ import (
 )
 
 var fallbackRequestID uint64
+
+const maxLogFieldBytes = 1024
 
 // Observe creates a request ID, records bounded request/response metadata and
 // emits one access entry after the wrapped handler returns. Client-supplied
@@ -79,10 +82,10 @@ func logOutcome(logger *zap.Logger, r *http.Request, observation *telemetry.Obse
 	}
 	fields := []zap.Field{
 		zap.String("request_id", outcome.RequestID),
-		zap.String("method", r.Method),
-		zap.String("path", r.URL.Path),
-		zap.String("route", outcome.Route),
-		zap.String("service", outcome.Service),
+		zap.String("method", boundedLogField(r.Method)),
+		zap.String("path", boundedLogField(r.URL.Path)),
+		zap.String("route", boundedLogField(outcome.Route)),
+		zap.String("service", boundedLogField(outcome.Service)),
 		zap.Int("status", outcome.Status),
 		zap.Duration("duration", time.Since(outcome.Started)),
 		zap.Int64("request_bytes", outcome.RequestBytes),
@@ -94,6 +97,18 @@ func logOutcome(logger *zap.Logger, r *http.Request, observation *telemetry.Obse
 	} else {
 		logger.Info("request completed", fields...)
 	}
+}
+
+func boundedLogField(value string) string {
+	if len(value) <= maxLogFieldBytes {
+		return value
+	}
+	marker := "…"
+	cut := maxLogFieldBytes - len(marker)
+	for cut > 0 && !utf8.ValidString(value[:cut]) {
+		cut--
+	}
+	return value[:cut] + marker
 }
 
 func RouteMetadata(route, service string) Middleware {

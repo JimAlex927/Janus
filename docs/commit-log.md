@@ -5,6 +5,27 @@ repository commit. Add a new dated section before every future commit.
 
 ## 2026-09-17
 
+### Bound access-log field size
+
+Commit message: `fix(observability): bound access log fields`
+
+Scope:
+
+- Bounded method, path, route and service values in access logs to 1024 bytes.
+- Truncated only at valid UTF-8 boundaries and added a regression test for
+  oversized multibyte values.
+- Closed the gap between the observer's bounded-metadata contract and its
+  actual structured log fields; metric label bounds were already enforced.
+
+Verification:
+
+- `gofmt -w internal/middleware/observer.go internal/middleware/observer_test.go`
+- `go test ./internal/middleware`
+- `git diff --check`
+
+Scope note: this bounds log field size; it does not replace the later redaction,
+security review and production qualification gates.
+
 ### Bound HTTP/3 slow request bodies by timeout cancellation
 
 Commit message: `fix(timeout): close request bodies on cancellation`
