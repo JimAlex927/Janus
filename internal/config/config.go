@@ -39,6 +39,7 @@ const (
 	CurrentConfigVersion   = 1
 	ProtocolHTTP1          = "http1"
 	ProtocolHTTP2          = "http2"
+	ProtocolH2C            = "h2c"
 	ProtocolHTTP3          = "http3"
 	RouteProtocolHTTP      = "http"
 	RouteProtocolSSE       = "sse"
@@ -46,8 +47,8 @@ const (
 	MaxTrustedProxyCIDRs   = 128
 )
 
-// LimenConfig describes one inbound protocol binding. HTTP/2 is enabled only
-// over TLS in the first native multi-protocol profile.
+// LimenConfig describes one inbound protocol binding. HTTP/2 means TLS-backed
+// h2; h2c is the explicit cleartext HTTP/2 alternative.
 type LimenConfig struct {
 	Address        string         `json:"address"`
 	Protocols      []string       `json:"protocols"`
@@ -641,7 +642,7 @@ func (c Config) validateLimenBindings() (map[string]LimenConfig, error) {
 		}
 		seen := map[string]bool{}
 		for _, protocol := range binding.Protocols {
-			if protocol != ProtocolHTTP1 && protocol != ProtocolHTTP2 && protocol != ProtocolHTTP3 {
+			if protocol != ProtocolHTTP1 && protocol != ProtocolHTTP2 && protocol != ProtocolH2C && protocol != ProtocolHTTP3 {
 				return nil, fmt.Errorf("limen %q has unsupported protocol %q", name, protocol)
 			}
 			if seen[protocol] {
@@ -658,6 +659,12 @@ func (c Config) validateLimenBindings() (map[string]LimenConfig, error) {
 				return nil, fmt.Errorf("limen %q: %w", name, err)
 			}
 			binding.HTTP3 = &http3
+		}
+		if seen[ProtocolH2C] && binding.TLS != nil {
+			return nil, fmt.Errorf("limen %q: h2c cannot be combined with TLS", name)
+		}
+		if seen[ProtocolH2C] && seen[ProtocolHTTP2] {
+			return nil, fmt.Errorf("limen %q: h2c and HTTP/2 cannot be enabled together", name)
 		}
 		if (seen[ProtocolHTTP2] || seen[ProtocolHTTP3]) && binding.TLS == nil {
 			return nil, fmt.Errorf("limen %q: HTTP/2 and HTTP/3 require TLS", name)

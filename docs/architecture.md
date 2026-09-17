@@ -3,7 +3,7 @@
 ## Scope and implementation status
 
 Janus currently serves bounded-duration HTTP APIs through Protocol Limen on
-private HTTP/1.x, native TLS/HTTP/2, and opt-in native TLS/HTTP/3 listeners,
+private HTTP/1.x, native TLS/HTTP/2, explicit h2c, and opt-in native TLS/HTTP/3 listeners,
 forwarding to static HTTP/HTTPS origins. Versioned file-based routing reload,
 TLS certificate content rotation, SSE, and HTTP/1 WebSocket proxying are
 implemented; HTTP/2 WebSocket extended CONNECT, gRPC and arbitrary TCP/UDP

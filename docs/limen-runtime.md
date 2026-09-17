@@ -181,11 +181,12 @@ explicit generation ownership or reference-counted sharing.
 
 ## HTTP/2 delivery — complete
 
-Go `net/http` handles HTTP/1.1 and HTTP/2, `crypto/tls` handles the Limen
-certificate, and the versioned startup schema selects the enabled protocols.
-TLS Limens advertise ALPN `h2` and `http/1.1`; a plaintext legacy HTTP/1 Limen
-remains available behind an external TLS terminator. Unencrypted HTTP/2 remains
-deferred. Inbound and outbound protocol selection are independent, and the
+Go `net/http` handles HTTP/1.1, TLS HTTP/2 and explicit cleartext h2c;
+`crypto/tls` handles the TLS Limen certificate, and the versioned startup schema
+selects the enabled protocols. TLS Limens advertise ALPN `h2` and
+`http/1.1`; a plaintext Limen can opt into `h2c` with `http1` fallback.
+Unencrypted h2c is kept separate from TLS `http2` and cannot be enabled in the
+same binding. Inbound and outbound protocol selection are independent, and the
 outbound transport explicitly preserves HTTP/2 after installing its custom
 dialer. See [Go 1.25 HTTP protocol and server APIs](https://pkg.go.dev/net/http@go1.25.0).
 

@@ -5,6 +5,30 @@ repository commit. Add a new dated section before every future commit.
 
 ## 2026-09-17
 
+### Add explicit cleartext HTTP/2 Limen support
+
+Commit message: `feat(limen): support explicit h2c bindings`
+
+Scope:
+
+- Added the `h2c` Limen protocol, backed by Go `net/http`'s unencrypted
+  HTTP/2 support and the existing raw TCP listener path.
+- Kept TLS-backed `http2` separate from `h2c`; a binding cannot combine h2c
+  with TLS or another HTTP/2 mode.
+- Added real TCP coverage for h2c with HTTP/1.1 fallback, plus startup and
+  configuration rejection tests for invalid combinations.
+- Added an h2c configuration example and updated the architecture, runtime,
+  protocol, and delivery-plan documentation.
+
+Verification:
+
+- `go test -count=1 ./...`
+- `go test -race -count=1 ./...`
+- `go vet ./...`
+- `go run ./cmd/janus -check -config configs/janus-h2c.example.json`
+
+## 2026-09-17
+
 ### Harden rule parsing and route matching regression coverage
 
 Commit message: `fix(router): harden rule parser and matcher tests`

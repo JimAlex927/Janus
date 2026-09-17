@@ -1,6 +1,6 @@
 // Package limen owns Janus's inbound protocol boundary and HTTP server
-// lifecycle. It serves plaintext HTTP/1.x, TLS HTTP/1.x/HTTP/2, and opt-in TLS
-// HTTP/3 without changing the handler it serves.
+// lifecycle. It serves plaintext HTTP/1.x/h2c, TLS HTTP/1.x/HTTP/2, and opt-in
+// TLS HTTP/3 without changing the handler it serves.
 package limen
 
 import (
@@ -176,8 +176,13 @@ func serverProtocols(binding config.LimenConfig) (*http.Protocols, error) {
 				return nil, fmt.Errorf("HTTP/2 requires TLS")
 			}
 			protocols.SetHTTP2(true)
+		case config.ProtocolH2C:
+			if binding.TLS != nil {
+				return nil, fmt.Errorf("h2c cannot be combined with TLS")
+			}
+			protocols.SetUnencryptedHTTP2(true)
 		case config.ProtocolHTTP3:
-			// HTTP/3 is served by the QUIC adapter below, not net/http.Server.
+		// HTTP/3 is served by the QUIC adapter below, not net/http.Server.
 		default:
 			return nil, fmt.Errorf("unsupported protocol %q", name)
 		}

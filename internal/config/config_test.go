@@ -295,6 +295,8 @@ func TestVersionedLimenConfigRejectsInvalidBindings(t *testing.T) {
 		body string
 	}{
 		{"http2 without tls", strings.Replace(base, `["http1"]`, `["http2"]`, 1)},
+		{"h2c with tls", strings.Replace(strings.Replace(base, `["http1"]`, `["h2c"]`, 1), `"protocols":["h2c"]`, `"protocols":["h2c"],"tls":{"cert_file":"server.crt","key_file":"server.key"}`, 1)},
+		{"h2 and h2c together", strings.Replace(base, `["http1"]`, `["http2","h2c"]`, 1)},
 		{"unknown protocol", strings.Replace(base, `["http1"]`, `["tcp"]`, 1)},
 		{"http3 without TLS", strings.Replace(base, `["http1"]`, `["http1","http3"]`, 1)},
 		{"http3 without TCP fallback", strings.Replace(base, `["http1"]`, `["http3"]`, 1)},
@@ -306,6 +308,13 @@ func TestVersionedLimenConfigRejectsInvalidBindings(t *testing.T) {
 				t.Fatal("expected configuration validation error")
 			}
 		})
+	}
+}
+
+func TestVersionedLimenConfigAcceptsH2C(t *testing.T) {
+	body := `{"version":1,"limens":{"internal":{"address":"127.0.0.1:8080","protocols":["http1","h2c"]}} ,"services":{"s":{"upstreams":["http://localhost:9000"]}},"routes":[{"name":"r","limen":"internal","path_prefix":"/api","service":"s"}]}`
+	if _, err := Load(strings.NewReader(body)); err != nil {
+		t.Fatal(err)
 	}
 }
 

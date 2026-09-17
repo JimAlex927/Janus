@@ -134,10 +134,13 @@ The legacy listener receives HTTP/1.x on a private interface. Versioned startup
 configuration can also create a native TLS Limen with HTTP/1.1, HTTP/2 selected
 through ALPN, and an opt-in HTTP/3 UDP listener. H3 requires TLS and a TCP
 HTTP/1 or HTTP/2 fallback; it advertises the bound UDP port with `Alt-Svc`,
-shares the rotated certificate callback, and leaves 0-RTT disabled. A load
-balancer can still terminate public TLS and forward HTTP/1.1 to Janus. Outbound
-TLS must verify certificates and hostnames; never ship `InsecureSkipVerify` to
-make a deployment work. Plan CA rotation and mTLS separately if required.
+shares the rotated certificate callback, and leaves 0-RTT disabled. A Limen may
+explicitly enable `h2c` for cleartext HTTP/2 with `"protocols": ["http1", "h2c"]`.
+`h2c` cannot share a binding with TLS or `http2`; use separate Limens when both
+secure h2 and internal cleartext h2c are needed. A load balancer can still
+terminate public TLS and forward HTTP/1.1 to Janus. Outbound TLS must verify
+certificates and hostnames; never ship `InsecureSkipVerify` to make a
+deployment work. Plan CA rotation and mTLS separately if required.
 
 The optional `limen.http3.max_concurrent_streams` setting bounds the number of
 simultaneous bidirectional request streams a peer can open on one QUIC

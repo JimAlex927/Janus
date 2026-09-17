@@ -125,6 +125,17 @@ func TestLimenRejectsHTTP3WithoutTLSOrTCPFallback(t *testing.T) {
 	}
 }
 
+func TestLimenRejectsH2CWithTLS(t *testing.T) {
+	certFile, keyFile, _ := writeTestCertificate(t)
+	if _, err := NewBinding("internal", config.LimenConfig{
+		Address:   "127.0.0.1:0",
+		Protocols: []string{config.ProtocolH2C},
+		TLS:       &config.TLSSettings{CertFile: certFile, KeyFile: keyFile},
+	}, http.NotFoundHandler(), config.DefaultSettings()); err == nil {
+		t.Fatal("expected h2c with TLS to be rejected")
+	}
+}
+
 func TestLimenHTTP3StreamsAreIsolated(t *testing.T) {
 	certFile, keyFile, roots := writeTestCertificate(t)
 	started, release := make(chan struct{}), make(chan struct{})
@@ -625,6 +636,47 @@ func TestLimenNegotiatesHTTP2AndHTTP1Fallback(t *testing.T) {
 	h1Transport.Protocols.SetHTTP1(true)
 	defer h1Transport.CloseIdleConnections()
 	h1Response, err := (&http.Client{Transport: h1Transport}).Get("https://" + listener.Addr().String() + "/h1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	h1Body, err := io.ReadAll(h1Response.Body)
+	h1Response.Body.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if h1Response.ProtoMajor != 1 || string(h1Body) != "HTTP/1.1" {
+		t.Fatalf("HTTP/1 response = proto %s body %q", h1Response.Proto, h1Body)
+	}
+}
+
+func TestLimenServesH2CAndHTTP1Fallback(t *testing.T) {
+	_, listener := startTestLimen(t, config.LimenConfig{
+		Address:   "127.0.0.1:0",
+		Protocols: []string{config.ProtocolHTTP1, config.ProtocolH2C},
+	}, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, r.Proto)
+	}))
+
+	h2Transport := &http.Transport{Protocols: new(http.Protocols)}
+	h2Transport.Protocols.SetUnencryptedHTTP2(true)
+	defer h2Transport.CloseIdleConnections()
+	h2Response, err := (&http.Client{Transport: h2Transport}).Get("http://" + listener.Addr().String() + "/h2c")
+	if err != nil {
+		t.Fatal(err)
+	}
+	h2Body, err := io.ReadAll(h2Response.Body)
+	h2Response.Body.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if h2Response.ProtoMajor != 2 || string(h2Body) != "HTTP/2.0" {
+		t.Fatalf("h2c response = proto %s body %q", h2Response.Proto, h2Body)
+	}
+
+	h1Transport := &http.Transport{Protocols: new(http.Protocols)}
+	h1Transport.Protocols.SetHTTP1(true)
+	defer h1Transport.CloseIdleConnections()
+	h1Response, err := (&http.Client{Transport: h1Transport}).Get("http://" + listener.Addr().String() + "/h1")
 	if err != nil {
 		t.Fatal(err)
 	}

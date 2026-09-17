@@ -4,6 +4,7 @@
 
 A small, auditable HTTP gateway that an individual can maintain.
 The current deployment profile supports private HTTP/1.x, native HTTPS/HTTP/2,
+explicit internal cleartext h2c,
 and opt-in native HTTPS/HTTP/3 listeners through Protocol Limen. The stable
 runtime dispatcher and versioned file-based routing reload are implemented;
 HTTP/3 adapter work is in progress. Backend apps retain
@@ -195,10 +196,10 @@ and certificate rotation are delivered in Phase 2D.
 ## Phase 2C: HTTPS and HTTP/2 — complete
 
 Versioned startup configuration now supports named Limen bindings with explicit
-`http1`/`http2` selection and certificate/key files. TLS Limens use Go
-`net/http` with ALPN `h2` and `http/1.1`; plaintext legacy HTTP/1 remains
-available, while unencrypted H2 is deferred. Runtime and Gateway are shared by
-all bindings, and route references can scope a route to a named Limen.
+`http1`/`http2`/`h2c` selection and certificate/key files. TLS Limens use Go
+`net/http` with ALPN `h2` and `http/1.1`; plaintext Limens may explicitly enable
+`h2c` alongside HTTP/1.1. Runtime and Gateway are shared by all bindings, and
+route references can scope a route to a named Limen.
 
 The implementation verifies certificate loading, real H2 negotiation, HTTP/1.1
 fallback, concurrent stream isolation, named route scope, graceful startup
@@ -452,7 +453,7 @@ failure contract, and retry needs bounded replay and idempotency rules.
 
 Plugin marketplace, scripting, dashboard, Kubernetes/Docker discovery, distributed
 configuration store, caching, WAF rules, transformation language, ACME, outbound
-HTTP/3, unencrypted HTTP/2, HTTP/2 WebSocket extended CONNECT, gRPC, arbitrary
+HTTP/3, HTTP/2 WebSocket extended CONNECT, gRPC, arbitrary
 TCP/UDP proxying, and a general policy engine. Each expands the security
 and operational contract substantially. Add one only after defining its owner,
 tests and failure behavior.
