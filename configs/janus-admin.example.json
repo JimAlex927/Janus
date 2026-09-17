@@ -15,17 +15,17 @@
       "load_balancer_removal_delay": "2s"
     }
   },
-  "routes": [
-    {
-      "name": "api",
-      "limen": "private",
-      "path_prefix": "/api",
-      "service": "api"
-    }
-  ],
   "services": {
     "api": {
       "upstreams": ["http://127.0.0.1:9000"]
     }
-  }
+  },
+  "routes": [
+    {
+      "name": "api",
+      "limen": "private",
+      "match": "PathPrefix(`/api`) && Protocol(`http`)",
+      "action": { "forward": { "service": "api" } }
+    }
+  ]
 }

@@ -1,5 +1,11 @@
 {
-  "listen": "127.0.0.1:8080",
+  "version": 1,
+  "limens": {
+    "private": {
+      "address": "127.0.0.1:8080",
+      "protocols": ["http1"]
+    }
+  },
   "services": {
     "example": {
       "upstreams": ["http://127.0.0.1:9000"],
@@ -15,6 +21,11 @@
     }
   },
   "routes": [
-    { "name": "example-api", "path_prefix": "/api", "service": "example" }
+    {
+      "name": "example-api",
+      "limen": "private",
+      "match": "PathPrefix(`/api`) && Protocol(`http`)",
+      "action": { "forward": { "service": "example" } }
+    }
   ]
 }

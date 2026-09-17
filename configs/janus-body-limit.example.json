@@ -19,19 +19,19 @@
       "body_limit": { "max_bytes": 8388608 }
     }
   },
+  "services": {
+    "storage": {
+      "upstreams": ["http://127.0.0.1:9000"],
+      "middlewares": ["service-upload-cap", "user-limit"]
+    }
+  },
   "routes": [
     {
       "name": "uploads",
       "limen": "private",
-      "path_prefix": "/uploads",
+      "match": "PathPrefix(`/uploads`) && Protocol(`http`)",
       "middlewares": ["route-upload-cap"],
-      "service": "storage"
+      "action": { "forward": { "service": "storage" } }
     }
-  ],
-  "services": {
-    "storage": {
-      "upstreams": ["http://127.0.0.1:9000"],
-      "middlewares": ["service-upload-cap","user-limit"]
-    }
-  }
+  ]
 }

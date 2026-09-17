@@ -1,5 +1,11 @@
 {
-  "listen": "127.0.0.1:8080",
+  "version": 1,
+  "limens": {
+    "default": {
+      "address": "127.0.0.1:8080",
+      "protocols": ["http1"]
+    }
+  },
   "settings": {
     "request": {
       "read_timeout": "30s",
@@ -31,12 +37,24 @@
       }
     }
   },
-  "routes": [
-    { "name": "example-api", "host": "", "path_prefix": "/api", "service": "example" },
-    { "name": "example-buffered-api", "host": "", "path_prefix": "/buffered", "service": "example", "middlewares": ["buffered-api"] }
-  ],
   "services": {
-    "example": { "upstreams": ["http://127.0.0.1:9000"] }
-  }
-
+    "example": {
+      "upstreams": ["http://127.0.0.1:9000"]
+    }
+  },
+  "routes": [
+    {
+      "name": "example-api",
+      "limen": "default",
+      "match": "PathPrefix(`/api`) && Protocol(`http`)",
+      "action": { "forward": { "service": "example" } }
+    },
+    {
+      "name": "example-buffered-api",
+      "limen": "default",
+      "match": "PathPrefix(`/buffered`) && Protocol(`http`)",
+      "middlewares": ["buffered-api"],
+      "action": { "forward": { "service": "example" } }
+    }
+  ]
 }

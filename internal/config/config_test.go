@@ -23,6 +23,29 @@ func TestComprehensiveExampleConfig(t *testing.T) {
 	}
 }
 
+func TestAllExampleConfigsUseCurrentRouteShape(t *testing.T) {
+	paths, err := filepath.Glob(filepath.Join("..", "..", "configs", "*.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(paths) == 0 {
+		t.Fatal("no configuration examples found")
+	}
+	for _, path := range paths {
+		t.Run(filepath.Base(path), func(t *testing.T) {
+			c, _, err := LoadFileSnapshot(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, route := range c.Routes {
+				if route.Match == "" || route.Action == nil {
+					t.Fatalf("route %q does not use match/action form", route.Name)
+				}
+			}
+		})
+	}
+}
+
 func FuzzLoadNeverPanics(f *testing.F) {
 	f.Add([]byte(`{"listen":"127.0.0.1:8080","services":{"s":{"upstreams":["http://localhost:9000"]}},"routes":[{"name":"r","path_prefix":"/","service":"s"}]}`))
 	f.Add([]byte(`{"version":1,"limens":{"public":{"address":"127.0.0.1:8443","protocols":["http1"]}},"services":{"s":{"upstreams":["http://localhost:9000"]}},"routes":[{"name":"r","limen":"public","path_prefix":"/","service":"s"}]}`))

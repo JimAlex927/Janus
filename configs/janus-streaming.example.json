@@ -12,11 +12,23 @@
       "idle_timeout": "5m"
     }
   },
-  "routes": [
-    { "name": "events", "limen": "private", "path_prefix": "/events", "protocols": ["sse"], "service": "streaming" },
-    { "name": "socket", "limen": "private", "path_prefix": "/socket", "protocols": ["websocket"], "service": "streaming" }
-  ],
   "services": {
-    "streaming": { "upstreams": ["http://127.0.0.1:9000"] }
-  }
+    "streaming": {
+      "upstreams": ["http://127.0.0.1:9000"]
+    }
+  },
+  "routes": [
+    {
+      "name": "events",
+      "limen": "private",
+      "match": "PathPrefix(`/events`) && Protocol(`sse`)",
+      "action": { "forward": { "service": "streaming" } }
+    },
+    {
+      "name": "socket",
+      "limen": "private",
+      "match": "PathPrefix(`/socket`) && Protocol(`websocket`)",
+      "action": { "forward": { "service": "streaming" } }
+    }
+  ]
 }

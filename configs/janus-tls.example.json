@@ -38,10 +38,17 @@
       "disable_compression": true
     }
   },
-  "routes": [
-    { "name": "example-api", "limen": "public", "path_prefix": "/api", "service": "example" }
-  ],
   "services": {
-    "example": { "upstreams": ["http://127.0.0.1:9000"] }
-  }
+    "example": {
+      "upstreams": ["http://127.0.0.1:9000"]
+    }
+  },
+  "routes": [
+    {
+      "name": "example-api",
+      "limen": "public",
+      "match": "PathPrefix(`/api`) && Protocol(`http`)",
+      "action": { "forward": { "service": "example" } }
+    }
+  ]
 }

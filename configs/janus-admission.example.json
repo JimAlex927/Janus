@@ -16,24 +16,24 @@
       "in_flight": { "max_concurrent": 32 }
     }
   },
-  "routes": [
-    {
-      "name": "upload-status",
-      "limen": "private",
-      "path_prefix": "/upload-status",
-      "service": "storage"
-    },
-    {
-      "name": "upload-finalize",
-      "limen": "private",
-      "path_prefix": "/upload-finalize",
-      "service": "storage"
-    }
-  ],
   "services": {
     "storage": {
       "upstreams": ["http://127.0.0.1:9000"],
       "middlewares": ["storage-cap"]
     }
-  }
+  },
+  "routes": [
+    {
+      "name": "upload-status",
+      "limen": "private",
+      "match": "PathPrefix(`/upload-status`) && Protocol(`http`)",
+      "action": { "forward": { "service": "storage" } }
+    },
+    {
+      "name": "upload-finalize",
+      "limen": "private",
+      "match": "PathPrefix(`/upload-finalize`) && Protocol(`http`)",
+      "action": { "forward": { "service": "storage" } }
+    }
+  ]
 }

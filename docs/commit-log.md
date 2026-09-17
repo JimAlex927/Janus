@@ -5,6 +5,26 @@ repository commit. Add a new dated section before every future commit.
 
 ## 2026-09-17
 
+### Migrate configuration examples to match/action routes
+
+Commit message: `docs(config): migrate examples to current route format`
+
+Scope:
+
+- Rewrote every JSON file under `configs/` to use versioned Limens and the
+  current `match` plus explicit `action` route format.
+- Converted ordinary HTTP, SSE, WebSocket, middleware, health-check, admin,
+  TLS, redirect, and direct-response examples without changing their intent.
+- Added a regression test that loads every example and requires the current
+  route shape.
+
+Verification:
+
+- All configuration examples passed `LoadFileSnapshot` validation.
+- `go test -count=1 ./...`
+
+## 2026-09-17
+
 ### Add compiled route rules, indexes, and direct actions
 
 Commit message: `feat(router): add compiled matching and route actions`
