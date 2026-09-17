@@ -24,6 +24,9 @@ const (
 	DefaultResponseWriteHeadroom = 5 * time.Second
 	MaxServerWriteTimeout        = MaxSettingDuration + DefaultResponseWriteHeadroom
 	MaxLoadBalancerRemovalDelay  = 5 * time.Minute
+
+	DefaultStreamMaxDuration = time.Hour
+	DefaultStreamIdleTimeout = 5 * time.Minute
 )
 
 // Duration is a time.Duration encoded as a human-readable JSON string such as
@@ -51,6 +54,7 @@ func (d *Duration) UnmarshalJSON(data []byte) error {
 
 type Settings struct {
 	Request  RequestSettings  `json:"request"`
+	Stream   StreamSettings   `json:"stream"`
 	Server   ServerSettings   `json:"server"`
 	Backend  BackendSettings  `json:"backend"`
 	Admin    AdminSettings    `json:"admin"`
@@ -70,6 +74,23 @@ type RequestSettings struct {
 	ReadTimeout     Duration `json:"read_timeout"`     // inbound request read budget, including headers and body
 	MaximumDuration Duration `json:"maximum_duration"` // active end-to-end request deadline
 	MaxInFlight     int      `json:"max_in_flight"`    // process-wide non-waiting admission cap
+}
+
+// StreamSettings bounds explicitly classified SSE and classic WebSocket
+// requests. These budgets are separate from the finite API request deadline.
+type StreamSettings struct {
+	MaxDuration Duration `json:"max_duration"`
+	IdleTimeout Duration `json:"idle_timeout"`
+}
+
+func (s StreamSettings) WithDefaults() StreamSettings {
+	if s.MaxDuration == 0 {
+		s.MaxDuration = Duration(DefaultStreamMaxDuration)
+	}
+	if s.IdleTimeout == 0 {
+		s.IdleTimeout = Duration(DefaultStreamIdleTimeout)
+	}
+	return s
 }
 
 type ServerSettings struct {
@@ -100,6 +121,10 @@ func DefaultSettings() Settings {
 			ReadTimeout:     Duration(30 * time.Second),
 			MaximumDuration: Duration(30 * time.Second),
 			MaxInFlight:     DefaultGlobalInFlight,
+		},
+		Stream: StreamSettings{
+			MaxDuration: Duration(DefaultStreamMaxDuration),
+			IdleTimeout: Duration(DefaultStreamIdleTimeout),
 		},
 		Server: ServerSettings{
 			ReadHeaderTimeout: Duration(5 * time.Second),
@@ -138,6 +163,7 @@ func (s Settings) WithDefaults() Settings {
 	if s.Request.MaxInFlight == 0 {
 		s.Request.MaxInFlight = d.Request.MaxInFlight
 	}
+	s.Stream = s.Stream.WithDefaults()
 	if s.Server.ReadHeaderTimeout == 0 {
 		s.Server.ReadHeaderTimeout = d.Server.ReadHeaderTimeout
 	}
@@ -201,6 +227,15 @@ func (s Settings) Validate() error {
 	}
 	if err := validateDuration("request.maximum_duration", s.Request.MaximumDuration); err != nil {
 		return err
+	}
+	if err := validateDuration("stream.max_duration", s.Stream.MaxDuration); err != nil {
+		return err
+	}
+	if err := validateDuration("stream.idle_timeout", s.Stream.IdleTimeout); err != nil {
+		return err
+	}
+	if s.Stream.IdleTimeout > s.Stream.MaxDuration {
+		return fmt.Errorf("stream.idle_timeout must not exceed stream.max_duration")
 	}
 	if s.Request.MaxInFlight < 1 || s.Request.MaxInFlight > MaxGlobalInFlight {
 		return fmt.Errorf("request.max_in_flight must be between 1 and %d", MaxGlobalInFlight)

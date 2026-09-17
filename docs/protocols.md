@@ -102,8 +102,12 @@ it is not a replacement for context cancellation. The named body-size policy is
 separate from these time budgets. Do not apply a short API timeout to
 WebSockets, gRPC streams or SSE. Janus now skips the bounded API timeout for
 explicitly classified SSE/WebSocket requests, clears the finite response-write
-deadline, and lets Limen shutdown own the drain. Streaming still needs a
-production per-stream lifetime/idle policy.
+deadline, and lets Limen shutdown own the drain. They instead use the validated
+`stream.max_duration` and `stream.idle_timeout` budgets (defaults: `1h` and
+`5m`). SSE cancellation is propagated through the request context; a classic
+HTTP/1 WebSocket's hijacked connection is closed when either budget expires.
+The budgets do not forcibly stop arbitrary handler code that ignores context
+cancellation, and WebSocket activity is measured at the connection boundary.
 
 ## Retries and backend health
 

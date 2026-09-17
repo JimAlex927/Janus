@@ -58,6 +58,21 @@ func TestErrorMappingUsesRequestDeadlineForBodyReadFailure(t *testing.T) {
 	}
 }
 
+func TestErrorMappingUsesCancellationCauseForStreamTimeout(t *testing.T) {
+	u, _ := url.Parse("http://backend")
+	pool, _ := upstream.New([]*url.URL{u})
+	p := New(pool, roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return nil, context.Canceled
+	}), zap.NewNop())
+	ctx, cancel := context.WithCancelCause(context.Background())
+	cancel(context.DeadlineExceeded)
+	w := httptest.NewRecorder()
+	p.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "http://gateway/", nil).WithContext(ctx))
+	if w.Code != http.StatusGatewayTimeout {
+		t.Fatalf("stream timeout with cancellation cause = %d, want 504", w.Code)
+	}
+}
+
 func TestNewTransportUsesConfiguredSettings(t *testing.T) {
 	settings := config.DefaultSettings().Backend
 	settings.TLSHandshakeTimeout = config.Duration(1200 * time.Millisecond)

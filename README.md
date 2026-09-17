@@ -130,6 +130,11 @@ still require restart. Legacy configurations remain startup-only.
   enabled only on a TLS limen with a TCP HTTP/1 or HTTP/2 fallback. Existing
   upgraded connections are tracked for bounded Limen drain, while QUIC
   connections receive the HTTP/3 server's graceful GOAWAY/close treatment.
+- Explicit SSE and HTTP/1 WebSocket routes bypass the finite API timeout and use
+  `settings.stream.max_duration` (default `1h`) and
+  `settings.stream.idle_timeout` (default `5m`). SSE observes cancellation
+  through the request context; upgraded WebSocket connections are closed when
+  either budget expires. Handlers still need to observe cancellation.
 - HTTP/3 uses a separately bound UDP socket, advertises `Alt-Svc` from the TCP
   path, disables 0-RTT, reuses the rotated TLS identity, and applies the
   bounded `limen.http3.max_concurrent_streams` setting (default 100). H3

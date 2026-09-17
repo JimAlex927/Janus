@@ -5,6 +5,40 @@ repository commit. Add a new dated section before every future commit.
 
 ## 2026-09-17
 
+### Bound SSE and WebSocket stream lifetime
+
+Commit message: `feat(timeout): add stream lifetime and idle budgets`
+
+Scope:
+
+- Added validated `settings.stream.max_duration` and
+  `settings.stream.idle_timeout` settings with `1h` and `5m` defaults.
+- Added a stream timeout middleware for explicitly classified SSE and classic
+  HTTP/1 WebSocket requests. SSE activity refreshes the idle budget and
+  cancellation reaches the backend through the request context.
+- Wrapped hijacked WebSocket connections so lifetime/idle expiry and parent
+  cancellation close the client-side stream; ordinary API requests retain the
+  finite request timeout path.
+- Mapped the stream cancellation cause to 504 before response commitment and
+  added unit and end-to-end regression coverage.
+- Documented the stream policy, its handler-cancellation boundary and an
+  explicit streaming configuration example.
+
+Verification:
+
+- `gofmt -w` on changed Go files
+- `go test -count=3 ./internal/config ./internal/middleware ./internal/proxy ./internal/gateway`
+- `go test ./...`
+- `go vet ./...`
+- Windows/amd64 and `CGO_ENABLED=0` Linux/amd64 builds
+- `go mod verify`
+- `go run golang.org/x/vuln/cmd/govulncheck@v1.7.0 ./...` (zero reachable vulnerabilities)
+- `git diff --check`
+
+Scope note: this covers SSE and classic HTTP/1 WebSocket lifecycle bounds. It
+does not enable WebSocket extended CONNECT, gRPC streaming, or claim H3
+interoperability or full production qualification.
+
 ### Verify module integrity in release CI
 
 Commit message: `ci: verify module integrity`

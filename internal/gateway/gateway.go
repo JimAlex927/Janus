@@ -163,6 +163,7 @@ func NewWithTransportAndLimiters(c config.Config, logger *zap.Logger, transport 
 			middleware.Observe(logger),
 			middleware.RejectUnsupportedProtocols,
 			middleware.Timeout(c.Settings.Request.MaximumDuration.Duration()),
+			middleware.StreamTimeout(c.Settings.Stream.MaxDuration.Duration(), c.Settings.Stream.IdleTimeout.Duration()),
 			middleware.ClearStreamingWriteDeadline,
 		),
 		transport:       ownedTransport,

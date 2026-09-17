@@ -319,6 +319,12 @@ func TestSettingsDurationSyntaxAndDefaults(t *testing.T) {
 	if c.Settings.Request.MaxInFlight != DefaultGlobalInFlight {
 		t.Fatalf("max in-flight = %d, want %d default", c.Settings.Request.MaxInFlight, DefaultGlobalInFlight)
 	}
+	if got := c.Settings.Stream.MaxDuration.Duration(); got != DefaultStreamMaxDuration {
+		t.Fatalf("stream max duration = %s, want %s", got, DefaultStreamMaxDuration)
+	}
+	if got := c.Settings.Stream.IdleTimeout.Duration(); got != DefaultStreamIdleTimeout {
+		t.Fatalf("stream idle timeout = %s, want %s", got, DefaultStreamIdleTimeout)
+	}
 	if got := c.Settings.Shutdown.DrainTimeout.Duration(); got != 5*time.Second+750*time.Millisecond {
 		t.Fatalf("drain timeout = %s, want server write timeout", got)
 	}
@@ -353,6 +359,12 @@ func TestSettingsRejectInvalidBounds(t *testing.T) {
 		}},
 		{"global admission too large", func(s *Settings) {
 			s.Request.MaxInFlight = MaxGlobalInFlight + 1
+		}},
+		{"stream idle exceeds lifetime", func(s *Settings) {
+			s.Stream.IdleTimeout = s.Stream.MaxDuration + Duration(time.Second)
+		}},
+		{"stream lifetime below minimum", func(s *Settings) {
+			s.Stream.MaxDuration = Duration(time.Microsecond)
 		}},
 		{"drain shorter than write", func(s *Settings) {
 			s.Shutdown.DrainTimeout = Duration(s.Server.WriteTimeout.Duration() - time.Millisecond)

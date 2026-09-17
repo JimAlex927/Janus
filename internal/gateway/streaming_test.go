@@ -152,6 +152,59 @@ func TestWebSocketUpgradeIsProxied(t *testing.T) {
 	}
 }
 
+func TestWebSocketStreamTimeoutClosesUpgradedConnection(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, buffered, err := w.(http.Hijacker).Hijack()
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		defer conn.Close()
+		_, _ = io.WriteString(buffered, "HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n")
+		if err := buffered.Flush(); err != nil {
+			t.Error(err)
+			return
+		}
+		<-r.Context().Done()
+	}))
+	defer backend.Close()
+	settings := config.Settings{
+		Request: config.RequestSettings{MaximumDuration: config.Duration(100 * time.Millisecond)},
+		Stream:  config.StreamSettings{MaxDuration: config.Duration(time.Second), IdleTimeout: config.Duration(50 * time.Millisecond)},
+		Server:  config.ServerSettings{WriteTimeout: config.Duration(500 * time.Millisecond)},
+	}
+	address, cleanup := startStreamingGateway(t, config.Config{
+		Listen:   "127.0.0.1:8080",
+		Settings: settings,
+		Services: map[string]config.Service{"socket": {Upstreams: []string{backend.URL}}},
+		Routes:   []config.Route{{Name: "socket", PathPrefix: "/socket", Protocols: []string{config.RouteProtocolWebSocket}, Service: "socket"}},
+	})
+	defer cleanup()
+
+	conn, err := net.DialTimeout("tcp", address, 2*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	key := base64.StdEncoding.EncodeToString([]byte("stream-timeout-key"))
+	request := "GET /socket HTTP/1.1\r\nHost: gateway\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: " + key + "\r\n\r\n"
+	if _, err := io.WriteString(conn, request); err != nil {
+		t.Fatal(err)
+	}
+	reader := bufio.NewReader(conn)
+	response, err := http.ReadResponse(reader, &http.Request{Method: http.MethodGet})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.StatusCode != http.StatusSwitchingProtocols {
+		t.Fatalf("upgrade status = %d", response.StatusCode)
+	}
+	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	if _, err := reader.ReadByte(); err == nil {
+		t.Fatal("upgraded connection remained open after idle timeout")
+	}
+}
+
 func writeClientFrame(w io.Writer, payload []byte) {
 	mask := [4]byte{1, 2, 3, 4}
 	frame := []byte{0x81, byte(0x80 | len(payload)), mask[0], mask[1], mask[2], mask[3]}

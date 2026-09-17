@@ -77,7 +77,7 @@ not just configuration types. Size effort after each phase's exit review.
 | 2B: runtime generations | Stable dispatcher and explicit resource ownership | Complete: old requests retain old handlers; new requests use new handlers; retirement is bounded and race-safe |
 | 2C: HTTPS and HTTP/2 | TLS Limens, protocol configuration, response capability audit | Complete: actual H2 negotiation, sibling-stream isolation, H1 fallback and TLS startup checks pass |
 | 2D: dynamic files and certificates | Serialized validated routing reload; independent certificate rotation | Complete: invalid updates preserve last-good state; runtime and certificate resources remain bounded |
-| 2E: long-lived HTTP protocols | Explicit SSE and classic HTTP/1 WebSocket route modes | Complete: event flush, upgrade/frame forwarding, timeout bypass, and bounded upgraded-connection drain pass |
+| 2E: long-lived HTTP protocols | Explicit SSE and classic HTTP/1 WebSocket route modes | Complete: event flush, upgrade/frame forwarding, separate stream lifetime/idle budgets, timeout bypass, and bounded upgraded-connection drain pass |
 | 2F: usable request policies | Named body-limit policies, request IDs, access observation | Policies compose in order; early rejection, upload limits, trailers, and incomplete responses covered on H1/H2 |
 | 3: bounded operation | Global/service admission, admin readiness, configurable drain | Complete: overload, shared service limits, readiness-first stop-admission, bounded removal delay and total shutdown budget |
 | 4: backend and trust policy | Active health checks, trusted forwarding identity, metrics | Complete for the bounded HTTP metrics/trust scope; production qualification remains Phase 6 |
@@ -239,9 +239,13 @@ Routes can explicitly declare `sse` or `websocket` in their `protocols` list.
 SSE uses the normal HTTP response path with immediate event flushing. Classic
 HTTP/1 WebSocket upgrades are forwarded through `ReverseProxy`; arbitrary
 upgrades, CONNECT, and HTTP/2 extended CONNECT remain rejected. Long-lived
-requests bypass the bounded API timeout and finite write deadline, while Limen
+requests bypass the bounded API timeout and finite write deadline. They use the
+validated `stream.max_duration` and `stream.idle_timeout` budgets, defaulting to
+`1h` and `5m`; SSE receives cancellation through its request context, while a
+hijacked WebSocket connection is closed when either budget expires. Limen also
 tracks upgraded connections and force-closes them when the drain budget expires.
-The route buffer middleware bypasses both modes.
+The route buffer middleware bypasses both modes. These budgets cannot forcibly
+stop arbitrary handler code that ignores context cancellation.
 
 ## Phase 2F: request policies (in progress)
 

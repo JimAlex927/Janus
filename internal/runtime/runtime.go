@@ -121,6 +121,7 @@ func NewWithBuilder(c config.Config, logger *zap.Logger, builder Builder) (*Runt
 		middleware.RejectUnsupportedProtocols,
 		middleware.Admission(r.global),
 		middleware.Timeout(c.Settings.Request.MaximumDuration.Duration()),
+		middleware.StreamTimeout(c.Settings.Stream.MaxDuration.Duration(), c.Settings.Stream.IdleTimeout.Duration()),
 		middleware.ClearStreamingWriteDeadline,
 	)
 	return r, nil

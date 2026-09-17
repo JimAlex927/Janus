@@ -6,6 +6,12 @@
       "protocols": ["http1"]
     }
   },
+  "settings": {
+    "stream": {
+      "max_duration": "1h",
+      "idle_timeout": "5m"
+    }
+  },
   "routes": [
     { "name": "events", "limen": "private", "path_prefix": "/events", "protocols": ["sse"], "service": "streaming" },
     { "name": "socket", "limen": "private", "path_prefix": "/socket", "protocols": ["websocket"], "service": "streaming" }
