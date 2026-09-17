@@ -14,7 +14,7 @@ cross-compilation do not satisfy Linux execution or deployment gates.
 | Stream timeouts release resources | Slow TCP reader terminates; H1/H2/H3 proxy tests assert body failure before client deadline, backend cancellation and released admission; HTTP/3 stream timeout closes a slow request body | Target Linux slow readers/uploads and concurrent sibling streams under load |
 | Reload matches published bytes | Startup hash comes from the runtime input snapshot; certificate hash/parse/publication use the same bounded bytes; startup race regressions | Repeated route/certificate replacement and rollback during load |
 | Correct timeout response | 103 followed by deadline returns final 504 | Protocol fault-injection campaign |
-| Linux/race | Pinned CI definition; Linux process SIGTERM test added and cross-compiled; Windows full test/vet plus targeted race pass | Actual full test/race/vet runs on VM; preserve logs |
+| Linux/race | Pinned CI definition; Linux process SIGTERM test added and cross-compiled; Windows full test/vet plus repeated full tests and race pass | Actual full test/race/vet runs on VM; preserve logs |
 | Deployment | Native systemd unit and runbook | Install as non-root on VM, readiness, restart, ports, CA roots and resource caps |
 | Capacity | Configuration limits exist | Agree workload, measure overload and 24h soak |
 | Canary | Not started | Name non-core business, traffic split, baseline and rollback target; qualify first |
@@ -63,3 +63,15 @@ rotation; retain raw time-series and check for sustained resource growth.
 
 No live business traffic is switched until the destination, traffic scope and
 rollback baseline are identified. A local demo is not production canary evidence.
+
+## Local qualification replay: 2026-09-17
+
+The reviewed tree at commit `5e47d35` passed the following on the development
+host: `go test -count=1 ./...`, `go test -count=5 ./...`,
+`go test -race -count=1 ./...`, `go vet ./...`,
+`go test -fuzz=FuzzLoadNeverPanics -fuzztime=30s ./internal/config`,
+`go mod verify`, `govulncheck@v1.7.0`, and a static `linux/amd64` build.
+The vulnerability scan reports zero vulnerabilities affecting reachable code;
+four module vulnerabilities are present but not called by this code. These are
+development-host results and do not replace Linux execution or deployment
+evidence.

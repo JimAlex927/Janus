@@ -314,9 +314,9 @@ func LoadFileBytes(path string, data []byte) (Config, error) {
 		if !filepath.IsAbs(binding.TLS.KeyFile) {
 			binding.TLS.KeyFile = filepath.Join(base, binding.TLS.KeyFile)
 		}
-		//Limens是协议层，比如http/1.x   http/2   http/3
-		// 然后routers会绑定一个limen。 routers负责的是 http、sse、websocket。 已经不需要注重不同版本的http
-		//TODO 需要注意的是，当前的Limens支持 http/1.x  https 以及http2 over tls 不支持http2的明文 也就是h2c
+		// Limens own transport protocols (HTTP/1, TLS HTTP/2, and HTTP/3).
+		// Routes select application request shapes such as HTTP, SSE, or the
+		// supported classic HTTP/1 WebSocket upgrade independently of that choice.
 		c.Limens[name] = binding
 	}
 	return c, nil

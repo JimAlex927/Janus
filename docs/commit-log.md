@@ -1318,3 +1318,30 @@ Verification:
 Release note: local code-level verification remains green; Linux process,
 systemd deployment, capacity, soak, canary, and rollback evidence are still
 required before production approval.
+
+## 2026-09-17
+
+### Clarify runtime ownership and qualification evidence
+
+Commit message: `docs: clarify runtime ownership and qualification evidence`
+
+Scope:
+
+- Replaced question-style and stale comments in the entrypoint, Limen,
+  configuration loader, and Runtime with concise descriptions of protocol
+  ownership, shared transport/metrics/limiters, and transactional generation
+  publication.
+- Recorded the repeated local test, fuzz, vulnerability, module-integrity,
+  and static-build evidence in the production-readiness document.
+
+Verification:
+
+- `gofmt -w cmd/janus/main.go internal/config/config.go internal/limen/limen.go internal/runtime/runtime.go`
+- `go test -count=1 ./...`
+- `go test -count=5 ./...`
+- `go test -race -count=1 ./...`
+- `go vet ./...`
+- `go test -fuzz=FuzzLoadNeverPanics -fuzztime=30s ./internal/config`
+- `go mod verify`
+- `go run golang.org/x/vuln/cmd/govulncheck@v1.7.0 ./...`
+- static `linux/amd64` build

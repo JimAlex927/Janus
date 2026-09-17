@@ -57,14 +57,9 @@ func run(ctx context.Context, path string, check, printEffective bool, reloadInt
 	if err != nil {
 		return err
 	}
-	//TODO 这里是check 只在命令 --check = true的时候 去检查limen的binding配置是否有效
-	//构造一个临时的 Limen，目的是验证：
-	//- 协议配置是否合法
-	//- HTTP/2 是否正确配置了 TLS
-	//- HTTP/3 是否有 TCP fallback
-	//- TLS 证书和私钥是否能加载
-	//- HTTP Server 的协议参数是否能创建
-	//- HTTP/3 的 QUIC 参数是否有效
+	// Check mode constructs each Limen without opening listeners. This validates
+	// protocol compatibility, TLS assets, and HTTP/3 fallback settings before
+	// the process starts accepting traffic.
 	if check || printEffective {
 		for name, binding := range c.LimenBindings() {
 			if _, err := limen.NewBinding(name, binding, http.NotFoundHandler(), c.Settings); err != nil {
@@ -89,7 +84,8 @@ func run(ctx context.Context, path string, check, printEffective bool, reloadInt
 		return err
 	}
 	defer requestRuntime.Close()
-	//这里是limen，也就是协议层，可以有多个端口  一个端口可以有多个协议 这一点还不太确定
+	// Each Limen owns one inbound address and may expose TCP HTTP/1/HTTP/2 plus
+	// an optional UDP HTTP/3 socket, while all of them share the runtime handler.
 	bindings := c.LimenBindings()
 	names := make([]string, 0, len(bindings))
 	for name := range bindings {

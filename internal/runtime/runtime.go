@@ -89,54 +89,42 @@ func NewWithBuilder(c config.Config, logger *zap.Logger, builder Builder) (*Runt
 	if logger == nil {
 		logger = zap.NewNop()
 	}
-	//传输层 用于转发请求的给runtime用的全局传输层
+	// One process-owned transport is reused by every published generation.
 	transport := proxy.NewTransport(c.Settings.Backend)
-	//全局共享的监控指标  进程级别的指标注册表 请求完成后可能记录：route=/api service=user-service status=200 duration=35ms
-	//最后由管理接口暴露成 Prometheus 格式。 那么也就意味着全局共享，其它很多组件都要拿到它修改metric  比如 middleware
+	// Metrics are process-owned so observations remain continuous across
+	// generation replacement and can be scraped from the admin listener.
 	metrics := telemetry.NewMetrics()
-	//全局共享的 Service 限流器注册表  Service 级别并发限流器的注册表。 也就是每个service 如果配置了 in_flight middleware 就会在这里创建limiter
-	//也就是entries里面 的value是一个limiter  *middleware.Limiter  。
-	//为什么这里单独做呢？而不是交给  in_flight middleware 处理的时候限流呢？还是说middleware也会拿到里面的limiter，然后用limiter具体处理请求的时候限流？
+	// Service limiters live outside generations so an in-flight count survives a
+	// route reload. The service middleware receives the shared limiter and
+	// performs the per-request acquire/release operation.
 	serviceLimiterRegistry := newServiceLimiterRegistry(metrics)
-	//构建Generation 这个generation 就是路由规则某个版本
+	// Build the first immutable route/service generation.
 	initial, err := buildGeneration(builder, c, transport, logger, serviceLimiterRegistry)
 	if err != nil {
 		transport.CloseIdleConnections()
 		return nil, err
 	}
-	//这里根据配置、可能是热更新的配置，创建generation成功 然后提交，说明可以把限速器更新到注册表中了。
-	//inition是generationRef   commit会完成初始化的操作 主要是限速器entry 替换 更确切的说是 已有的entry 如果limit改变 就只改变limit数量
+	// Publication is transactional: only a successfully built generation may
+	// commit its service limiter limits.
 	initial.commit()
 	r := &Runtime{
-		//这里新的运行时直接把创建的放进来 放在active
-		active: initial,
-		//retired是旧的。我有一个疑问，如果是配置更新了，这里是新的runtime对象，旧的runtime对象呢？这里应该把旧的runtime对象替换吧？
-		//但也有可能就是当前NewWithBuilder方法只是app启动时候构建一次，后续配置更新不会用这个方法，但是 buildGeneration 会多次用到
-		//所以当前方法构建的runtime是唯一的
-		retired: make(map[*generationRef]struct{}),
-		//版本号
-		version: c.Version,
-		//这里为什么要克隆 是怕无法修改吗？
-		limens: cloneLimens(c.LimenBindings()),
-		//这里应该是配置的副本
-		settings: c.Settings,
-		//generation的构建器，一般是默认的。
+		// Runtime is created once; reload replaces generations inside it.
+		active:            initial,
+		retired:           make(map[*generationRef]struct{}),
+		version:           c.Version,
+		limens:            cloneLimens(c.LimenBindings()),
+		settings:          c.Settings,
 		generationBuilder: builder,
-		//logger
-		logger: logger,
-		//运行时用的全局 process level 传输层
-		transport: transport,
-		//这里的global是什么限速器？应该是一个全局的限速器，不仅仅是每个service的。这里默认值就是MaxInFlight
-		global: middleware.NewLimiterWithMetrics(c.Settings.Request.MaxInFlight, metrics, "global", ""),
-		//限速器注册表
+		logger:            logger,
+		transport:         transport,
+		// The global limiter protects the whole gateway, including all services.
+		global:                 middleware.NewLimiterWithMetrics(c.Settings.Request.MaxInFlight, metrics, "global", ""),
 		serviceLimiterRegistry: serviceLimiterRegistry,
-		//运行时全局监控指标
-		metrics: metrics,
+		metrics:                metrics,
 	}
-	// This chain is process-owned and is deliberately outside the replaceable
-	// generation. Its order preserves the existing behavior: observation wraps
-	// protocol guards, timeout, and active-generation dispatch.
-	//runtime级别的middleware chain
+	// This chain is process-owned and remains stable while generations reload.
+	// Its order preserves the existing behavior: observation wraps protocol
+	// guards, timeout, and active-generation dispatch.
 	r.handler = middleware.Chain(
 		/**
 		这里就到了分流的地方了
@@ -438,9 +426,8 @@ func (r *serviceLimiterRegistry) acquire(c config.Config) (map[string]*middlewar
 		//然后去查看limiter注册表中是否已经有了 如果没有就创建限速器
 		entry := r.entries[name]
 		if entry == nil {
-			//创建限速器 然后注册到 limiter注册表中 这里是如果配置里面有新的限速器就会立即注册
-			// 如果是app启动也会立即注册 如果配置热更新 然后发现新增了 也会立即注册 所以这里存在风险 如果一直不停新增 但是构建generation失败 可能泄漏
-			// 但是release这里相当于是rollback，如果generation构建失败，回滚 entry被引用数量减1，就会触发回收。所以这个风险不存在。
+			// Acquire creates an entry provisionally. releaseServices below rolls it
+			// back if generation construction fails before publication.
 			entry = &serviceLimiterEntry{limiter: middleware.NewLimiterWithMetrics(limit, r.metrics, "service", name)}
 			r.entries[name] = entry
 		}
@@ -453,9 +440,8 @@ func (r *serviceLimiterRegistry) acquire(c config.Config) (map[string]*middlewar
 
 	var once sync.Once
 	var commitOnce sync.Once
-	// 返回每个service的limiter的引用map、这里的limiters是新的配置重新构建的临时entry。 name -->> limiter
-	// 这个临时entry 还没有替换到限速器的注册表中，因为要考虑到可能构建新的Genration失败，所以延迟替换。
-	//这也就是为什么返回第一个func() 也就是一个commit 的动作
+	// Return the shared limiters plus commit and rollback functions. Limits are
+	// changed only after the candidate generation has passed validation.
 	return limiters, func() {
 			commitOnce.Do(func() {
 				r.mu.Lock()

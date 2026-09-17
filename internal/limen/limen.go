@@ -118,7 +118,8 @@ func NewBinding(name string, binding config.LimenConfig, handler http.Handler, s
 		//如果协议里面有h3
 		http3:    h3Server,
 		hijacked: make(map[net.Conn]struct{}), hijackedEmpty: hijackedEmpty,
-		//这里是非h3的server  也就是http  server还没启动  还要单独启动tls的server
+		// The TCP server handles HTTP/1 and HTTP/2. TLS is applied to its listener
+		// in Serve; HTTP/3 uses the separate QUIC server above.
 		server: &http.Server{
 			Addr: binding.Address, Handler: handler,
 			// net/http serves HTTP/1 and HTTP/2 on the TCP listener. TLS, when
@@ -198,8 +199,8 @@ func serverTLSConfig(binding config.LimenConfig, protocols *http.Protocols) (*tl
 	if binding.TLS == nil {
 		return nil, nil, nil
 	}
-	//这里一个binding只读取一个证书 说明一个binding的多个协议 共用一个证书 似乎是在说明 https只是 一个内层明文http + tls
-	//证书独立于协议
+	// One binding has one TLS identity shared by its enabled TCP protocols and
+	// the HTTP/3 adapter. ALPN selects HTTP/2 or HTTP/1.1 on the TLS connection.
 	cert, err := loadTLSKeyPair(binding.TLS.CertFile, binding.TLS.KeyFile)
 	if err != nil {
 		return nil, nil, fmt.Errorf("load limen TLS certificate: %w", err)
