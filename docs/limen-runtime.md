@@ -197,6 +197,8 @@ The implemented 2C evidence demonstrates:
 - H1/H2 selection on the inbound Limen, H2 negotiation on the outbound
   transport, and route scoping by named Limen.
 - Bind-before-serve startup cleanup and the existing server deadline behavior.
+- A real TLS/H2 Limen shutdown drains an active stream before returning and
+  closes the TCP listener to new connections.
 
 The full H1/H2 forwarding matrix, response-writer capability audit, protocol-
 specific stream limits, and graceful GOAWAY/force-close qualification remain

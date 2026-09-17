@@ -200,7 +200,8 @@ all bindings, and route references can scope a route to a named Limen.
 
 The implementation verifies certificate loading, real H2 negotiation, HTTP/1.1
 fallback, concurrent stream isolation, named route scope, graceful startup
-cleanup, and outbound HTTP/2 enablement. Long-lived protocols still require a
+cleanup, active H2 stream drain through Limen shutdown, and outbound HTTP/2
+enablement. Long-lived protocols still require a
 separate timeout, buffering, upgrade, and drain contract.
 
 ## Phase 2D: file reload and certificate rotation — complete

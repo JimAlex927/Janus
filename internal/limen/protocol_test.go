@@ -565,3 +565,92 @@ func TestLimenHTTP2ConcurrentStreamsAreIsolated(t *testing.T) {
 		t.Fatal("slow stream did not finish")
 	}
 }
+
+func TestLimenHTTP2ShutdownDrainsActiveStream(t *testing.T) {
+	certFile, keyFile, roots := writeTestCertificate(t)
+	started, release := make(chan struct{}), make(chan struct{})
+	var releaseOnce sync.Once
+	l, err := NewBinding("public", config.LimenConfig{
+		Address:   "127.0.0.1:0",
+		Protocols: []string{config.ProtocolHTTP2},
+		TLS:       &config.TLSSettings{CertFile: certFile, KeyFile: keyFile},
+	}, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/slow" {
+			close(started)
+			<-release
+		}
+		_, _ = io.WriteString(w, "done")
+	}), config.DefaultSettings())
+	if err != nil {
+		t.Fatal(err)
+	}
+	tcpListener, err := l.Listen()
+	if err != nil {
+		t.Fatal(err)
+	}
+	serveDone := make(chan error, 1)
+	go func() { serveDone <- l.Serve(tcpListener) }()
+	t.Cleanup(func() {
+		releaseOnce.Do(func() { close(release) })
+		_ = l.Close()
+		if err := <-serveDone; err != nil && !errors.Is(err, http.ErrServerClosed) {
+			t.Errorf("limen stopped: %v", err)
+		}
+	})
+
+	transport := &http.Transport{
+		TLSClientConfig:   &tls.Config{RootCAs: roots},
+		ForceAttemptHTTP2: true,
+		MaxConnsPerHost:   1,
+	}
+	defer transport.CloseIdleConnections()
+	client := &http.Client{Transport: transport}
+	responseDone := make(chan *http.Response, 1)
+	responseErr := make(chan error, 1)
+	go func() {
+		response, requestErr := client.Get("https://" + tcpListener.Addr().String() + "/slow")
+		if requestErr != nil {
+			responseErr <- requestErr
+			return
+		}
+		responseDone <- response
+	}()
+	select {
+	case <-started:
+	case err := <-responseErr:
+		t.Fatal(err)
+	case <-time.After(2 * time.Second):
+		t.Fatal("HTTP/2 active stream did not start")
+	}
+
+	shutdownDone := make(chan error, 1)
+	shutdownContext, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	go func() { shutdownDone <- l.Shutdown(shutdownContext) }()
+	select {
+	case err := <-shutdownDone:
+		t.Fatalf("shutdown completed before active stream: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	releaseOnce.Do(func() { close(release) })
+	select {
+	case response := <-responseDone:
+		body, readErr := io.ReadAll(response.Body)
+		response.Body.Close()
+		if readErr != nil || response.ProtoMajor != 2 || string(body) != "done" {
+			t.Fatalf("drained HTTP/2 response = proto %s body %q error %v", response.Proto, body, readErr)
+		}
+	case err := <-responseErr:
+		t.Fatal(err)
+	case <-time.After(2 * time.Second):
+		t.Fatal("active HTTP/2 stream did not finish")
+	}
+	if err := <-shutdownDone; err != nil {
+		t.Fatalf("HTTP/2 shutdown = %v", err)
+	}
+	if probe, err := net.DialTimeout("tcp", tcpListener.Addr().String(), time.Second); err == nil {
+		probe.Close()
+		t.Fatal("HTTP/2 Limen accepted a new TCP connection after shutdown")
+	}
+}

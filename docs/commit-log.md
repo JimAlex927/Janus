@@ -5,6 +5,27 @@ repository commit. Add a new dated section before every future commit.
 
 ## 2026-09-16
 
+### Verify Limen HTTP/2 active-stream drain
+
+Commit message: `test(lifecycle): verify HTTP/2 stream drain`
+
+Scope:
+
+- Added a real TLS/H2 Limen integration test for graceful shutdown.
+- Verified an active H2 stream completes before `Limen.Shutdown` returns and
+  the TCP listener rejects new connections after shutdown begins.
+- Updated H2 lifecycle evidence without claiming full GOAWAY, Linux, or load
+  qualification.
+
+Verification:
+
+- `gofmt -w internal/limen/protocol_test.go`
+- `go test -count=5 ./internal/limen -run TestLimenHTTP2ShutdownDrainsActiveStream`
+- `git diff --check`
+
+Scope note: this verifies the Limen wrapper's local H2 drain path; it does not
+fully qualify client-side GOAWAY behavior or production deployment semantics.
+
 ### Preserve gateway request IDs at response commit
 
 Commit message: `fix(observability): preserve authoritative response IDs`
