@@ -5,6 +5,20 @@ repository commit. Add a new dated section before every future commit.
 
 ## 2026-09-17
 
+### Stabilize stream timing regression under race instrumentation
+
+Commit message: `test: stabilize stream timeout race coverage`
+
+Scope:
+
+- Increased the idle-activity test margin so scheduler and race-detector
+  overhead cannot turn a valid activity sequence into a timing flake.
+
+Verification:
+
+- The targeted test passed five times under `go test -race`.
+- `go test -race -count=1 ./...` passed on Windows/amd64.
+
 ### Repair metrics accumulation and stream request-body cancellation
 
 Commit message: `fix: repair metrics counters and stream body cancellation`

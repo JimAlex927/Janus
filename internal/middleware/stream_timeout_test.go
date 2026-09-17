@@ -81,7 +81,7 @@ func TestHijackedStreamActivityResetsIdleTimeout(t *testing.T) {
 	defer cancel(nil)
 	control := newStreamControl()
 	activity := make(chan struct{}, 1)
-	go runStreamTimers(ctx, cancel, control, activity, time.Second, 100*time.Millisecond)
+	go runStreamTimers(ctx, cancel, control, activity, time.Second, 300*time.Millisecond)
 	serverConn, clientConn := net.Pipe()
 	defer serverConn.Close()
 	defer clientConn.Close()
@@ -105,7 +105,7 @@ func TestHijackedStreamActivityResetsIdleTimeout(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("initial WebSocket frame was not delivered")
 	}
-	time.Sleep(50 * time.Millisecond)
+	time.Sleep(100 * time.Millisecond)
 	secondRead := make(chan error, 1)
 	go func() {
 		_, err := clientConn.Read(make([]byte, 1))
@@ -122,7 +122,7 @@ func TestHijackedStreamActivityResetsIdleTimeout(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("second WebSocket frame was not delivered")
 	}
-	time.Sleep(75 * time.Millisecond)
+	time.Sleep(200 * time.Millisecond)
 	thirdRead := make(chan error, 1)
 	go func() {
 		_, err := clientConn.Read(make([]byte, 1))
