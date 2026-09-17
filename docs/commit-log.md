@@ -1448,3 +1448,23 @@ Verification:
 - `go test -race -count=1 ./cmd/janus-loadtest`
 - `go vet ./cmd/janus-loadtest`
 - Direct-backend and Janus forwarding smoke runs with a 100 request/s target
+
+## 2026-09-17
+
+### Record the first local forwarding smoke
+
+Commit message: `docs: record local qualification smoke`
+
+Scope:
+
+- Archived a direct-backend versus Janus loopback comparison using the
+  independent load generator.
+- Recorded the exact scenario and limitations so the result cannot be
+  mistaken for production capacity or an SLO.
+
+Verification:
+
+- Direct backend smoke: 200 scheduled requests at a 100 requests/s target.
+- Janus forwarding smoke: 200 scheduled requests at the same target.
+- Both runs completed with zero ordinary transport errors; one direct-backend
+  request was classified as an end-of-window cancellation.

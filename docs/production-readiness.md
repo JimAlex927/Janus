@@ -61,6 +61,10 @@ The tool deliberately reports ordinary HTTP only; SSE and WebSocket scenarios
 need protocol-aware clients and must be added to the same workload mix rather
 than inferred from ordinary-request results.
 
+The first local smoke is archived in
+[qualification-local-smoke-2026-09-17.md](qualification-local-smoke-2026-09-17.md).
+It is explicitly development-only and does not close the Linux capacity gate.
+
 ## Linux execution sequence
 
 1. Record VM identity/specifications and install the pinned Go toolchain and a
