@@ -177,7 +177,7 @@ func serverTLSConfig(binding config.LimenConfig, protocols *http.Protocols) (*tl
 	if binding.TLS == nil {
 		return nil, nil, nil
 	}
-	cert, err := tls.LoadX509KeyPair(binding.TLS.CertFile, binding.TLS.KeyFile)
+	cert, err := loadTLSKeyPair(binding.TLS.CertFile, binding.TLS.KeyFile)
 	if err != nil {
 		return nil, nil, fmt.Errorf("load limen TLS certificate: %w", err)
 	}
@@ -217,7 +217,7 @@ func (l *Limen) RotateCertificate(certFile, keyFile string) error {
 	if l.cert == nil {
 		return fmt.Errorf("limen does not use TLS")
 	}
-	cert, err := tls.LoadX509KeyPair(certFile, keyFile)
+	cert, err := loadTLSKeyPair(certFile, keyFile)
 	if err != nil {
 		return fmt.Errorf("load rotated limen TLS certificate: %w", err)
 	}

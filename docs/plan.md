@@ -212,6 +212,8 @@ Read bounded, strict routing documents, build a full candidate, then publish
 through Phase 2B. Add a portable polling trigger with hash-based deduplication
 and serialized/coalesced reloads. Atomic file replacement is the supported write
 workflow. Invalid, missing or unreadable input retains the previous generation.
+TLS certificate and private-key files use a shared bounded reader during
+startup, fingerprinting and rotation so reloads cannot read unbounded assets.
 Expose generation and failure information in logs initially. Reload routing
 without restarting sockets, closing connections, or issuing GOAWAY.
 

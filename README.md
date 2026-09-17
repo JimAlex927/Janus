@@ -139,7 +139,9 @@ still require restart. Legacy configurations remain startup-only.
   drain closes the H3 network lifecycle within its context budget; arbitrary handlers still need
   to observe request cancellation to terminate their own work.
 - Unknown JSON fields, duplicate JSON object keys and duplicate route matches
-  fail validation. Configuration input is bounded to 1 MiB before parsing.
+  fail validation. Configuration input is bounded to 1 MiB before parsing;
+  each TLS certificate and private-key asset is likewise bounded to 1 MiB at
+  startup and during rotation.
 - This repository contains no performance claim or completed security audit.
 
 The development sequence and concrete release gates are in the plan. A smaller

@@ -5,6 +5,28 @@ repository commit. Add a new dated section before every future commit.
 
 ## 2026-09-17
 
+### Bound TLS asset reads across startup and rotation
+
+Commit message: `fix(tls): bound certificate asset reads`
+
+Scope:
+
+- Added a shared 1 MiB-per-file TLS asset reader for certificate and private-key
+  PEM files.
+- Applied it consistently to Limen startup, certificate rotation and reload
+  fingerprinting, preventing the reload path from using unbounded `ReadFile`.
+- Added startup and direct-reader regression tests for oversized assets.
+- Documented the TLS asset bound alongside the existing configuration bound.
+
+Verification:
+
+- `gofmt -w internal/config/config.go internal/limen/tls_asset.go internal/limen/tls_asset_test.go internal/limen/limen.go internal/limen/cert_reloader.go`
+- `go test ./internal/config ./internal/limen`
+- `git diff --check`
+
+Scope note: this bounds file reads; certificate policy, dependency review and
+full production security qualification remain separate gates.
+
 ### Bound access-log field size
 
 Commit message: `fix(observability): bound access log fields`

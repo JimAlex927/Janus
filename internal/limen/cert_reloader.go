@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"fmt"
-	"os"
 	"sort"
 	"sync"
 	"time"
@@ -124,13 +123,13 @@ func (r *CertificateReloader) Run(ctx context.Context) error {
 }
 
 func fingerprintCertificate(settings config.TLSSettings) (certificateFingerprint, error) {
-	cert, err := os.ReadFile(settings.CertFile)
+	cert, err := readTLSAsset(settings.CertFile, "certificate")
 	if err != nil {
-		return certificateFingerprint{}, fmt.Errorf("read certificate: %w", err)
+		return certificateFingerprint{}, err
 	}
-	key, err := os.ReadFile(settings.KeyFile)
+	key, err := readTLSAsset(settings.KeyFile, "private key")
 	if err != nil {
-		return certificateFingerprint{}, fmt.Errorf("read private key: %w", err)
+		return certificateFingerprint{}, err
 	}
 	return certificateFingerprint{cert: sha256.Sum256(cert), key: sha256.Sum256(key)}, nil
 }

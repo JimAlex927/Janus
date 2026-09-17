@@ -17,7 +17,10 @@ import (
 	"time"
 )
 
-const MaxConfigBytes = 1 << 20
+const (
+	MaxConfigBytes   = 1 << 20
+	MaxTLSAssetBytes = 1 << 20
+)
 
 type Config struct {
 	Version        int                    `json:"version,omitempty"`
