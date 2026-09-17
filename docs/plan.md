@@ -143,8 +143,10 @@ universal values for them.
    but does not forcibly stop arbitrary application code.
 5. Real-listener tests cover backend header stall, stalled response body,
    client cancellation, pre/post-commitment deadline behavior, server-side slow
-   upload termination, and server-side slow-reader termination. Timeout itself
-   does not buffer responses.
+   upload termination, server-side slow-reader termination, and HTTP/3 slow-body
+   termination. The timeout middleware closes a request body when its derived
+   context expires; the proxy maps body-read failures using that context.
+   Timeout itself does not buffer responses.
 
 Phase 1 implementation is present; its qualification is reopened as 1Q after
 reviewing the existing test assertions. It introduces the named route policy `buffer` to prove route

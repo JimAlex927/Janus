@@ -109,7 +109,8 @@ func NewWithForwarding(pool *upstream.Pool, transport http.RoundTripper, logger 
 			}
 		},
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
-			if errors.Is(err, context.Canceled) {
+			requestErr := r.Context().Err()
+			if errors.Is(requestErr, context.Canceled) || errors.Is(err, context.Canceled) {
 				telemetry.MarkError(r.Context(), "client_canceled")
 				return
 			}
@@ -120,7 +121,7 @@ func NewWithForwarding(pool *upstream.Pool, transport http.RoundTripper, logger 
 				telemetry.MarkError(r.Context(), "request_body_too_large")
 			}
 			var timeout net.Error
-			if status == http.StatusBadGateway && (errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &timeout) && timeout.Timeout())) {
+			if status == http.StatusBadGateway && (errors.Is(requestErr, context.DeadlineExceeded) || errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &timeout) && timeout.Timeout())) {
 				status = http.StatusGatewayTimeout
 				telemetry.MarkError(r.Context(), "timeout")
 			} else if status == http.StatusBadGateway {

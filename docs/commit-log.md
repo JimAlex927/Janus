@@ -3,6 +3,33 @@
 This document records the purpose, scope, and verification for each Janus
 repository commit. Add a new dated section before every future commit.
 
+## 2026-09-17
+
+### Bound HTTP/3 slow request bodies by timeout cancellation
+
+Commit message: `fix(timeout): close request bodies on cancellation`
+
+Scope:
+
+- Updated the timeout middleware to close a finite request body when the
+  derived request context is cancelled or reaches its deadline. This closes
+  the underlying QUIC stream body, which does not otherwise observe a child
+  context while blocked in `Read`.
+- Updated proxy error mapping to classify a non-context body-read error as 504
+  when the request context already expired.
+- Added unit, proxy, and real HTTP/3 slow-upload regression tests.
+- Updated the Phase 1 timeout contract and HTTP/3 qualification notes.
+
+Verification:
+
+- `gofmt -w internal/middleware/timeout.go internal/middleware/timeout_test.go internal/proxy/proxy.go internal/proxy/proxy_test.go internal/limen/protocol_test.go`
+- `go test -count=5 ./internal/middleware ./internal/proxy`
+- `go test -count=5 ./internal/limen -run TestLimenHTTP3TimeoutClosesSlowRequestBody`
+- `git diff --check`
+
+Scope note: this bounds request-body reads for finite requests; SSE/WebSocket
+remain outside the finite timeout contract and require their own lifecycle.
+
 ## 2026-09-16
 
 ### Verify Limen HTTP/2 active-stream drain

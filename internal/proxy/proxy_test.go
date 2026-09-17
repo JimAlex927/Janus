@@ -43,6 +43,21 @@ func TestErrorMapping(t *testing.T) {
 	}
 }
 
+func TestErrorMappingUsesRequestDeadlineForBodyReadFailure(t *testing.T) {
+	u, _ := url.Parse("http://backend")
+	pool, _ := upstream.New([]*url.URL{u})
+	p := New(pool, roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return nil, errors.New("request body closed")
+	}), zap.NewNop())
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer cancel()
+	w := httptest.NewRecorder()
+	p.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "http://gateway/", nil).WithContext(ctx))
+	if w.Code != http.StatusGatewayTimeout {
+		t.Fatalf("body failure with expired request context = %d, want 504", w.Code)
+	}
+}
+
 func TestNewTransportUsesConfiguredSettings(t *testing.T) {
 	settings := config.DefaultSettings().Backend
 	settings.TLSHandshakeTimeout = config.Duration(1200 * time.Millisecond)

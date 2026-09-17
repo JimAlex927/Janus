@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"janus/internal/config"
+	"janus/internal/middleware"
 
 	"github.com/quic-go/quic-go"
 	"github.com/quic-go/quic-go/http3"
@@ -270,6 +271,103 @@ func TestLimenHTTP3ClientCancellationReachesHandler(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("HTTP/3 client request did not finish after cancellation")
 	}
+}
+
+func TestLimenHTTP3TimeoutClosesSlowRequestBody(t *testing.T) {
+	certFile, keyFile, roots := writeTestCertificate(t)
+	started, bodyDone := make(chan struct{}), make(chan error, 1)
+	l, err := NewBinding("public", config.LimenConfig{
+		Address:   "127.0.0.1:0",
+		Protocols: []string{config.ProtocolHTTP1, config.ProtocolHTTP3},
+		TLS:       &config.TLSSettings{CertFile: certFile, KeyFile: keyFile},
+	}, middleware.Timeout(100*time.Millisecond)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(started)
+		_, readErr := io.Copy(io.Discard, r.Body)
+		bodyDone <- readErr
+	})), config.DefaultSettings())
+	if err != nil {
+		t.Fatal(err)
+	}
+	tcpListener, err := l.Listen()
+	if err != nil {
+		t.Fatal(err)
+	}
+	udpListener, err := l.ListenPacket()
+	if err != nil {
+		_ = tcpListener.Close()
+		t.Fatal(err)
+	}
+	serveDone := make(chan error, 1)
+	go func() { serveDone <- l.Serve(tcpListener) }()
+	t.Cleanup(func() {
+		_ = l.Close()
+		if err := <-serveDone; err != nil && !errors.Is(err, http.ErrServerClosed) {
+			t.Errorf("limen stopped: %v", err)
+		}
+	})
+
+	transport := &http3.Transport{
+		TLSClientConfig: &tls.Config{RootCAs: roots, ServerName: "localhost"},
+		QUICConfig:      &quic.Config{Allow0RTT: false},
+	}
+	defer transport.Close()
+	body := &slowRequestBody{released: make(chan struct{})}
+	request, err := http.NewRequest(http.MethodPost, "https://"+udpListener.LocalAddr().String()+"/upload", body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.ContentLength = -1
+	requestDone := make(chan error, 1)
+	go func() {
+		response, requestErr := (&http.Client{Transport: transport}).Do(request)
+		if response != nil {
+			response.Body.Close()
+		}
+		requestDone <- requestErr
+	}()
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("HTTP/3 slow upload handler did not start")
+	}
+	select {
+	case readErr := <-bodyDone:
+		if readErr == nil {
+			t.Fatal("slow HTTP/3 request body ended without a close error")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("HTTP/3 timeout did not close the request body")
+	}
+	close(body.released)
+	select {
+	case <-requestDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("HTTP/3 client request did not finish")
+	}
+}
+
+type slowRequestBody struct {
+	sent     bool
+	released chan struct{}
+}
+
+func (b *slowRequestBody) Read(p []byte) (int, error) {
+	if !b.sent {
+		b.sent = true
+		p[0] = 'x'
+		return 1, nil
+	}
+	<-b.released
+	return 0, io.EOF
+}
+
+func (b *slowRequestBody) Close() error {
+	select {
+	case <-b.released:
+	default:
+		close(b.released)
+	}
+	return nil
 }
 
 func TestLimenHTTP3FailureStopsTCPFallback(t *testing.T) {

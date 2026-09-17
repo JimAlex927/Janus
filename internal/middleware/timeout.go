@@ -23,6 +23,15 @@ func Timeout(timeout time.Duration) Middleware {
 			}
 			ctx, cancel := context.WithTimeout(r.Context(), timeout)
 			defer cancel()
+			if r.Body != nil && r.Body != http.NoBody {
+				// A derived request context does not necessarily interrupt the
+				// underlying body reader. This matters for HTTP/3, where a QUIC
+				// stream body can otherwise wait indefinitely for the next DATA
+				// frame. Closing the body on cancellation releases that stream and
+				// also bounds slow uploads for any body with the same contract.
+				stopBody := context.AfterFunc(ctx, func() { _ = r.Body.Close() })
+				defer stopBody()
+			}
 			next.ServeHTTP(w, r.WithContext(ctx))
 			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 				telemetry.MarkError(r.Context(), "timeout")
