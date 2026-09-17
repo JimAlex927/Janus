@@ -5,6 +5,23 @@ repository commit. Add a new dated section before every future commit.
 
 ## 2026-09-17
 
+### Verify module integrity in release CI
+
+Commit message: `ci: verify module integrity`
+
+Scope:
+
+- Added `go mod verify` to the pinned Linux CI job after toolchain setup and
+  before tests, so downloaded module contents are checked against go.sum.
+
+Verification:
+
+- `go mod verify` using Go 1.25.13
+- `git diff --check`
+
+Scope note: module checksum verification does not replace dependency license
+review, vulnerability scanning or a broader supply-chain audit.
+
 ### Enforce patched Go and vulnerability scanning in CI
 
 Commit message: `ci: add patched Go vulnerability gate`
