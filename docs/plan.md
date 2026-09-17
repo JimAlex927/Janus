@@ -365,7 +365,8 @@ in Phase 4 also need retirement/reload tests when introduced.
 ## Phase 6 tasks
 
 The repository now defines a pinned Ubuntu CI job for the release gates: full
-tests, the race detector, vet, and a static Linux build. A real CI run is still
+tests, the race detector, vet, and a static Linux build. The reusable GitHub
+Actions are pinned to immutable release commits. A real CI run is still
 required before treating those checks as release evidence. Add Linux
 signal/socket tests, malformed framing, ambiguous paths, middleware composition,
 and repeated failed/successful reload coverage. A configuration-parser fuzz

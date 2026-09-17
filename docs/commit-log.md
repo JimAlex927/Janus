@@ -5,6 +5,27 @@ repository commit. Add a new dated section before every future commit.
 
 ## 2026-09-17
 
+### Pin GitHub Actions used by release CI
+
+Commit message: `ci: pin GitHub Actions to release commits`
+
+Scope:
+
+- Replaced movable `checkout@v4` and `setup-go@v5` references with immutable
+  commits for checkout v4.2.2 and setup-go v5.5.0.
+- Kept the release tag in comments so deliberate dependency refreshes remain
+  reviewable.
+- Updated the Phase 6 plan to record that the reusable CI actions are pinned.
+
+Verification:
+
+- `git ls-remote https://github.com/actions/checkout refs/tags/v4.2.2 refs/tags/v4.2.2^{}`
+- `git ls-remote https://github.com/actions/setup-go refs/tags/v5.5.0 refs/tags/v5.5.0^{}`
+- `git diff --check`
+
+Scope note: hosted CI still needs an actual run; pinning action commits does not
+replace the Linux, security, load or soak qualification gates.
+
 ### Bound trusted forwarded-hop processing
 
 Commit message: `fix(security): bound forwarded proxy hops`
