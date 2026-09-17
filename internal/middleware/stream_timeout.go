@@ -24,7 +24,7 @@ func StreamTimeout(maxDuration, idleTimeout time.Duration) Middleware {
 				next.ServeHTTP(w, r)
 				return
 			}
-
+			//如果是sse或者websocket
 			ctx, cancel := context.WithCancelCause(r.Context())
 			control := newStreamControl()
 			control.writer = http.NewResponseController(w)

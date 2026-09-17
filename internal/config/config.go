@@ -288,6 +288,7 @@ func LoadFileSnapshot(path string) (Config, [sha256.Size]byte, error) {
 	if len(data) > MaxConfigBytes {
 		return Config{}, hash, fmt.Errorf("config exceeds %d bytes", MaxConfigBytes)
 	}
+	//继续还是反序列化 规范化配置 变成config对象 hash是配置文件的签名
 	c, err := LoadFileBytes(path, data)
 	return c, hash, err
 }
@@ -296,6 +297,7 @@ func LoadFileSnapshot(path string) (Config, [sha256.Size]byte, error) {
 // paths against the supplied configuration file path. It is used by the
 // watcher so parsing and hashing operate on the same atomic-replacement read.
 func LoadFileBytes(path string, data []byte) (Config, error) {
+	//反序列化配置文件 变成config.Config对象
 	c, err := Load(bytes.NewReader(data))
 	if err != nil {
 		return c, err
@@ -305,12 +307,16 @@ func LoadFileBytes(path string, data []byte) (Config, error) {
 		if binding.TLS == nil {
 			continue
 		}
+		//这里是规范binding的 tls的证书和keyfile的文件路径 标准化成绝对路径
 		if !filepath.IsAbs(binding.TLS.CertFile) {
 			binding.TLS.CertFile = filepath.Join(base, binding.TLS.CertFile)
 		}
 		if !filepath.IsAbs(binding.TLS.KeyFile) {
 			binding.TLS.KeyFile = filepath.Join(base, binding.TLS.KeyFile)
 		}
+		//Limens是协议层，比如http/1.x   http/2   http/3
+		// 然后routers会绑定一个limen。 routers负责的是 http、sse、websocket。 已经不需要注重不同版本的http
+		//TODO 需要注意的是，当前的Limens支持 http/1.x  https 以及http2 over tls 不支持http2的明文 也就是h2c
 		c.Limens[name] = binding
 	}
 	return c, nil
@@ -627,7 +633,7 @@ func validateTLSSettings(name string, settings *TLSSettings) error {
 // WithDefaults returns a copy with omitted settings filled from the starter
 // profile. Explicit non-zero values are preserved for validation.
 func (c Config) WithDefaults() Config {
-	c.Settings = c.Settings.WithDefaults()
+	c.Settings = c.Settings.WithDefaults() // 这里是配置进行一个矫正 没写的配置填充默认值的作用
 	if len(c.Services) > 0 {
 		services := make(map[string]Service, len(c.Services))
 		for name, service := range c.Services {

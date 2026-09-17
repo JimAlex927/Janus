@@ -61,7 +61,7 @@ func NewFileReloader(r *Runtime, path string, interval time.Duration, logger *za
 func (f *FileReloader) ReloadOnce() error {
 	f.reloadMu.Lock()
 	defer f.reloadMu.Unlock()
-
+	//这里会加载文件
 	c, hash, err := config.LoadFileSnapshot(f.path)
 	if err != nil {
 		f.runtime.metrics.RecordReload("rejected")
@@ -70,9 +70,11 @@ func (f *FileReloader) ReloadOnce() error {
 		}
 		return err
 	}
+	//如果当前hash已然加载就不需要重新构建runtime
 	if f.isApplied(hash) {
 		return nil
 	}
+	//否则用新的配置 构建generation 完成替换
 	if err := f.runtime.Replace(c); err != nil {
 		f.runtime.metrics.RecordReload("rejected")
 		if f.shouldReport(hash) {
@@ -97,6 +99,7 @@ func (f *FileReloader) Run(ctx context.Context) error {
 		case <-ctx.Done():
 			return nil
 		case <-ticker.C:
+			//每隔interval 重置一次
 			_ = f.ReloadOnce()
 		}
 	}

@@ -7,6 +7,11 @@
     }
   },
   "middlewares": {
+    "user-limit": {
+      "in_flight": {
+        "max_concurrent": 100
+      }
+    },
     "route-upload-cap": {
       "body_limit": { "max_bytes": 1048576 }
     },
@@ -26,7 +31,7 @@
   "services": {
     "storage": {
       "upstreams": ["http://127.0.0.1:9000"],
-      "middlewares": ["service-upload-cap"]
+      "middlewares": ["service-upload-cap","user-limit"]
     }
   }
 }

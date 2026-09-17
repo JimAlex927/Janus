@@ -76,6 +76,7 @@ type rejectionMetricKey struct {
 }
 
 // NewMetrics creates an empty process registry.
+// 进程级别的指标注册表，会记录请求总数、状态码等等
 func NewMetrics() *Metrics {
 	return &Metrics{
 		requests:   make(map[requestMetricKey]uint64),

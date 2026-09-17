@@ -59,10 +59,12 @@ func New(address string, handler http.Handler, settings config.Settings) *Limen 
 // settings. Certificate files are loaded before the listener is opened.
 func NewBinding(name string, binding config.LimenConfig, handler http.Handler, settings config.Settings) (*Limen, error) {
 	settings = settings.WithDefaults()
+	//协议 必须要有一个协议 。 http1 不检验TLS。http2必须要有TLS。http走的是QUIC
 	protocols, err := serverProtocols(binding)
 	if err != nil {
 		return nil, err
 	}
+	//加载证书 有热更新机制 一个binding一个证书
 	tlsConfig, certificates, err := serverTLSConfig(binding, protocols)
 	if err != nil {
 		return nil, err
@@ -70,9 +72,11 @@ func NewBinding(name string, binding config.LimenConfig, handler http.Handler, s
 	if name != "" {
 		next := handler
 		handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			//这里是把请求包装一下，修改请求的context，并在context里面放入limen的Id 估计是为了后面metric用
 			next.ServeHTTP(w, protocol.WithLimenID(r, name))
 		})
 	}
+	//这里如果协议里面有http3
 	var h3Server *http3.Server
 	if hasProtocol(binding.Protocols, config.ProtocolHTTP3) {
 		h3Settings := config.HTTP3Settings{}.WithDefaults()
@@ -97,6 +101,7 @@ func NewBinding(name string, binding config.LimenConfig, handler http.Handler, s
 		// has been bound and the QUIC server has started.
 		next := handler
 		handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			//TODO 这里设置了一个什么请求头 然后再处理的请求 暂时对h3的协议不太了解
 			_ = h3Server.SetQUICHeaders(w.Header())
 			next.ServeHTTP(w, r)
 		})
@@ -104,13 +109,18 @@ func NewBinding(name string, binding config.LimenConfig, handler http.Handler, s
 	hijackedEmpty := make(chan struct{})
 	close(hijackedEmpty)
 	l := &Limen{
-		address:  binding.Address,
-		tls:      tlsConfig,
-		cert:     certificates,
+		//地址
+		address: binding.Address,
+		//tls配置
+		tls:  tlsConfig,
+		cert: certificates,
+		//如果协议里面有h3
 		http3:    h3Server,
 		hijacked: make(map[net.Conn]struct{}), hijackedEmpty: hijackedEmpty,
+		//这里是非h3的server  也就是http  server还没启动  还要单独启动tls的server
 		server: &http.Server{
 			Addr: binding.Address, Handler: handler,
+			//这里 net/http支持  http/1 和 http/2    相当于开启了http服务，但是如果有tls，会先开启tls服务，然后tls服务把请求转发到这个server？
 			Protocols:         protocols,
 			ReadHeaderTimeout: settings.Server.ReadHeaderTimeout.Duration(),
 			ReadTimeout:       settings.Request.ReadTimeout.Duration(),
@@ -119,6 +129,7 @@ func NewBinding(name string, binding config.LimenConfig, handler http.Handler, s
 			MaxHeaderBytes:    int(settings.Server.MaxHeaderBytes),
 		},
 	}
+	//下面这个是属于TCP的回调函数 主要用于跟踪 HTTP/1.1 WebSocket 升级后的连接。
 	l.server.ConnState = func(conn net.Conn, state http.ConnState) {
 		// net/http reports StateHijacked for the frontend connection after
 		// ReverseProxy completes a WebSocket upgrade.
@@ -146,9 +157,13 @@ func serverProtocols(binding config.LimenConfig) (*http.Protocols, error) {
 	seen := map[string]bool{}
 	for _, name := range binding.Protocols {
 		if seen[name] {
+			//必须要有一个协议
 			return nil, fmt.Errorf("limen enables protocol %q more than once", name)
 		}
 		seen[name] = true
+		//这里遍历每个协议，对于http2 必须要求有TLS配置。
+		//对于http3 放在后面继续判断 http3 不属于net/http包 走的是QUIC
+
 		switch name {
 		case config.ProtocolHTTP1:
 			protocols.SetHTTP1(true)
@@ -163,6 +178,7 @@ func serverProtocols(binding config.LimenConfig) (*http.Protocols, error) {
 			return nil, fmt.Errorf("unsupported protocol %q", name)
 		}
 	}
+	//如果需要支持http3 必须要TLS 如果没有可以单独跳过 必需要有一个合法的http请求 否则返回nil 报错
 	if hasProtocol(binding.Protocols, config.ProtocolHTTP3) {
 		if binding.TLS == nil {
 			return nil, fmt.Errorf("HTTP/3 requires TLS")
@@ -175,9 +191,12 @@ func serverProtocols(binding config.LimenConfig) (*http.Protocols, error) {
 }
 
 func serverTLSConfig(binding config.LimenConfig, protocols *http.Protocols) (*tls.Config, *atomic.Pointer[tls.Certificate], error) {
+
 	if binding.TLS == nil {
 		return nil, nil, nil
 	}
+	//这里一个binding只读取一个证书 说明一个binding的多个协议 共用一个证书 似乎是在说明 https只是 一个内层明文http + tls
+	//证书独立于协议
 	cert, err := loadTLSKeyPair(binding.TLS.CertFile, binding.TLS.KeyFile)
 	if err != nil {
 		return nil, nil, fmt.Errorf("load limen TLS certificate: %w", err)
@@ -196,6 +215,7 @@ func serverTLSConfig(binding config.LimenConfig, protocols *http.Protocols) (*tl
 	if protocols.HTTP1() {
 		nextProtos = append(nextProtos, "http/1.1")
 	}
+	//这里用了一个原子指针 是为了更新配置时候 旧请求用旧证书 新请求用新证书
 	certificates := new(atomic.Pointer[tls.Certificate])
 	certificates.Store(&cert)
 	return &tls.Config{

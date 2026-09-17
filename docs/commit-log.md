@@ -5,6 +5,29 @@ repository commit. Add a new dated section before every future commit.
 
 ## 2026-09-17
 
+### Clarify runtime construction and protocol lifecycle
+
+Commit message: `docs: clarify runtime and protocol construction`
+
+Scope:
+
+- Added explanatory comments around configuration checking, Limen protocol
+  binding, TLS/HTTP/2/HTTP/3 startup, administration endpoints, Runtime
+  ownership, generation replacement, shared transport, metrics, and admission
+  limiters.
+- Renamed Runtime fields to make the generation builder and shared service
+  limiter registry explicit.
+- Added comments to the example body-limit configuration and the configuration
+  reload path while preserving the existing behavior.
+
+Verification:
+
+- `gofmt` on changed Go files.
+- `go test -count=1 ./...` passed on Windows/amd64.
+
+
+## 2026-09-17
+
 ### Repair lifecycle and snapshot acceptance defects
 
 Commit message: `fix: repair stream drain and startup snapshot guarantees`

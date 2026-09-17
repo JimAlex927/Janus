@@ -44,6 +44,7 @@ func NewWithTransport(c config.Config, logger *zap.Logger, transport http.RoundT
 // limiters. A nil map keeps the standalone Gateway path source-compatible by
 // creating generation-local service limiters.
 func NewWithTransportAndLimiters(c config.Config, logger *zap.Logger, transport http.RoundTripper, serviceLimiters map[string]*middleware.Limiter) (*Gateway, error) {
+	// 把配置填充默认值 同时里面还有个对server的health check填充默认值的操作
 	c = c.WithDefaults()
 	if err := c.Validate(); err != nil {
 		return nil, err
@@ -127,6 +128,7 @@ func NewWithTransportAndLimiters(c config.Config, logger *zap.Logger, transport 
 		if err != nil {
 			return nil, err
 		}
+		//这里启用了proxy机制
 		serviceHandler := proxy.NewWithForwarding(pool, transport, logger.With(zap.String("service", name)), forwardingPolicies)
 		serviceLimiter := serviceLimiters[name]
 		if serviceLimiter == nil {

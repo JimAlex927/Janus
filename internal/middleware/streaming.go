@@ -13,6 +13,7 @@ import (
 func ClearStreamingWriteDeadline(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if protocol.IsWebSocketRequest(r) || protocol.WantsSSE(r) {
+			//这里如果是SSE或者websocket 会把writeDeadline给设置成永久
 			_ = http.NewResponseController(w).SetWriteDeadline(time.Time{})
 		}
 		next.ServeHTTP(w, r)

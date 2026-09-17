@@ -26,7 +26,7 @@ import (
 func main() {
 
 	//1、parse the argument in the exe command-----------
-	path := flag.String("config", "configs/janus.json", "configuration file")
+	path := flag.String("config", "configs/janus-body-limit.example.json", "configuration file")
 	check := flag.Bool("check", false, "validate configuration and exit")
 	printEffective := flag.Bool("print-effective-config", false, "print normalized configuration without TLS asset paths and exit")
 	reloadInterval := flag.Duration("reload-interval", time.Second, "poll interval for versioned configuration and TLS files")
@@ -41,7 +41,7 @@ func main() {
 	//3、graceful exit preparation.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	//4、Run : the core logics
+	//4、Run : the core logics   核心地方
 	if err := run(ctx, *path, *check, *printEffective, *reloadInterval, logger); err != nil {
 		logger.Error("janus stopped", zap.Error(err))
 		os.Exit(1)
@@ -51,10 +51,19 @@ func main() {
 func run(ctx context.Context, path string, check, printEffective bool, reloadInterval time.Duration, logger *zap.Logger) error {
 	// Open and validate the Janus configuration. Versioned TLS paths are
 	// resolved relative to this file by LoadFile.
+	//加载配置 返回反序列化对象  配置文件的hash
 	c, startupHash, err := config.LoadFileSnapshot(path)
 	if err != nil {
 		return err
 	}
+	//TODO 这里是check 只在命令 --check = true的时候 去检查limen的binding配置是否有效
+	//构造一个临时的 Limen，目的是验证：
+	//- 协议配置是否合法
+	//- HTTP/2 是否正确配置了 TLS
+	//- HTTP/3 是否有 TCP fallback
+	//- TLS 证书和私钥是否能加载
+	//- HTTP Server 的协议参数是否能创建
+	//- HTTP/3 的 QUIC 参数是否有效
 	if check || printEffective {
 		for name, binding := range c.LimenBindings() {
 			if _, err := limen.NewBinding(name, binding, http.NotFoundHandler(), c.Settings); err != nil {
@@ -73,11 +82,13 @@ func run(ctx context.Context, path string, check, printEffective bool, reloadInt
 		return nil
 	}
 	// Runtime owns the stable handler, active generation, and shared transport.
+	//  关键地方： 开启运行时
 	requestRuntime, err := janusruntime.New(c, logger)
 	if err != nil {
 		return err
 	}
 	defer requestRuntime.Close()
+	//这里是limen，也就是协议层，可以有多个端口  一个端口可以有多个协议 这一点还不太确定
 	bindings := c.LimenBindings()
 	names := make([]string, 0, len(bindings))
 	for name := range bindings {
@@ -88,6 +99,8 @@ func run(ctx context.Context, path string, check, printEffective bool, reloadInt
 	serversByName := make(map[string]*limen.Limen, len(names))
 	listeners := make([]net.Listener, 0, len(names))
 	packetListeners := make([]net.PacketConn, 0, len(names))
+
+	//=======================For Administration============================
 	var adminState *admin.State
 	var adminServer *http.Server
 	var adminListener net.Listener
@@ -100,6 +113,7 @@ func run(ctx context.Context, path string, check, printEffective bool, reloadInt
 			IdleTimeout:       c.Settings.Server.IdleTimeout.Duration(),
 			MaxHeaderBytes:    int(c.Settings.Server.MaxHeaderBytes),
 		}
+		//只是绑定端口
 		adminListener, err = net.Listen("tcp", address)
 		if err != nil {
 			closeListeners(listeners)
@@ -108,7 +122,11 @@ func run(ctx context.Context, path string, check, printEffective bool, reloadInt
 		}
 		defer func() { _ = adminServer.Close() }()
 	}
+	//=============================For various Limen protocol bindings ===================
 	for _, name := range names {
+		/*
+			关键地方 创建一个Limen对象 用的还是全局process的 runtime。 里面有http1和2 的server  以及http3的server  还有tls的server
+		*/
 		protocolLimen, err := limen.NewBinding(name, bindings[name], requestRuntime, c.Settings)
 		if err != nil {
 			if adminListener != nil {
@@ -119,6 +137,7 @@ func run(ctx context.Context, path string, check, printEffective bool, reloadInt
 			closeServers(servers)
 			return err
 		}
+		//用了net/http的监听端口 说明给http1/2 用的
 		ln, err := protocolLimen.Listen()
 		if err != nil {
 			if adminListener != nil {
@@ -134,6 +153,7 @@ func run(ctx context.Context, path string, check, printEffective bool, reloadInt
 		listeners = append(listeners, ln)
 		logger.Info("janus listening", zap.String("limen", name), zap.String("address", ln.Addr().String()))
 		if protocolLimen.HTTP3Enabled() {
+			//如果http3被启用了 要单独开启http3的服务器  packetListeners是给h3的监听端口
 			packet, err := protocolLimen.ListenPacket()
 			if err != nil {
 				if adminListener != nil {
@@ -151,6 +171,7 @@ func run(ctx context.Context, path string, check, printEffective bool, reloadInt
 	reloadCtx, cancelReload := context.WithCancel(ctx)
 	defer cancelReload()
 	if c.Version == config.CurrentConfigVersion {
+		//构建文件重载器
 		routeReloader, err := janusruntime.NewFileReloader(requestRuntime, path, reloadInterval, logger, startupHash)
 		if err != nil {
 			closeListeners(listeners)
@@ -158,6 +179,7 @@ func run(ctx context.Context, path string, check, printEffective bool, reloadInt
 			closeServers(servers)
 			return err
 		}
+		//tls的证书重载器
 		certificateReloader, err := limen.NewCertificateReloader(bindings, serversByName, reloadInterval, logger)
 		if err != nil {
 			closeListeners(listeners)
@@ -165,19 +187,23 @@ func run(ctx context.Context, path string, check, printEffective bool, reloadInt
 			closeServers(servers)
 			return err
 		}
+		//启动两个重载器 配置文件重载 和tls证书重载
 		go func() { _ = routeReloader.Run(reloadCtx) }()
 		go func() { _ = certificateReloader.Run(reloadCtx) }()
 	}
 	done := make(chan error, len(servers)+1)
 	for i, server := range servers {
+		//这里是启动limen里面http的服务器那一块
 		go func(i int, server *limen.Limen) { done <- server.Serve(listeners[i]) }(i, server)
 	}
+	//开启管理员服务
 	if adminServer != nil {
 		go func() { done <- adminServer.Serve(adminListener) }()
 	}
 	if adminState != nil {
 		adminState.SetReady(true)
 	}
+	//Graceful shutdown！
 	select {
 	case err := <-done:
 		cancelReload()
