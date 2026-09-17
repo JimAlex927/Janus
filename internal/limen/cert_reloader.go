@@ -14,11 +14,13 @@ import (
 )
 
 type certificateEntry struct {
-	name     string
-	limen    *Limen
-	settings config.TLSSettings
-	last     certificateFingerprint
-	hasLast  bool
+	name        string
+	limen       *Limen
+	settings    config.TLSSettings
+	last        certificateFingerprint
+	hasLast     bool
+	rejected    certificateFingerprint
+	hasRejected bool
 }
 
 type certificateFingerprint struct {
@@ -73,8 +75,8 @@ func NewCertificateReloader(bindings map[string]config.LimenConfig, servers map[
 }
 
 // ReloadOnce checks every configured certificate pair once. A malformed or
-// incomplete pair leaves the current certificate active and is retried after
-// the files change again.
+// incomplete pair leaves the current certificate active and is retried on a
+// later poll; repeated errors for the same fingerprint are log-deduplicated.
 func (r *CertificateReloader) ReloadOnce() error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -92,16 +94,18 @@ func (r *CertificateReloader) ReloadOnce() error {
 		if entry.hasLast && entry.last == fingerprint {
 			continue
 		}
-		// Remember the content before validation so an unchanged bad pair is
-		// not repeatedly published or logged by callers that poll frequently.
-		entry.last, entry.hasLast = fingerprint, true
 		if err := entry.limen.RotateCertificate(entry.settings.CertFile, entry.settings.KeyFile); err != nil {
 			if firstErr == nil {
 				firstErr = fmt.Errorf("limen %q: %w", entry.name, err)
 			}
-			r.logger.Error("certificate reload rejected", zap.String("limen", entry.name), zap.Error(err))
+			if !entry.hasRejected || entry.rejected != fingerprint {
+				r.logger.Error("certificate reload rejected", zap.String("limen", entry.name), zap.Error(err))
+			}
+			entry.rejected, entry.hasRejected = fingerprint, true
 			continue
 		}
+		entry.last, entry.hasLast = fingerprint, true
+		entry.hasRejected = false
 		r.logger.Info("certificate reloaded", zap.String("limen", entry.name))
 	}
 	return firstErr

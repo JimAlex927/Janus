@@ -5,6 +5,29 @@ repository commit. Add a new dated section before every future commit.
 
 ## 2026-09-17
 
+### Retry rejected TLS certificate fingerprints
+
+Commit message: `fix(reload): retry rejected certificate pairs`
+
+Scope:
+
+- Changed certificate reload state to record a fingerprint as applied only
+  after `RotateCertificate` succeeds.
+- Retried unchanged rejected pairs on later polls while deduplicating repeated
+  rejection logs for the same fingerprint.
+- Added a regression test proving an unchanged incomplete pair is retried and
+  the last valid certificate remains active.
+
+Verification:
+
+- `gofmt -w internal/limen/cert_reloader.go internal/limen/cert_reloader_test.go`
+- `go test ./internal/limen`
+- `git diff --check`
+- `go test -race ./internal/limen -run 'TestCertificateReloader|TestHTTP3CertificateRotation'` (blocked by the local Windows `runtime/cgo` toolchain exit-status-2 limitation)
+
+Scope note: reload retry is now correct for readable rejected pairs; broader
+certificate policy, security review and production qualification remain open.
+
 ### Bound TLS asset reads across startup and rotation
 
 Commit message: `fix(tls): bound certificate asset reads`

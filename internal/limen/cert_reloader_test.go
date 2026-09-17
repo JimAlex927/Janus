@@ -43,6 +43,9 @@ func TestCertificateReloaderPublishesOnlyValidatedPairs(t *testing.T) {
 	if err := reloader.ReloadOnce(); err == nil {
 		t.Fatal("expected incomplete pair rejection")
 	}
+	if err := reloader.ReloadOnce(); err == nil {
+		t.Fatal("expected unchanged incomplete pair to be retried")
+	}
 	requestWithRoots(t, listener.Addr().String(), rootsOne)
 
 	secondKeyBytes, err := os.ReadFile(secondKey)
