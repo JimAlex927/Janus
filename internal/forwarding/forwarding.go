@@ -9,6 +9,8 @@ import (
 	"strings"
 )
 
+const maxForwardedHops = 128
+
 // Policy trusts forwarded identity headers only when the immediate peer is in
 // one of the configured CIDRs. An empty policy intentionally trusts nothing.
 type Policy struct {
@@ -125,6 +127,9 @@ func forwardedChain(values []string, peer string) ([]string, bool) {
 	chain := make([]string, 0, len(values)+1)
 	for _, value := range values {
 		for _, part := range strings.Split(value, ",") {
+			if len(chain) >= maxForwardedHops-1 {
+				return nil, false
+			}
 			part = strings.TrimSpace(part)
 			ip := net.ParseIP(part)
 			if ip == nil {

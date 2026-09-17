@@ -26,7 +26,7 @@ break at a protocol boundary and how to demonstrate correct behavior.
 | `GET /apix` | Does not match `/api`; returns 404 unless another route matches. |
 | Exact host plus hostless route | The exact, case-insensitive host rule wins; the incoming port is ignored for matching. |
 | `GET /api/a%2Fb` | Routing uses Go's decoded `URL.Path`; the reverse proxy preserves the escaped path for the backend. |
-| Client-supplied `X-Forwarded-*`, `X-Real-IP`, or `Forwarded` | Removed or rewritten; forwarded identity is trusted only when the immediate peer matches the limen's explicit CIDRs. |
+| Client-supplied `X-Forwarded-*`, `X-Real-IP`, or `Forwarded` | Removed or rewritten; forwarded identity is trusted only when the immediate peer matches the limen's explicit CIDRs, and the retained `X-Forwarded-For` chain is capped at 128 addresses. |
 | `CONNECT` or a non-WebSocket `Upgrade` request | Rejected with 501; Janus does not create a tunnel. |
 | No matching host/path | Returns 404 without contacting a backend. |
 | Overall deadline before response commitment | Returns 504 when the response socket remains writable. |

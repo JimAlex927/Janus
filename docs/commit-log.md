@@ -5,6 +5,27 @@ repository commit. Add a new dated section before every future commit.
 
 ## 2026-09-17
 
+### Bound trusted forwarded-hop processing
+
+Commit message: `fix(security): bound forwarded proxy hops`
+
+Scope:
+
+- Capped the accepted `X-Forwarded-For` chain at 128 addresses, including the
+  immediate peer in the resulting canonical chain.
+- Overlong chains now use the existing conservative direct-peer fallback rather
+  than allocating and forwarding an unbounded hop list.
+- Added a regression test and documented the forwarding-chain bound.
+
+Verification:
+
+- `gofmt -w internal/forwarding/forwarding.go internal/forwarding/forwarding_test.go`
+- `go test ./internal/forwarding ./internal/gateway`
+- `git diff --check`
+
+Scope note: this bounds forwarded-hop processing; it does not add a trust-all
+mode or change the configured CIDR trust boundary.
+
 ### Prevent buffered responses from committing after timeout
 
 Commit message: `fix(timeout): guard buffered response commitment`

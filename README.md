@@ -122,7 +122,7 @@ still require restart. Legacy configurations remain startup-only.
   up to its configured maximum before committing them.
 - The immediate peer determines forwarding identity by default. A versioned
   limen may explicitly configure `trusted_proxies` CIDRs; only then are valid
-  X-Forwarded-For hops and trusted HTTPS scheme/host headers retained. There is
+  bounded X-Forwarded-For hops and trusted HTTPS scheme/host headers retained. There is
   no trust-all mode, and malformed or untrusted input falls back to the peer.
 - CONNECT and non-WebSocket Upgrade requests receive 501. SSE routes stream
   `text/event-stream` responses; WebSocket routes proxy RFC 6455 upgrades over

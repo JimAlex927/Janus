@@ -3,6 +3,7 @@ package forwarding
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -54,5 +55,24 @@ func TestResolveMalformedChainFallsBackToPeer(t *testing.T) {
 	identity := policy.Resolve(r)
 	if identity.ClientIP != "10.0.0.1" || identity.ForwardedFor != "10.0.0.1" || identity.ForwardedProto != "https" || identity.ForwardedHost != "public.example" {
 		t.Fatalf("malformed identity = %+v", identity)
+	}
+}
+
+func TestResolveOverlongChainFallsBackToPeer(t *testing.T) {
+	policy, err := NewPolicy([]string{"10.0.0.0/8"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := httptest.NewRequest(http.MethodGet, "http://gateway/api", nil)
+	r.RemoteAddr = "10.0.0.1:1234"
+	parts := make([]string, maxForwardedHops)
+	for i := range parts {
+		parts[i] = "203.0.113.9"
+	}
+	r.Header.Set("X-Forwarded-For", strings.Join(parts, ", "))
+
+	identity := policy.Resolve(r)
+	if identity.ClientIP != "10.0.0.1" || identity.ForwardedFor != "10.0.0.1" {
+		t.Fatalf("overlong identity = %+v, want direct peer fallback", identity)
 	}
 }
