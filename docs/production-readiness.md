@@ -10,7 +10,7 @@ cross-compilation do not satisfy Linux execution or deployment gates.
 
 | Gate | Candidate evidence | Still required |
 | --- | --- | --- |
-| Accepted requests survive graceful drain | H3 client completes during shutdown; forced-drain tests retained | Execute on target Linux with concurrent TCP/UDP traffic |
+| Accepted requests survive graceful drain | H3 client completes during shutdown; forced-drain tests retained; process-level lifecycle test exercises a real TCP client and bounded context cancellation | Execute on target Linux with concurrent TCP/UDP traffic |
 | Stream timeouts release resources | Slow TCP reader terminates; H1/H2/H3 proxy tests assert body failure before client deadline, backend cancellation and released admission; HTTP/3 stream timeout closes a slow request body | Target Linux slow readers/uploads and concurrent sibling streams under load |
 | Reload matches published bytes | Startup hash comes from the runtime input snapshot; certificate hash/parse/publication use the same bounded bytes; startup race regressions | Repeated route/certificate replacement and rollback during load |
 | Correct timeout response | 103 followed by deadline returns final 504 | Protocol fault-injection campaign |
@@ -75,3 +75,9 @@ The vulnerability scan reports zero vulnerabilities affecting reachable code;
 four module vulnerabilities are present but not called by this code. These are
 development-host results and do not replace Linux execution or deployment
 evidence.
+
+The cross-platform process lifecycle regression additionally verifies that the
+entrypoint reaches `/readyz`, returns the expected backend body, publishes a
+route replacement from the watched file, and exits after cancellation. The
+Linux-only child-process SIGTERM test remains necessary because it verifies the
+actual OS signal and process boundary.

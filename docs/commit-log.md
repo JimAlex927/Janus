@@ -1345,3 +1345,24 @@ Verification:
 - `go mod verify`
 - `go run golang.org/x/vuln/cmd/govulncheck@v1.7.0 ./...`
 - static `linux/amd64` build
+
+## 2026-09-17
+
+### Add process-level lifecycle regression coverage
+
+Commit message: `test(lifecycle): cover run startup reload and shutdown`
+
+Scope:
+
+- Added a cross-platform entrypoint test that starts the real `run` lifecycle,
+  waits for readiness, validates a client response body, observes a file-based
+  route replacement, and verifies bounded context-cancellation shutdown.
+- Kept the Linux-specific child-process SIGTERM test as a separate deployment
+  gate because an in-process test cannot prove OS signal delivery or process
+  exit behavior.
+
+Verification:
+
+- `gofmt -w cmd/janus/main_test.go`
+- `go test -count=3 ./cmd/janus`
+- `go test -race -count=1 ./cmd/janus`
