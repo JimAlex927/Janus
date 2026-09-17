@@ -5,6 +5,32 @@ repository commit. Add a new dated section before every future commit.
 
 ## 2026-09-17
 
+### Enforce patched Go and vulnerability scanning in CI
+
+Commit message: `ci: add patched Go vulnerability gate`
+
+Scope:
+
+- Raised the module and Linux CI toolchain baseline from Go 1.25.1 to patched
+  Go 1.25.13, which fixes the standard-library vulnerabilities found by the
+  initial scan.
+- Configured CI with `GOTOOLCHAIN=local` so the pinned runner toolchain cannot
+  silently switch to another version during a release run.
+- Added a fixed `govulncheck@v1.7.0` CI step.
+- Recorded the local scan result: zero reachable vulnerabilities in the project
+  code; four vulnerabilities remain in required modules but were reported as
+  unreachable and still need dependency review.
+- Updated the production qualification documentation with the new gate.
+
+Verification:
+
+- `go run golang.org/x/vuln/cmd/govulncheck@v1.7.0 ./...` using Go 1.25.13 and `GOPROXY=https://proxy.golang.org,direct`
+- `git diff --check`
+
+Scope note: hosted Linux CI must still run this job; a clean reachability scan
+does not replace dependency/license review or the broader production security
+audit.
+
 ### Pin GitHub Actions used by release CI
 
 Commit message: `ci: pin GitHub Actions to release commits`

@@ -149,8 +149,11 @@ feature set is useful only if the supported behavior is reliable under failure.
 
 ## Verification of this starter
 
-On 2026-09-16, with Go 1.25.1 on Windows/amd64: `go test ./...`, `go vet ./...`,
-the binary build, and example configuration validation passed. Tests exercise real
+On 2026-09-17, with Go 1.25.13 on Windows/amd64: `go test ./...`, `go vet ./...`,
+the binary build, example configuration validation, and `govulncheck@v1.7.0`
+passed. The vulnerability scan reports no reachable vulnerabilities in the
+project's code with the patched Go toolchain; four module vulnerabilities remain
+reported as not reachable and still require dependency review. Tests exercise real
 HTTP connections, escaped paths, bodies/trailers, forwarding-header sanitation,
 HTTPS certificate trust, cancellation, route precedence, concurrent round-robin
 selection, body-limit rejection for known and chunked bodies, and completion of
