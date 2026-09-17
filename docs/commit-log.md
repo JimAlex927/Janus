@@ -5,6 +5,28 @@ repository commit. Add a new dated section before every future commit.
 
 ## 2026-09-17
 
+### Prevent buffered responses from committing after timeout
+
+Commit message: `fix(timeout): guard buffered response commitment`
+
+Scope:
+
+- Made the buffer middleware check the request context before committing its
+  delayed response.
+- A deadline that expires before commitment now produces 504 even when the
+  wrapped handler returns normally after observing or ignoring cancellation;
+  client cancellation still abandons the buffered response.
+- Added a regression test for a handler that returns a body after its deadline.
+
+Verification:
+
+- `gofmt -w internal/middleware/buffer.go internal/middleware/buffer_test.go`
+- `go test ./internal/middleware ./internal/gateway`
+- `git diff --check`
+
+Scope note: this does not forcibly stop arbitrary handler code and does not
+change already-committed streaming response semantics.
+
 ### Require GET for long-lived protocol classification
 
 Commit message: `fix(protocol): require GET for SSE and WebSocket modes`

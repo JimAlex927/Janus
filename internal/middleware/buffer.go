@@ -40,6 +40,13 @@ func Buffer(maxResponseBodyBytes int64) Middleware {
 					http.Error(w, http.StatusText(status), status)
 					return
 				}
+				if errors.Is(r.Context().Err(), context.DeadlineExceeded) {
+					http.Error(w, http.StatusText(http.StatusGatewayTimeout), http.StatusGatewayTimeout)
+					return
+				}
+				if errors.Is(r.Context().Err(), context.Canceled) {
+					return
+				}
 				if buffered.writeErr != nil {
 					http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 					return
