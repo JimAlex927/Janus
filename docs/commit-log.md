@@ -1366,3 +1366,10 @@ Verification:
 - `gofmt -w cmd/janus/main_test.go`
 - `go test -count=3 ./cmd/janus`
 - `go test -race -count=1 ./cmd/janus`
+
+Follow-up stability verification:
+
+- `go test -count=50 -run '^TestRunLifecycle$' ./cmd/janus`
+- `go test -count=1 ./...`
+- `go test -race -count=1 ./...`
+- `go vet ./...`

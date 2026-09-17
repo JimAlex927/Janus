@@ -66,7 +66,7 @@ rollback baseline are identified. A local demo is not production canary evidence
 
 ## Local qualification replay: 2026-09-17
 
-The reviewed tree at commit `5e47d35` passed the following on the development
+The reviewed tree through commit `8e72c0f` passed the following on the development
 host: `go test -count=1 ./...`, `go test -count=5 ./...`,
 `go test -race -count=1 ./...`, `go vet ./...`,
 `go test -fuzz=FuzzLoadNeverPanics -fuzztime=30s ./internal/config`,
@@ -81,3 +81,8 @@ entrypoint reaches `/readyz`, returns the expected backend body, publishes a
 route replacement from the watched file, and exits after cancellation. The
 Linux-only child-process SIGTERM test remains necessary because it verifies the
 actual OS signal and process boundary.
+
+At commit `65375b8`, the full suite and full race suite were rerun after
+adding the process test, and
+`go test -count=50 -run '^TestRunLifecycle$' ./cmd/janus` passed to check
+for startup/reload/shutdown flakiness.
