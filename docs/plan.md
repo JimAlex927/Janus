@@ -248,7 +248,7 @@ tracks upgraded connections and force-closes them when the drain budget expires.
 The route buffer middleware bypasses both modes. These budgets cannot forcibly
 stop arbitrary handler code that ignores context cancellation.
 
-## Phase 2F: request policies (in progress)
+## Phase 2F: request policies (complete for current scope)
 
 1. Add request ID and a single access observer in the fixed global chain. Generate
    IDs by default; define validation and trust before accepting client-supplied
@@ -268,7 +268,9 @@ stop arbitrary handler code that ignores context cancellation.
    wrapper intentionally does not expose `ReaderFrom`; normal `Write` paths
    remain counted.
 3. Extend typed named middleware definitions and ordered route/service references.
-   `body_limit` is implemented at route and service scope. Missing references,
+   `body_limit`, `headers`, `add_prefix`, `buffer`, and `cors` are implemented at
+   route and service scope; `strip_prefix` is route-only and `in_flight` is
+   service-only. Missing references,
    unknown types/options, multiple types per definition, and duplicate references
    within a list fail validation before opening listeners. Scope compatibility is
    currently explicit: the built-in policies are valid at both scopes.
@@ -276,19 +278,23 @@ stop arbitrary handler code that ignores context cancellation.
    limits while streaming. Return 413 when still possible; terminate an already-
    started response otherwise. A backend may have received a prefix of an oversized
    body. Do not add retries. Multiple route/service body caps use the smallest cap.
-5. Preserve configurations without middleware references. A runnable body-limit
-   example and end-to-end tests for short-circuit behavior and chunked forwarding
-   are now present. The current 2F request-policy scope is complete; later
+5. Preserve configurations without middleware references. Runnable examples and
+   end-to-end tests cover body limits, headers/prefix behavior, bounded response
+   buffering, and browser CORS preflights. The current 2F request-policy scope is complete; later
    admission, metrics, health and trusted-proxy policies remain separate phases.
 
-The first 2F delivery is the bounded request-body policy. It is intentionally a
-request-size guard, not an upload-duration or global admission policy: server read
-deadlines and the later Phase 3 admission controls remain independent.
+The 2F policies are intentionally bounded request/response and browser-boundary
+policies, not upload-duration or global admission policies: server read deadlines
+and the Phase 3 admission controls remain independent. The `cors` policy accepts
+exact HTTP(S) Origins or a lone wildcard, rejects wildcard credentials, and
+short-circuits only an allowed preflight. WebSocket Origin authorization remains
+outside this policy.
 
 Phase 2F is complete for the currently defined request-policy scope. Its release
-evidence includes route/service body limits, fixed access observation, response
-capability tests, early-error integration coverage, configuration examples and
-the full repository test/vet/build gates. This does not certify the overall
+evidence includes route/service body limits, headers/prefix policies, bounded
+buffering, browser CORS, fixed access observation, response capability tests,
+early-error integration coverage, configuration examples and the full repository
+test/vet/build gates. This does not certify the overall
 gateway for production; Phase 6 qualification remains required.
 
 ## Phase 3: admission and lifecycle — complete

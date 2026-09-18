@@ -141,9 +141,9 @@ response through a generic panic-recovery wrapper.
 | Overall request deadline | Fixed global timeout middleware using `request.maximum_duration` | Implemented in Phase 1 |
 | Connect/TLS/header timeouts, TCP keepalive, pool limits | Shared outbound `http.Transport` | Already implemented |
 | Request ID and access observation | Fixed global middleware; options only when consumed | Phase 2 |
-| `middlewares` definitions | Named, typed, reusable configuration; `buffer` is implemented first | Phase 1/2 |
-| `routes[].middlewares` | Ordered policies for the matched route; route-level `buffer` is implemented first | Phase 1/2 |
-| `services.<name>.middlewares` | Ordered policies on the shared service handler | Phase 2 |
+| `middlewares` definitions | Named, typed, reusable configuration described by the backend capability catalog | Phase 1/2 complete for current policies |
+| `routes[].middlewares` | Ordered policies for the matched route | Phase 1/2 complete for current policies |
+| `services.<name>.middlewares` | Ordered policies on the shared service handler | Phase 2 complete for current policies |
 | Global admission, drain and admin settings | Process/listener lifecycle | Admission, admin health, bounded removal delay and total drain budget implemented |
 | Health probes | Per-service resource lifecycle | Phase 4 complete |
 | Trusted proxy CIDRs and identity rules | Listener trust policy with proxy rewrite integration | Phase 4 complete |

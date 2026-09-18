@@ -2005,3 +2005,23 @@ Verification:
 - `go test ./internal/admin ./cmd/janus`
 - `go vet ./...`
 - `git diff --check`
+
+## 2026-09-18
+
+### Align middleware phase documentation
+
+Commit message: `docs: align middleware phase status`
+
+Scope:
+
+- Updated the architecture ownership table to describe the backend-driven
+  Middleware capability catalog and the current Route/Service policy scope.
+- Updated the delivery plan to record Phase 2F's actual completed policy set,
+  including headers, prefixes, buffering and CORS, while retaining the separate
+  production qualification gate.
+
+Verification:
+
+- Reviewed the plan against `config.MiddlewareCapabilities` and the gateway
+  constructor switch
+- `git diff --check`
