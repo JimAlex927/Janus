@@ -1,4 +1,35 @@
-import { useEffect, useId, useRef, type ReactNode } from "react";
+import { useEffect, useId, useRef, type ReactNode, type RefObject } from "react";
+
+/**
+ * Shared dialog lifecycle. Nested editors use the same behavior: the page
+ * behind the active dialog cannot scroll, Escape only closes the top dialog,
+ * and focus returns to the control that opened it.
+ */
+export function useDialogLifecycle(dialogRef: RefObject<HTMLElement>, onCancel: () => void) {
+  const cancelRef = useRef(onCancel);
+  cancelRef.current = onCancel;
+
+  useEffect(() => {
+    const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    dialogRef.current?.focus();
+
+    const handleKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      const dialogs = document.querySelectorAll<HTMLElement>('[role="dialog"]');
+      if (dialogs[dialogs.length - 1] !== dialogRef.current) return;
+      event.preventDefault();
+      cancelRef.current();
+    };
+    window.addEventListener("keydown", handleKey);
+    return () => {
+      window.removeEventListener("keydown", handleKey);
+      document.body.style.overflow = previousOverflow;
+      previous?.focus();
+    };
+  }, [dialogRef]);
+}
 
 /** 通用编辑对话框：所有资源编辑器共用一致的确认、取消和关闭语义。 */
 export function Drawer({
@@ -23,18 +54,9 @@ export function Drawer({
   children: ReactNode;
 }) {
   const titleId = useId();
+  const subtitleId = useId();
   const dialogRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    const handleKey = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      const dialogs = document.querySelectorAll<HTMLElement>('[role="dialog"]');
-      if (dialogs[dialogs.length - 1] !== dialogRef.current) return;
-      event.preventDefault();
-      onCancel();
-    };
-    window.addEventListener("keydown", handleKey);
-    return () => window.removeEventListener("keydown", handleKey);
-  }, [onCancel]);
+  useDialogLifecycle(dialogRef, onCancel);
   return (
     <div className="backdrop" onMouseDown={onCancel}>
       <div
@@ -43,13 +65,15 @@ export function Drawer({
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
+        aria-describedby={subtitle ? subtitleId : undefined}
+        tabIndex={-1}
         onMouseDown={(event) => event.stopPropagation()}
       >
         <div className="drawer-head">
           <div>
             <div className="eyebrow">JANUS CONFIG</div>
             <h3 id={titleId}>{title}</h3>
-            {subtitle && <p>{subtitle}</p>}
+            {subtitle && <p id={subtitleId}>{subtitle}</p>}
           </div>
           <div className="drawer-head-actions">
             {onDelete && !hideDelete && (

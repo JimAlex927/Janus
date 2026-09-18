@@ -1981,3 +1981,27 @@ Verification:
 - Parsed `configs/janus-comprehensive.example.json` with PowerShell
   `ConvertFrom-Json`
 - `git diff --check`
+
+## 2026-09-18
+
+### Harden console dialog interaction
+
+Commit message: `fix(console): unify dialog lifecycle`
+
+Scope:
+
+- Added one shared dialog lifecycle for the common editor drawer, Middleware
+  manager and Registry manager.
+- Opening a dialog now locks background page scrolling and focuses the active
+  dialog; Escape is handled only by the topmost dialog; closing restores focus
+  to the control that opened it. This keeps nested Route/Service editors and
+  their manager dialogs from competing with the page underneath.
+- Added the dialog focus target and accessible subtitle relationship to the
+  common editor frame, and refreshed the embedded console assets.
+
+Verification:
+
+- `cd frontend; npm run build`
+- `go test ./internal/admin ./cmd/janus`
+- `go vet ./...`
+- `git diff --check`

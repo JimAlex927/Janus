@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ApiError, testRegistry } from "./api";
 import { RegistryForm } from "./editors";
-import { Field } from "./ui";
+import { Field, useDialogLifecycle } from "./ui";
 import type { NacosRegistry } from "./types";
 
 type Health = { healthy: boolean; latency_ms?: number; error?: string };
@@ -43,6 +43,7 @@ export function RegistryManagerModal({
   const [nameDraft, setNameDraft] = useState("");
   const [testing, setTesting] = useState<string | null>(null);
   const [health, setHealth] = useState<Record<string, Health>>({});
+  useDialogLifecycle(dialogRef, onCancel);
 
   useEffect(() => {
     if (selected && !registries[selected]) {
@@ -50,18 +51,6 @@ export function RegistryManagerModal({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [registries]);
-  useEffect(() => {
-    const handleKey = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      const dialogs = document.querySelectorAll<HTMLElement>('[role="dialog"]');
-      if (dialogs[dialogs.length - 1] !== dialogRef.current) return;
-      event.preventDefault();
-      onCancel();
-    };
-    window.addEventListener("keydown", handleKey);
-    return () => window.removeEventListener("keydown", handleKey);
-  }, [onCancel]);
-
   function create() {
     const name = onCreate();
     if (!name) return;
@@ -103,7 +92,7 @@ export function RegistryManagerModal({
 
   return (
     <div className="backdrop" onMouseDown={onCancel}>
-      <div ref={dialogRef} className="mw-modal" role="dialog" aria-modal="true" aria-label={title} onMouseDown={(e) => e.stopPropagation()}>
+      <div ref={dialogRef} className="mw-modal" role="dialog" aria-modal="true" aria-label={title} tabIndex={-1} onMouseDown={(e) => e.stopPropagation()}>
         <div className="drawer-head">
           <div>
             <div className="eyebrow">NACOS REGISTRY</div>

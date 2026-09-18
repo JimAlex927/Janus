@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { MiddlewareDefForm, middlewareTypeOf } from "./editors";
-import { Field } from "./ui";
+import { Field, useDialogLifecycle } from "./ui";
 import type { Middleware, MiddlewareCapability } from "./types";
 
 export type MiddlewareScopeFilter = "route" | "service";
@@ -121,6 +121,7 @@ export function MiddlewareManagerModal({
   const [chainSel, setChainSel] = useState<string | null>(null);
   const [nameDraft, setNameDraft] = useState("");
   const [renameError, setRenameError] = useState("");
+  useDialogLifecycle(dialogRef, onCancel);
 
   const names = Object.keys(instances);
   useEffect(() => {
@@ -133,18 +134,6 @@ export function MiddlewareManagerModal({
       setChainSel(null);
     }
   }, [flow, chainSel]);
-  useEffect(() => {
-    const handleKey = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      const dialogs = document.querySelectorAll<HTMLElement>('[role="dialog"]');
-      if (dialogs[dialogs.length - 1] !== dialogRef.current) return;
-      event.preventDefault();
-      onCancel();
-    };
-    window.addEventListener("keydown", handleKey);
-    return () => window.removeEventListener("keydown", handleKey);
-  }, [onCancel]);
-
   function instantiate(type: string, klass: MiddlewareCapability) {
     if (!klass.scopes.includes(scope)) {
       notify(`${klass.label} 不能用于 ${scope === "route" ? "Route" : "Service"}。`);
@@ -181,7 +170,7 @@ export function MiddlewareManagerModal({
 
   return (
     <div className="backdrop" onMouseDown={onCancel}>
-      <div ref={dialogRef} className="mw-modal" role="dialog" aria-modal="true" aria-label={title} onMouseDown={(e) => e.stopPropagation()}>
+      <div ref={dialogRef} className="mw-modal" role="dialog" aria-modal="true" aria-label={title} tabIndex={-1} onMouseDown={(e) => e.stopPropagation()}>
         <div className="drawer-head">
           <div>
             <div className="eyebrow">MIDDLEWARE</div>
