@@ -51,49 +51,32 @@ The API also remains compatible with direct atomic edits of the JSON file. The
 file reloader recognizes a snapshot already published by the console and does
 not build a duplicate generation.
 
-## Visual configuration canvas
+## Console 页面
 
-The `配置画布` page has two synchronized modes:
+控制台采用「表格列表 + 右侧抽屉表单」结构，所有页面共享同一份浏览器
+草稿，发布前统一校验：
 
-- `画布` mode shows only Limen and Route nodes. Service and Middleware are
-  managed in their own resource pages and referenced from the Route editor.
-  Nodes can be added from the palette, dragged around the canvas, zoomed,
-  automatically arranged, and edited in a standalone node editor modal. Click
-  or drag from a node's output port to another node's input port (or the
-  highlighted target node) to create a supported relation.
-- Node parameters open in a type-specific modal from the card's `…` action.
-  Route editing includes a larger Match text area and an inline Middleware flow
-  with create, select, and explicit reorder controls; closing the modal leaves
-  the canvas layout unchanged.
-- Limen protocol fields use fixed multi-select options backed by the supported
-  transport protocol matrix. Route application protocols are written in the
-  Match DSL with `Protocol(...)`. Middleware creation and parameter editing expose
-  only the policies supported by the current scope: Route supports `buffer`
-  and `body_limit`, while Service additionally supports `in_flight`. Existing
-  invalid references remain visible so an operator can remove them without
-  falling back to JSON. Middleware names can be edited in place; references in
-  every Route and Service are updated atomically. Each new Middleware declares
-  a `scope` of `route`, `service`, or the backwards-compatible shared scope.
-- The canvas includes a request simulation drawer. It evaluates the current
-  browser draft, accepts a full URL or path plus Host and Header fields, shows
-  the winning Route, Action, Middleware chain, and Service, and lists every
-  candidate's match result without sending traffic.
-- `JSON` mode keeps the complete configuration available for advanced fields.
-  Both modes edit the same browser draft and use the same validation and
-  publish actions.
-- The Limen inspector exposes trusted proxies, TLS, and HTTP/3 settings;
-  Service health checks expose their complete timing and threshold controls.
-- Visual and JSON edits stay in a browser draft until published. The console
-  shows whether the draft is synced, disables publish for an unchanged or
-  invalid draft, and provides undo/redo for canvas edits (rapid typing is
-  grouped into one edit).
-- A runtime generation event never overwrites a dirty local draft. Manual
-  refresh explicitly confirms discarding it; publishing reloads the new
-  generation automatically.
+- `概览`显示请求统计、Revision、未绑定 Service 的路由告警和操作顺序指引。
+- `路由`按入口过滤、按名称/规则搜索；新建与编辑在抽屉中完成，只能引用
+  已存在的 Service 与 Middleware；底部有请求模拟器，只评估当前草稿，
+  不发送真实流量。
+- `服务`维护静态上游池或 Nacos 引用（含健康检查）；被路由引用的服务
+  不允许直接删除。
+- `中间件`创建 buffer / body_limit / in_flight 策略；改名会自动同步所有
+  Route 与 Service 的引用，删除会同步清理引用。
+- `注册中心`管理 Nacos 连接并支持连通性测试；密码字段留空表示沿用远端
+  已保存的凭据。
+- `入口`管理监听地址、协议、TLS 与 HTTP/3；地址/协议/TLS 属于启动级
+  配置，发布后需重启 Janus。
+- `全局设置`编辑 request/stream/server/backend/admin/shutdown 各分组的
+  常用字段；留空表示使用后端默认值。
+- `JSON` 是全量兜底：表单未覆盖的高级字段只能在这里改。文本是局部
+  状态，只有点击「应用到草稿」才会进入全局草稿，避免与表单互相覆盖。
 
-Canvas coordinates are stored only in the browser's local storage and are not
-part of the runtime configuration. This keeps the published JSON stable while
-allowing each operator to arrange the graph independently.
+抽屉的取消/确认语义在所有页面一致：打开时快照当前草稿，取消则整体
+回滚，确认才写入草稿。删除操作会先检查引用关系，被引用时拒绝并提示
+调用方。发布按钮仅在草稿变脏时可用；远端发生变更时若本地无脏草稿则
+自动刷新，有脏草稿则只提示，由操作者决定丢弃或先发布。
 
 ## Frontend development
 
@@ -107,6 +90,6 @@ npm run test:model
 The Vite development server proxies `/api`, `/metrics`, and `/readyz` to the
 local Admin listener. A release build is copied to `internal/admin/ui/` before
 `go build` so the Go `embed` package has the same UI that was reviewed in the
-frontend build. The graph model, canvas, and type-specific node editors are
-kept in separate modules. Deterministic model tests cover Service visibility,
-connection semantics, missing references, and canvas bounds.
+frontend build. The typed API client, config model helpers, request simulator,
+and per-resource editors are kept in separate modules. Deterministic tests
+cover the request simulator's match semantics.

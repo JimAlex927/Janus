@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
-    "test:model": "node --experimental-strip-types --test src/graph-model.test.mjs src/simulation.test.mjs"
+    "test:model": "node --experimental-strip-types --test src/simulate.test.mjs"
   },
   "dependencies": {
     "react": "^18.3.1",

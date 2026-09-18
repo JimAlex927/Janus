@@ -1,9 +1,0 @@
-.multi-select-option.option-disabled {
-  cursor: not-allowed;
-  opacity: 0.52;
-}
-
-.toggle-row.disabled {
-  cursor: not-allowed;
-  opacity: 0.52;
-}
