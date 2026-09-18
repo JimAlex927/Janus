@@ -78,6 +78,11 @@ not build a duplicate generation.
   `确认修改`保留本次资源与编排变更；`取消`、遮罩、右上角关闭和 Escape
   都恢复打开弹窗前的配置快照。Middleware 类型、适用作用域、默认值和
   参数控件来自后端能力目录，不在前端维护另一份类型清单。
+- Route 的可视化匹配器可直接添加 `Host`、`Path`、`PathPrefix`、`Method`、
+  `Protocol`、`Header` 和 `Query` 条件；含 OR、NOT 或括号的表达式保持在
+  高级 DSL 模式，以免可视化表单改变原语义。选择 Middleware Scope 后，类型
+  列表只显示该 Scope 可用的后端能力；目录给出的必填项、字段类型和数值范围
+  也会在保存、校验和发布前做本地快速检查。
 - `全局设置`编辑生效配置文件的 settings 段。保存只做校验并写文件，
   不触碰运行中的 generation，保存后必须重启 Janus。
 

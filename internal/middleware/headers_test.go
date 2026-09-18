@@ -64,3 +64,21 @@ func TestHeadersAppliesResponseRulesBeforeFlush(t *testing.T) {
 		t.Fatalf("response headers = %#v, flushed = %v", w.Header(), w.Flushed)
 	}
 }
+
+func TestHeadersDoesNotModifySwitchingProtocolsHandshake(t *testing.T) {
+	h := Headers(nil, nil, map[string]string{"X-Janus-Response": "managed"}, []string{"Server"})(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Server", "upgrade-owner")
+		w.WriteHeader(http.StatusSwitchingProtocols)
+	}))
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/socket", nil))
+	if w.Code != http.StatusSwitchingProtocols {
+		t.Fatalf("status = %d, want 101", w.Code)
+	}
+	if got := w.Header().Get("X-Janus-Response"); got != "" {
+		t.Fatalf("upgrade response unexpectedly gained policy header %q", got)
+	}
+	if got := w.Header().Get("Server"); got != "upgrade-owner" {
+		t.Fatalf("upgrade response unexpectedly changed Server header to %q", got)
+	}
+}

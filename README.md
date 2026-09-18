@@ -128,7 +128,10 @@ still require restart. Legacy configurations remain startup-only.
   default; an optional route/service `buffer` middleware can hold finite responses
   up to its configured maximum before committing them. Named `headers` and
   `add_prefix` policies work at route or service scope, while `strip_prefix` is
-  route-only. The Admin console discovers these classes and their parameter
+  route-only. When forwarding, `strip_prefix` regenerates a trusted,
+  composable `X-Forwarded-Prefix` value after client-supplied forwarding
+  headers have been cleared; `headers` never rewrites a WebSocket 101
+  handshake. The Admin console discovers these classes and their parameter
   schemas from the running backend rather than carrying a hard-coded list.
 - The immediate peer determines forwarding identity by default. A versioned
   limen may explicitly configure `trusted_proxies` CIDRs; only then are valid

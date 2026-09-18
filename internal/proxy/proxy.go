@@ -112,6 +112,9 @@ func NewWithForwarding(pool TargetSelector, transport http.RoundTripper, logger 
 			if identity.ForwardedHost != "" {
 				r.Out.Header.Set("X-Forwarded-Host", identity.ForwardedHost)
 			}
+			if prefix := forwarding.ForwardedPrefix(r.In); prefix != "" {
+				r.Out.Header.Set("X-Forwarded-Prefix", prefix)
+			}
 		},
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
 			requestErr := r.Context().Err()

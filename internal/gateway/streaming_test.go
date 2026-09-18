@@ -125,7 +125,10 @@ func TestWebSocketUpgradeIsProxied(t *testing.T) {
 	address, cleanup := startStreamingGateway(t, config.Config{
 		Listen: "127.0.0.1:8080",
 		Middlewares: map[string]config.Middleware{
-			"ws-headers": {Headers: &config.HeadersSettings{RequestSet: map[string]string{"X-Janus-Test": "middleware"}}},
+			"ws-headers": {Headers: &config.HeadersSettings{
+				RequestSet:  map[string]string{"X-Janus-Test": "middleware"},
+				ResponseSet: map[string]string{"X-Janus-Response": "must-not-alter-upgrade"},
+			}},
 		},
 		Services: map[string]config.Service{"socket": {Upstreams: []string{backend.URL}, Middlewares: []string{"ws-headers"}}},
 		Routes:   []config.Route{{Name: "socket", Match: "PathPrefix(`/socket`) && Protocol(`websocket`)", Service: "socket"}},
@@ -149,6 +152,9 @@ func TestWebSocketUpgradeIsProxied(t *testing.T) {
 	}
 	if response.StatusCode != http.StatusSwitchingProtocols {
 		t.Fatalf("upgrade status = %d", response.StatusCode)
+	}
+	if got := response.Header.Get("X-Janus-Response"); got != "" {
+		t.Fatalf("upgrade handshake unexpectedly gained response middleware header %q", got)
 	}
 	writeClientFrame(conn, []byte("ping"))
 	payload, err := readServerFrame(reader)

@@ -558,6 +558,46 @@ func TestServiceAddPrefixRewritesPathBeforeProxying(t *testing.T) {
 	}
 }
 
+func TestStripPrefixForwardsTrustedComposedPrefix(t *testing.T) {
+	type observedRequest struct {
+		path   string
+		prefix string
+	}
+	seen := make(chan observedRequest, 1)
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen <- observedRequest{path: r.URL.EscapedPath(), prefix: r.Header.Get("X-Forwarded-Prefix")}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer backend.Close()
+	c := config.Config{
+		Listen: "127.0.0.1:8080",
+		Middlewares: map[string]config.Middleware{
+			"strip-api": {Scope: config.MiddlewareScopeRoute, StripPrefix: &config.StripPrefixSettings{Prefix: "/api"}},
+			"strip-v1":  {Scope: config.MiddlewareScopeRoute, StripPrefix: &config.StripPrefixSettings{Prefix: "/v1"}},
+		},
+		Services: map[string]config.Service{
+			"s": {Upstreams: []string{backend.URL}},
+		},
+		Routes: []config.Route{{Name: "api", PathPrefix: "/api", Service: "s", Middlewares: []string{"strip-api", "strip-v1"}}},
+	}
+	g, err := New(c, zap.NewNop())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer g.Close()
+	req := httptest.NewRequest(http.MethodGet, "http://gateway/api/v1/orders", nil)
+	req.Header.Set("X-Forwarded-Prefix", "/spoofed")
+	w := httptest.NewRecorder()
+	g.ServeHTTP(w, req)
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, body = %q", w.Code, w.Body.String())
+	}
+	got := <-seen
+	if got.path != "/orders" || got.prefix != "/api/v1" {
+		t.Fatalf("backend path/prefix = %q/%q, want /orders//api/v1", got.path, got.prefix)
+	}
+}
+
 func TestAllUnhealthyServiceReturns503WithoutForwarding(t *testing.T) {
 	var userCalls atomic.Int64
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

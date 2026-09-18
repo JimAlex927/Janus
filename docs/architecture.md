@@ -205,7 +205,10 @@ The implemented configurable policies are route/service `buffer`, `body_limit`,
 `in_flight`. Multiple applicable body limits compose by the minimum. The
 `headers` policy rejects hop-by-hop and framing header mutations and preserves
 stream flushing; its response rules intentionally do not rewrite a WebSocket
-101 handshake. Prefix policies preserve escaped-path semantics. Global
+101 handshake. Prefix policies preserve escaped-path semantics. `strip_prefix`
+records its result in trusted request metadata, and the proxy regenerates the
+composed `X-Forwarded-Prefix` only after discarding every client-supplied
+forwarding header. Global
 admission remains fixed infrastructure, and requests must pass both active caps.
 
 `config.MiddlewareCapabilities` is the authoritative operator-facing catalog

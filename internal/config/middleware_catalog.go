@@ -66,7 +66,7 @@ func MiddlewareCapabilities() []MiddlewareCapability {
 		},
 		{
 			Type: "strip_prefix", Label: "Strip Prefix", Scopes: []string{MiddlewareScopeRoute},
-			Description: "将匹配的路径前缀移除后再交给路由动作，并写入 X-Forwarded-Prefix。",
+			Description: "将匹配的路径前缀移除后再交给路由动作；转发到上游时会写入可信的 X-Forwarded-Prefix。",
 			Fields: []MiddlewareFieldCapability{{
 				Name: "prefix", Label: "路径前缀", Kind: "string", Required: true, Default: "/api",
 				Description: "必须是以 / 开头的绝对路径前缀。",

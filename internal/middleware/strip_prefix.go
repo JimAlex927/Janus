@@ -4,6 +4,8 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+
+	"janus/internal/forwarding"
 )
 
 // StripPrefix removes prefix only on a path-segment boundary. Requests that do
@@ -37,6 +39,7 @@ func StripPrefix(prefix string) Middleware {
 			r.URL = &u
 			r.Header = r.Header.Clone()
 			r.Header.Set("X-Forwarded-Prefix", prefix)
+			r = forwarding.WithForwardedPrefix(r, prefix)
 			next.ServeHTTP(w, r)
 		})
 	}

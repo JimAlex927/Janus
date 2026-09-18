@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -52,6 +53,17 @@ func TestEmbeddedConsoleIsServed(t *testing.T) {
 	h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/", nil))
 	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "Janus Console") {
 		t.Fatalf("console response = %d %q", w.Code, w.Body.String())
+	}
+	assets := regexp.MustCompile(`(?:src|href)="(/assets/[^"]+)"`).FindAllStringSubmatch(w.Body.String(), -1)
+	if len(assets) == 0 {
+		t.Fatal("console HTML does not reference any assets")
+	}
+	for _, match := range assets {
+		asset := httptest.NewRecorder()
+		h.ServeHTTP(asset, httptest.NewRequest(http.MethodGet, match[1], nil))
+		if asset.Code != http.StatusOK || asset.Body.Len() == 0 {
+			t.Fatalf("embedded asset %s = status %d, length %d", match[1], asset.Code, asset.Body.Len())
+		}
 	}
 }
 

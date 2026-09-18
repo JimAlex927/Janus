@@ -2,12 +2,13 @@ package middleware
 
 import (
 	"net/http"
-	"sync"
 )
 
 // Headers applies validated end-to-end header mutations. Request headers are
 // changed on a clone so sibling handlers cannot observe the mutation. Response
-// rules are applied exactly once immediately before headers are committed.
+// rules are applied exactly once immediately before a normal HTTP response is
+// committed. A 101 Switching Protocols response is deliberately left alone:
+// its handshake headers are owned by the upgrade implementation.
 func Headers(requestSet map[string]string, requestRemove []string, responseSet map[string]string, responseRemove []string) Middleware {
 	requestSet = cloneStringMap(requestSet)
 	requestRemove = append([]string(nil), requestRemove...)
@@ -55,17 +56,34 @@ func mutateHeaders(header http.Header, set map[string]string, remove []string) {
 
 type headerResponseWriter struct {
 	http.ResponseWriter
-	set    map[string]string
-	remove []string
-	once   sync.Once
+	set     map[string]string
+	remove  []string
+	applied bool
 }
 
 func (w *headerResponseWriter) apply() {
-	w.once.Do(func() { mutateHeaders(w.Header(), w.set, w.remove) })
+	if w.applied {
+		return
+	}
+	w.applied = true
+	mutateHeaders(w.Header(), w.set, w.remove)
 }
 
 func (w *headerResponseWriter) WriteHeader(status int) {
-	w.apply()
+	// A WebSocket (or other HTTP/1 upgrade) handshake has protocol-defined
+	// response fields such as Sec-WebSocket-Accept. Do not let a generic
+	// header policy alter it, and consume once so the deferred apply after the
+	// handler returns cannot mutate a response that has already been committed.
+	if status == http.StatusSwitchingProtocols {
+		w.applied = true
+		w.ResponseWriter.WriteHeader(status)
+		return
+	}
+	// Informational responses are not the final response. Keep the policy for
+	// the later final WriteHeader/Write/Flush call instead.
+	if status >= http.StatusOK {
+		w.apply()
+	}
 	w.ResponseWriter.WriteHeader(status)
 }
 

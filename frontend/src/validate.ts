@@ -12,6 +12,36 @@ export function validateLocal(config: JanusConfig, catalog: MiddlewareCapability
     const type = Object.keys(def).find((key) => key !== "scope");
     return catalog.find((item) => item.type === type);
   };
+  const validatePolicy = (name: string, def: Middleware) => {
+    const type = Object.keys(def).find((key) => key !== "scope");
+    const capability = capabilityOf(def);
+    if (!type || !capability) return;
+    const policy = def[type] && typeof def[type] === "object" ? def[type] as Record<string, unknown> : {};
+    for (const field of capability.fields) {
+      const value = policy[field.name];
+      const missing = value === undefined || value === null || value === "";
+      if (field.required && missing) {
+        errors.push(`Middleware ${name} 的 ${field.label} 不能为空`);
+        continue;
+      }
+      if (missing) continue;
+      if (field.kind === "integer") {
+        if (typeof value !== "number" || !Number.isInteger(value)) {
+          errors.push(`Middleware ${name} 的 ${field.label} 必须是整数`);
+        } else if ((field.min !== undefined && value < field.min) || (field.max !== undefined && value > field.max)) {
+          errors.push(`Middleware ${name} 的 ${field.label} 必须在 ${field.min ?? "-∞"} 到 ${field.max ?? "∞"} 之间`);
+        }
+      } else if (field.kind === "string" && typeof value !== "string") {
+        errors.push(`Middleware ${name} 的 ${field.label} 必须是文本`);
+      } else if (field.kind === "boolean" && typeof value !== "boolean") {
+        errors.push(`Middleware ${name} 的 ${field.label} 必须是 true 或 false`);
+      } else if (field.kind === "string_list" && (!Array.isArray(value) || value.some((item) => typeof item !== "string"))) {
+        errors.push(`Middleware ${name} 的 ${field.label} 必须是文本列表`);
+      } else if (field.kind === "string_map" && (typeof value !== "object" || Array.isArray(value) || Object.values(value as Record<string, unknown>).some((item) => typeof item !== "string"))) {
+        errors.push(`Middleware ${name} 的 ${field.label} 必须是文本键值对`);
+      }
+    }
+  };
 
   if (routes.length === 0) errors.push("至少需要 1 条 Route");
   const seen = new Set<string>();
@@ -55,6 +85,9 @@ export function validateLocal(config: JanusConfig, catalog: MiddlewareCapability
       if (catalog.length > 0 && !capability) errors.push(`Middleware ${mw} 的类型不受当前后端支持`);
       else if (capability && !capability.scopes.includes("service")) errors.push(`Service ${name} 不能引用 ${capability.type} Middleware：${mw}`);
     }
+  }
+  for (const [name, definition] of Object.entries(middlewares)) {
+    validatePolicy(name, definition);
   }
   return errors.slice(0, 12);
 }

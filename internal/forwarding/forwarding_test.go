@@ -41,6 +41,18 @@ func TestResolveUntrustedPeerIgnoresSpoofedHeaders(t *testing.T) {
 	}
 }
 
+func TestForwardedPrefixComposesOnlyFromTrustedRouteRewrites(t *testing.T) {
+	original := httptest.NewRequest(http.MethodGet, "http://gateway/api/v1/orders", nil)
+	rewritten := WithForwardedPrefix(original, "/api")
+	rewritten = WithForwardedPrefix(rewritten, "/v1")
+	if got := ForwardedPrefix(rewritten); got != "/api/v1" {
+		t.Fatalf("forwarded prefix = %q, want /api/v1", got)
+	}
+	if got := ForwardedPrefix(original); got != "" {
+		t.Fatalf("original request unexpectedly gained prefix %q", got)
+	}
+}
+
 func TestResolveMalformedChainFallsBackToPeer(t *testing.T) {
 	policy, err := NewPolicy([]string{"10.0.0.0/8"})
 	if err != nil {

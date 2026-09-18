@@ -130,6 +130,8 @@ export function RouteEditor({ draft, value, isNew, onChange, onConfirm, onCancel
             <button type="button" className="btn small" onClick={() => addRule("host")}>＋ Host</button>
             <button type="button" className="btn small" onClick={() => addRule("method")}>＋ Method</button>
             <button type="button" className="btn small" onClick={() => addRule("protocol")}>＋ Protocol</button>
+            <button type="button" className="btn small" onClick={() => addRule("header")}>＋ Header</button>
+            <button type="button" className="btn small" onClick={() => addRule("query")}>＋ Query</button>
           </div>
           {value.match && <div className="match-preview mono">{value.match}</div>}
         </div>

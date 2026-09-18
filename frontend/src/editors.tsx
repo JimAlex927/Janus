@@ -234,6 +234,9 @@ function CapabilityField({ field, value, onChange }: { field: MiddlewareFieldCap
 export function MiddlewareDefForm({ value, catalog, onChange }: { value: Middleware; catalog: MiddlewareCapability[]; onChange: (value: Middleware) => void }) {
   const type = middlewareTypeOf(value, catalog);
   const capability = catalog.find((item) => item.type === type);
+  const selectableCapabilities = value.scope
+    ? catalog.filter((item) => item.scopes.includes(value.scope as "route" | "service"))
+    : catalog;
   const policy = (type && value[type] && typeof value[type] === "object" ? value[type] : {}) as Record<string, unknown>;
 
   function changeScope(scope: string) {
@@ -260,14 +263,14 @@ export function MiddlewareDefForm({ value, catalog, onChange }: { value: Middlew
     <>
       <Field label="作用域 Scope">
         <select value={value.scope || ""} onChange={(e) => changeScope(e.target.value)}>
-          <option value="">Route + Service（共享）</option>
+          <option value="">未限定（按类型可用范围）</option>
           <option value="route">Route</option>
           <option value="service">Service</option>
         </select>
       </Field>
       <Field label="类型">
         <select value={type} onChange={(e) => changeType(e.target.value)}>
-          {catalog.map((item) => <option key={item.type} value={item.type}>{item.type}（{item.label}）</option>)}
+          {selectableCapabilities.map((item) => <option key={item.type} value={item.type}>{item.type}（{item.label}）</option>)}
         </select>
       </Field>
       {capability?.description && <p className="form-note">{capability.description}</p>}

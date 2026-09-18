@@ -1849,3 +1849,37 @@ Verification:
   flows, and Registry layout
 - JSON syntax validation for `configs/janus-comprehensive.example.json`
 - `git diff --check`
+
+## 2026-09-18
+
+### Preserve proxy rewrite semantics and strengthen console validation
+
+Commit message: `fix(middleware): preserve protocol and prefix semantics`
+
+Scope:
+
+- Corrected `headers` response handling so generic header rules never alter a
+  `101 Switching Protocols` handshake; normal and informational HTTP response
+  behavior remains unchanged.
+- Corrected `strip_prefix` forwarding: route rewrites now carry trusted prefix
+  metadata through the handler chain, and the proxy emits a canonical,
+  composable `X-Forwarded-Prefix` only after clearing all client-provided
+  forwarding headers.
+- Added real WebSocket and upstream forwarding regressions, including composed
+  prefix rewrites and a spoofed inbound `X-Forwarded-Prefix` value.
+- Made the console filter Middleware classes by an explicitly selected Scope,
+  consume generic capability field constraints during local checks, and expose
+  `Header` and `Query` in the visual Route matcher.
+- Added a regression that validates every hashed asset referenced by the
+  embedded console HTML is served, then refreshed the generated UI bundle.
+- Updated architecture, admin-console, and README documentation for these
+  protocol and operator-facing behaviors.
+
+Verification:
+
+- `go test ./...`
+- `go vet ./...`
+- `go test -race ./internal/forwarding ./internal/middleware ./internal/proxy ./internal/gateway ./internal/admin`
+- `cd frontend; npm run build`
+- Compared the frontend bundle and embedded bundle SHA-256 hashes
+- `git diff --check`

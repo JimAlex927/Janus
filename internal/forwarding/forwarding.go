@@ -3,6 +3,7 @@
 package forwarding
 
 import (
+	"context"
 	"net"
 	"net/http"
 	"strconv"
@@ -10,6 +11,27 @@ import (
 )
 
 const maxForwardedHops = 128
+
+type forwardedPrefixKey struct{}
+
+// WithForwardedPrefix carries a path prefix produced by Janus route rewriting.
+// It deliberately uses request context rather than an inbound header: the
+// proxy removes every client-supplied X-Forwarded-* field before it creates
+// the canonical headers sent to the backend. Multiple StripPrefix policies
+// compose in request order.
+func WithForwardedPrefix(r *http.Request, prefix string) *http.Request {
+	if existing := ForwardedPrefix(r); existing != "" {
+		prefix = existing + prefix
+	}
+	return r.WithContext(context.WithValue(r.Context(), forwardedPrefixKey{}, prefix))
+}
+
+// ForwardedPrefix returns the trusted prefix accumulated by Janus route
+// rewriting. It is empty when no StripPrefix policy matched the request.
+func ForwardedPrefix(r *http.Request) string {
+	prefix, _ := r.Context().Value(forwardedPrefixKey{}).(string)
+	return prefix
+}
 
 // Policy trusts forwarded identity headers only when the immediate peer is in
 // one of the configured CIDRs. An empty policy intentionally trusts nothing.

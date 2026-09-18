@@ -150,7 +150,8 @@ type HeadersSettings struct {
 }
 
 // StripPrefixSettings removes Prefix from a matching request path before it
-// reaches the service. The original value is exposed as X-Forwarded-Prefix.
+// reaches the service. Janus emits the accumulated stripped prefix as the
+// trusted X-Forwarded-Prefix header when it forwards the request upstream.
 type StripPrefixSettings struct {
 	Prefix string `json:"prefix"`
 }
