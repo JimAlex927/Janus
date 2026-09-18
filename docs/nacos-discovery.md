@@ -98,12 +98,18 @@ Gateway 构建成功后持有 `Lease`。构建中途失败，清理已获取的�
 
 `Runtime.DiscoverySnapshot()` 提供每个 Service 的实例数、最后更新、到期时间和失败/过期标记。它是只读运行态视图，读取不触发 Nacos 网络请求；没有变化的缓存读也不会被标记为新同步。
 
+私有 Admin API 通过 `GET /api/v1/discovery` 暴露同一份快照。接口沿用
+Admin session 认证，返回当前配置 revision，以及按 Janus Service 名称索引的
+`services` 对象。每个状态包含 `last_update`、`expires_at`、`instances`、
+`failed` 和 `expired`。没有接入发现能力时返回 `501`；即使如此，也会先执行
+认证检查。
+
 ## 给 Luna 的明确任务
 
 1. Service 编辑器增加“静态 URL / Nacos”来源切换，切换时删除互斥字段。Nacos 表单使用上面已经实现的字段，禁止输入 `dataId`。显示 namespace 所属连接及健康检查限制。
 2. 增加 registry 配置表单，支持多连接、多 namespace、多个服务器以及环境变量名称。沿用 JSON/画布同一草稿，不在浏览器解析秘密。
 3. 更新 Service 节点摘要：静态来源显示 URL 数，Nacos 来源显示 registry / group / service。不能把 Nacos Service 显示成“0 upstream、无效配置”。
-4. 将 `Runtime.DiscoverySnapshot` 通过受保护的 Admin API 暴露，补充状态与到期提示；API 没接好前不能在 UI 展示虚构的“健康/已连接”。
+4. 前端调用 `/api/v1/discovery` 展示状态与到期提示；不能根据配置静态推断“健康/已连接”。
 5. 添加完整 `configs/janus-nacos.example.json`（当前版本 Match/Action 格式，两个 namespace），更新 README 和部署环境变量说明。
 6. 前端构建、模型测试，重新同步嵌入资源。提交前更新 commit-log，避免把旧构建 bundle 反复堆入嵌入目录。
 

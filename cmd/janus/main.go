@@ -108,6 +108,7 @@ func run(ctx context.Context, path string, check, printEffective bool, reloadInt
 			Handler: admin.NewHandlerWithOptions(admin.Options{
 				State: adminState, Metrics: requestRuntime.Metrics(), Health: requestRuntime.HealthSnapshot,
 				Current: requestRuntime.ConfigSnapshot, Revision: requestRuntime.Revision,
+				Discovery: requestRuntime.DiscoverySnapshot,
 				Publish:   func(candidate config.Config) error { return publishConfig(path, requestRuntime, candidate) },
 				Subscribe: requestRuntime.Subscribe,
 			}),

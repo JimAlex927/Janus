@@ -59,8 +59,15 @@ type Lease struct {
 	release func()
 }
 
-func (l *Lease) Close() { l.release() }
+func (l *Lease) Close() {
+	if l != nil && l.release != nil {
+		l.release()
+	}
+}
 func (l *Lease) Status() Status {
+	if l == nil || l.feed == nil {
+		return Status{}
+	}
 	l.feed.statusMu.Lock()
 	defer l.feed.statusMu.Unlock()
 	s := l.feed.status
@@ -78,6 +85,9 @@ func key(value any) string { data, _ := json.Marshal(value); return string(data)
 // A valid empty service can be published and returns 503 until instances arrive.
 // Failure to establish a new subscription rejects the candidate configuration.
 func (m *Manager) Acquire(registry config.NacosRegistry, query config.NacosService) (*Lease, error) {
+	if m == nil || m.factory == nil {
+		return nil, fmt.Errorf("discovery manager is not configured")
+	}
 	registry = registry.WithDefaults()
 	query = query.WithDefaults()
 	clientKey := key(registry)
@@ -94,6 +104,9 @@ func (m *Manager) Acquire(registry config.NacosRegistry, query config.NacosServi
 		if err != nil {
 			return nil, err
 		}
+		if client == nil {
+			return nil, fmt.Errorf("discovery factory returned a nil client")
+		}
 		c = &clientRef{client: client}
 		m.clients[clientKey] = c
 	}
@@ -108,6 +121,9 @@ func (m *Manager) Acquire(registry config.NacosRegistry, query config.NacosServi
 		}
 	})
 	if err == nil {
+		if cancel == nil {
+			cancel = func() {}
+		}
 		f.unwatch = cancel
 		err = f.refresh()
 	}

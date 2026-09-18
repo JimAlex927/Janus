@@ -10,6 +10,7 @@ import (
 
 	"golang.org/x/crypto/bcrypt"
 	"janus/internal/config"
+	"janus/internal/discovery"
 	"janus/internal/telemetry"
 )
 
@@ -127,5 +128,36 @@ func TestAdminLoginProtectsConfigurationPublishing(t *testing.T) {
 	h.ServeHTTP(authorized, req)
 	if authorized.Code != http.StatusOK || !published {
 		t.Fatalf("authorized publish = %d, published=%v", authorized.Code, published)
+	}
+}
+
+func TestDiscoveryEndpointRequiresAuthAndReturnsLocalSnapshot(t *testing.T) {
+	hash, err := bcrypt.GenerateFromPassword([]byte("secret"), bcrypt.MinCost)
+	if err != nil {
+		t.Fatal(err)
+	}
+	current := config.Config{Settings: config.Settings{Admin: config.AdminSettings{Username: "admin", PasswordHash: string(hash)}}}
+	h := NewHandlerWithOptions(Options{
+		State: NewState(), Current: func() config.Config { return current }, Revision: func() uint64 { return 7 },
+		Discovery: func() map[string]discovery.Status {
+			return map[string]discovery.Status{"orders": {Instances: 2, Failed: false}}
+		},
+	})
+	unauthorized := httptest.NewRecorder()
+	h.ServeHTTP(unauthorized, httptest.NewRequest(http.MethodGet, "/api/v1/discovery", nil))
+	if unauthorized.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthorized discovery status = %d, want 401", unauthorized.Code)
+	}
+	login := httptest.NewRecorder()
+	h.ServeHTTP(login, httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", bytes.NewBufferString(`{"Username":"admin","Password":"secret"}`)))
+	if login.Code != http.StatusOK {
+		t.Fatalf("login status = %d", login.Code)
+	}
+	authorized := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/discovery", nil)
+	req.AddCookie(login.Result().Cookies()[0])
+	h.ServeHTTP(authorized, req)
+	if authorized.Code != http.StatusOK || !strings.Contains(authorized.Body.String(), `"orders"`) || !strings.Contains(authorized.Body.String(), `"instances":2`) {
+		t.Fatalf("discovery response = %d %q", authorized.Code, authorized.Body.String())
 	}
 }

@@ -15,6 +15,7 @@ import (
 
 	"embed"
 	"janus/internal/config"
+	"janus/internal/discovery"
 	janusruntime "janus/internal/runtime"
 	"janus/internal/telemetry"
 
@@ -48,6 +49,7 @@ type Options struct {
 	Health    func() []telemetry.BackendHealth
 	Current   func() config.Config
 	Revision  func() uint64
+	Discovery func() map[string]discovery.Status
 	Publish   func(config.Config) error
 	Subscribe func() (<-chan janusruntime.Event, func())
 }
@@ -58,6 +60,7 @@ type Handler struct {
 	health     func() []telemetry.BackendHealth
 	current    func() config.Config
 	revision   func() uint64
+	discovery  func() map[string]discovery.Status
 	publish    func(config.Config) error
 	subscribe  func() (<-chan janusruntime.Event, func())
 	sessionsMu sync.Mutex
@@ -75,7 +78,7 @@ func NewHandlerWithOptions(options Options) http.Handler {
 	if options.State == nil {
 		options.State = NewState()
 	}
-	h := &Handler{state: options.State, metrics: options.Metrics, health: options.Health, current: options.Current, revision: options.Revision, publish: options.Publish, subscribe: options.Subscribe, sessions: make(map[string]time.Time)}
+	h := &Handler{state: options.State, metrics: options.Metrics, health: options.Health, current: options.Current, revision: options.Revision, discovery: options.Discovery, publish: options.Publish, subscribe: options.Subscribe, sessions: make(map[string]time.Time)}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/livez", h.livez)
 	mux.HandleFunc("/readyz", h.readyz)
@@ -86,6 +89,7 @@ func NewHandlerWithOptions(options Options) http.Handler {
 	mux.HandleFunc("/api/v1/auth/login", h.login)
 	mux.HandleFunc("/api/v1/auth/logout", h.logout)
 	mux.HandleFunc("/api/v1/status", h.status)
+	mux.HandleFunc("/api/v1/discovery", h.discoveryStatus)
 	mux.HandleFunc("/api/v1/metrics", h.metricsSummary)
 	mux.HandleFunc("/api/v1/config", h.configHandler)
 	mux.HandleFunc("/api/v1/config/validate", h.validate)
@@ -212,6 +216,24 @@ func (h *Handler) status(w http.ResponseWriter, r *http.Request) {
 	}
 	result := map[string]any{"live": h.state.Live(), "ready": h.state.Ready(), "revision": h.revisionValue()}
 	writeJSON(w, 200, result)
+}
+
+func (h *Handler) discoveryStatus(w http.ResponseWriter, r *http.Request) {
+	if !allowMethod(w, r, http.MethodGet) {
+		return
+	}
+	if !h.guard(r) {
+		http.Error(w, "authentication required", http.StatusUnauthorized)
+		return
+	}
+	if h.discovery == nil {
+		http.Error(w, "discovery status unavailable", http.StatusNotImplemented)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"revision": h.revisionValue(),
+		"services": h.discovery(),
+	})
 }
 
 func (h *Handler) metricsSummary(w http.ResponseWriter, r *http.Request) {

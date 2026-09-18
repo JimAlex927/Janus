@@ -16,6 +16,7 @@ type fakeClient struct {
 	err                      error
 	watchErr                 error
 	notify                   func()
+	noCancel                 bool
 	watches, cancels, closes int
 }
 
@@ -24,6 +25,9 @@ func (c *fakeClient) Watch(_ config.NacosService, notify func()) (func(), error)
 	defer c.mu.Unlock()
 	c.watches++
 	c.notify = notify
+	if c.noCancel {
+		return nil, c.watchErr
+	}
 	return func() { c.mu.Lock(); defer c.mu.Unlock(); c.cancels++ }, c.watchErr
 }
 func (c *fakeClient) Snapshot(config.NacosService) (Snapshot, error) {
@@ -104,6 +108,26 @@ func TestManagerRollsBackFailedSubscriptionAndInitialSnapshot(t *testing.T) {
 		if c.cancels != 1 || c.closes != 1 || len(m.clients) != 0 {
 			t.Fatal("failed construction leaked resources")
 		}
+	}
+}
+
+func TestManagerRejectsInvalidFactoryResults(t *testing.T) {
+	if _, err := (*Manager)(nil).Acquire(config.NacosRegistry{}, config.NacosService{}); err == nil {
+		t.Fatal("nil manager accepted a subscription")
+	}
+	manager := NewManager(func(config.NacosRegistry) (Client, error) { return nil, nil })
+	if _, err := manager.Acquire(config.NacosRegistry{}, config.NacosService{}); err == nil {
+		t.Fatal("nil client accepted a subscription")
+	}
+	c := &fakeClient{value: sample(1, "127.0.0.1"), noCancel: true}
+	manager = NewManager(func(config.NacosRegistry) (Client, error) { return c, nil })
+	lease, err := manager.Acquire(config.NacosRegistry{}, config.NacosService{ServiceName: "no-cancel"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	lease.Close()
+	if c.closes != 1 {
+		t.Fatal("client without a cancel function was not released")
 	}
 }
 

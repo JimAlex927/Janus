@@ -28,6 +28,10 @@ runtime failed to initialize with a ThreadSanitizer allocation error (87);
 race checks must be rerun on Linux. Real Nacos cluster integration remains
 a separate deployment acceptance step.
 
+The next working-tree change adds the authenticated `GET /api/v1/discovery`
+endpoint and its Admin regression test, exposing only the Runtime's local
+discovery snapshot for the console.
+
 ## 2026-09-17
 
 ### Improve console editing workflow
