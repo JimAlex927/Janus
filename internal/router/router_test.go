@@ -75,7 +75,7 @@ func TestLimenScopedRoutes(t *testing.T) {
 
 func TestRouteProtocolScope(t *testing.T) {
 	rt, err := New([]Route{
-		{Protocols: []string{"sse"}, PathPrefix: "/events", Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("sse")) })},
+		{Match: "PathPrefix(`/events`) && Protocol(`sse`)", Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("sse")) })},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -85,7 +85,7 @@ func TestRouteProtocolScope(t *testing.T) {
 		code, body   int
 	}{
 		{name: "sse", accept: "text/event-stream", code: http.StatusOK},
-		{name: "ordinary", accept: "application/json", code: http.StatusNotImplemented},
+		{name: "ordinary", accept: "application/json", code: http.StatusNotFound},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			r := httptest.NewRequest(http.MethodGet, "http://gateway/events", nil)

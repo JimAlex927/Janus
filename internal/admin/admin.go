@@ -44,27 +44,29 @@ func (s *State) Ready() bool { return s != nil && s.ready.Load() }
 // Options connects the admin process to the stable Runtime without putting
 // admin concerns into the business request path.
 type Options struct {
-	State     *State
-	Metrics   *telemetry.Metrics
-	Health    func() []telemetry.BackendHealth
-	Current   func() config.Config
-	Revision  func() uint64
-	Discovery func() map[string]discovery.Status
-	Publish   func(config.Config) error
-	Subscribe func() (<-chan janusruntime.Event, func())
+	State          *State
+	Metrics        *telemetry.Metrics
+	Health         func() []telemetry.BackendHealth
+	Current        func() config.Config
+	Revision       func() uint64
+	Discovery      func() map[string]discovery.Status
+	RegistryHealth func(string) discovery.RegistryHealth
+	Publish        func(config.Config) error
+	Subscribe      func() (<-chan janusruntime.Event, func())
 }
 
 type Handler struct {
-	state      *State
-	metrics    *telemetry.Metrics
-	health     func() []telemetry.BackendHealth
-	current    func() config.Config
-	revision   func() uint64
-	discovery  func() map[string]discovery.Status
-	publish    func(config.Config) error
-	subscribe  func() (<-chan janusruntime.Event, func())
-	sessionsMu sync.Mutex
-	sessions   map[string]time.Time
+	state          *State
+	metrics        *telemetry.Metrics
+	health         func() []telemetry.BackendHealth
+	current        func() config.Config
+	revision       func() uint64
+	discovery      func() map[string]discovery.Status
+	registryHealth func(string) discovery.RegistryHealth
+	publish        func(config.Config) error
+	subscribe      func() (<-chan janusruntime.Event, func())
+	sessionsMu     sync.Mutex
+	sessions       map[string]time.Time
 }
 
 const maxSessions = 128
@@ -78,7 +80,7 @@ func NewHandlerWithOptions(options Options) http.Handler {
 	if options.State == nil {
 		options.State = NewState()
 	}
-	h := &Handler{state: options.State, metrics: options.Metrics, health: options.Health, current: options.Current, revision: options.Revision, discovery: options.Discovery, publish: options.Publish, subscribe: options.Subscribe, sessions: make(map[string]time.Time)}
+	h := &Handler{state: options.State, metrics: options.Metrics, health: options.Health, current: options.Current, revision: options.Revision, discovery: options.Discovery, registryHealth: options.RegistryHealth, publish: options.Publish, subscribe: options.Subscribe, sessions: make(map[string]time.Time)}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/livez", h.livez)
 	mux.HandleFunc("/readyz", h.readyz)
@@ -90,6 +92,7 @@ func NewHandlerWithOptions(options Options) http.Handler {
 	mux.HandleFunc("/api/v1/auth/logout", h.logout)
 	mux.HandleFunc("/api/v1/status", h.status)
 	mux.HandleFunc("/api/v1/discovery", h.discoveryStatus)
+	mux.HandleFunc("/api/v1/discovery/registries/health", h.registryHealthCheck)
 	mux.HandleFunc("/api/v1/metrics", h.metricsSummary)
 	mux.HandleFunc("/api/v1/config", h.configHandler)
 	mux.HandleFunc("/api/v1/config/validate", h.validate)
@@ -234,6 +237,31 @@ func (h *Handler) discoveryStatus(w http.ResponseWriter, r *http.Request) {
 		"revision": h.revisionValue(),
 		"services": h.discovery(),
 	})
+}
+
+func (h *Handler) registryHealthCheck(w http.ResponseWriter, r *http.Request) {
+	if !allowMethod(w, r, http.MethodPost) {
+		return
+	}
+	if !h.guard(r) {
+		http.Error(w, "authentication required", http.StatusUnauthorized)
+		return
+	}
+	if h.registryHealth == nil {
+		http.Error(w, "registry health checks unavailable", http.StatusNotImplemented)
+		return
+	}
+	var request struct {
+		Name string `json:"name"`
+	}
+	if !decodeJSON(w, r, &request) {
+		return
+	}
+	if request.Name == "" {
+		http.Error(w, "registry name is required", http.StatusBadRequest)
+		return
+	}
+	writeJSON(w, http.StatusOK, h.registryHealth(request.Name))
 }
 
 func (h *Handler) metricsSummary(w http.ResponseWriter, r *http.Request) {
@@ -385,13 +413,18 @@ func (h *Handler) decodeConfig(w http.ResponseWriter, r *http.Request) (config.C
 		http.Error(w, "config is too large", 413)
 		return config.Config{}, false
 	}
-	c, err := config.Load(strings.NewReader(string(body)))
+	inheritedHash := ""
+	if h.current != nil {
+		inheritedHash = h.current().Settings.Admin.PasswordHash
+	}
+	previousDiscovery := config.DiscoveryConfig{}
+	if h.current != nil {
+		previousDiscovery = h.current().Discovery
+	}
+	c, err := config.LoadWithAdminSecrets(strings.NewReader(string(body)), inheritedHash, previousDiscovery)
 	if err != nil {
 		writeJSON(w, 422, map[string]any{"ok": false, "error": err.Error()})
 		return config.Config{}, false
-	}
-	if h.current != nil && c.Settings.Admin.PasswordHash == "" {
-		c.Settings.Admin.PasswordHash = h.current().Settings.Admin.PasswordHash
 	}
 	return c, true
 }

@@ -77,8 +77,9 @@ configs/janus-comprehensive.example.json  multi-Limen, TLS/HTTP2/HTTP3, middlewa
 configs/janus-streaming.example.json  SSE/WebSocket route example
 configs/janus-health.example.json     active upstream health-check example
 configs/janus-nacos.example.json      single-namespace Nacos service discovery example
-configs/janus-nacos-multi-namespace.example.json  multiple Nacos namespaces and servers
-configs/janus-nacos-mixed.example.json  Nacos and static upstreams in one configuration
+configs/janus-nacos-multi-namespace.example.json  multiple namespaces, accounts and servers
+configs/janus-nacos-mixed.example.json  authenticated Nacos and static upstreams together
+configs/janus-nacos-env.example.json   Nacos username with password injected by environment
 examples/backend/     local test service
 docs/                  architecture, delivery plan, protocol learning guide
 deploy/systemd/        native Linux non-root systemd deployment artifact

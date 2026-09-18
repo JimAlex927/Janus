@@ -1,25 +1,27 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { addConfigNode, addMiddlewareToRoute, buildGraph, canConnectNodes, CANVAS_HEIGHT, CANVAS_WIDTH, clampPosition, connectNodes, NODE_HEIGHT, NODE_WIDTH } from "./graph-model.ts";
+import { addConfigNode, buildGraph, canConnectNodes, CANVAS_HEIGHT, CANVAS_WIDTH, clampPosition, connectNodes, NODE_HEIGHT, NODE_WIDTH, renameNode } from "./graph-model.ts";
 
 const node = (id, kind, name) => ({ id, kind, name, subtitle: "", badges: [], x: 0, y: 0 });
 
-test("renders a missing service referenced by a route", () => {
+test("canvas contains only Limen and Route nodes", () => {
   const graph = buildGraph({
-    routes: [{ name: "api", action: { forward: { service: "missing-api" } } }],
+    limens: { public: { address: "127.0.0.1:8080", protocols: ["http1"] } },
+    routes: [{ name: "api", limen: "public", action: { forward: { service: "missing-api" } } }],
   });
 
-  assert.deepEqual(graph.nodes.find(item => item.id === "service:missing-api")?.badges, ["未定义"]);
-  assert.ok(graph.edges.some(edge => edge.from === "route:api" && edge.to === "service:missing-api"));
+  assert.deepEqual(graph.nodes.map(item => item.kind), ["limen", "route"]);
+  assert.deepEqual(graph.edges, [{ from: "limen:public", to: "route:api" }]);
 });
 
-test("projects a legacy route service reference to the service edge", () => {
+test("service references stay in configuration without canvas service nodes", () => {
   const graph = buildGraph({
     routes: [{ name: "api", service: "backend" }],
     services: { backend: { upstreams: [] } },
   });
 
-  assert.ok(graph.edges.some(edge => edge.from === "route:api" && edge.to === "service:backend"));
+  assert.equal(graph.nodes.some(item => item.kind === "service"), false);
+  assert.equal(graph.edges.some(edge => edge.to === "service:backend"), false);
 });
 
 test("keeps Middleware out of the top-level graph", () => {
@@ -32,13 +34,6 @@ test("keeps Middleware out of the top-level graph", () => {
   assert.deepEqual(graph.nodes.find(item => item.id === "route:api")?.badges, ["auth"]);
 });
 
-test("creates and attaches a Middleware from the Route editor", () => {
-  const result = addMiddlewareToRoute({ routes: [{ name: "api", middlewares: [] }] }, "api");
-
-  assert.equal(result.config.middlewares[result.name].buffer.max_response_body_bytes, 1048576);
-  assert.deepEqual(result.config.routes[0].middlewares, [result.name]);
-});
-
 test("new canvas Routes do not create an implicit Service edge", () => {
   const result = addConfigNode({ services: { api: { upstreams: [] } } }, "route");
   const graph = buildGraph(result.config);
@@ -47,11 +42,25 @@ test("new canvas Routes do not create an implicit Service edge", () => {
   assert.equal(graph.edges.some(edge => edge.from === result.id && edge.to === "service:api"), false);
 });
 
+test("renaming a Middleware updates every route and service reference", () => {
+  const draft = {
+    middlewares: { auth: { scope: "route", body_limit: { max_bytes: 1024 } } },
+    routes: [{ name: "api", middlewares: ["auth"] }],
+    services: { backend: { upstreams: [], middlewares: ["auth"] } },
+  };
+  const result = renameNode(draft, node("middleware:auth", "middleware", "auth"), "request-auth");
+
+  assert.equal(result.error, undefined);
+  assert.equal(result.config.middlewares.auth, undefined);
+  assert.deepEqual(result.config.routes[0].middlewares, ["request-auth"]);
+  assert.deepEqual(result.config.services.backend.middlewares, ["request-auth"]);
+});
+
 test("keeps a large graph inside the drawable world", () => {
   const routes = Array.from({ length: 18 }, (_, index) => ({ name: `route-${index}`, action: { respond: { status: 200, body: "ok" } } }));
   const graph = buildGraph({ routes });
 
-  assert.ok(graph.nodes.length > routes.length);
+  assert.ok(graph.nodes.length === routes.length);
   assert.ok(graph.nodes.every(item => item.x >= 0 && item.y >= 0 && item.x + NODE_WIDTH <= CANVAS_WIDTH && item.y + NODE_HEIGHT <= CANVAS_HEIGHT));
 });
 

@@ -108,9 +108,10 @@ func run(ctx context.Context, path string, check, printEffective bool, reloadInt
 			Handler: admin.NewHandlerWithOptions(admin.Options{
 				State: adminState, Metrics: requestRuntime.Metrics(), Health: requestRuntime.HealthSnapshot,
 				Current: requestRuntime.ConfigSnapshot, Revision: requestRuntime.Revision,
-				Discovery: requestRuntime.DiscoverySnapshot,
-				Publish:   func(candidate config.Config) error { return publishConfig(path, requestRuntime, candidate) },
-				Subscribe: requestRuntime.Subscribe,
+				Discovery:      requestRuntime.DiscoverySnapshot,
+				RegistryHealth: requestRuntime.RegistryHealth,
+				Publish:        func(candidate config.Config) error { return publishConfig(path, requestRuntime, candidate) },
+				Subscribe:      requestRuntime.Subscribe,
 			}),
 			ReadHeaderTimeout: c.Settings.Server.ReadHeaderTimeout.Duration(),
 			WriteTimeout:      c.Settings.Server.WriteTimeout.Duration(),

@@ -15,7 +15,7 @@
         ],
         "namespace_id": "orders-production",
         "username": "janus",
-        "password_env": "JANUS_NACOS_PASSWORD",
+        "password": "orders-secret",
         "timeout": "5s",
         "stale_after": "3m"
       },
@@ -25,8 +25,8 @@
           { "address": "nacos-2.internal", "port": 8848, "grpc_port": 9848 }
         ],
         "namespace_id": "payments-production",
-        "username": "janus",
-        "password_env": "JANUS_NACOS_PASSWORD",
+        "username": "payments-janus",
+        "password": "payments-secret",
         "timeout": "5s",
         "stale_after": "3m"
       }

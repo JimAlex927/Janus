@@ -60,6 +60,7 @@ type Runtime struct {
 	transport              *http.Transport
 	global                 *middleware.Limiter
 	serviceLimiterRegistry *serviceLimiterRegistry
+	discoveryManager       *discovery.Manager
 	metrics                *telemetry.Metrics
 	handler                http.Handler
 	config                 config.Config
@@ -95,13 +96,18 @@ func New(c config.Config, logger *zap.Logger) (*Runtime, error) {
 // NewWithDiscovery keeps client/subscription reuse outside immutable handler
 // generations and provides an injectable boundary for deterministic tests.
 func NewWithDiscovery(c config.Config, logger *zap.Logger, manager *discovery.Manager) (*Runtime, error) {
-	return NewWithBuilder(c, logger, func(c config.Config, transport http.RoundTripper, logger *zap.Logger, limits map[string]*middleware.Limiter) (Generation, error) {
+	r, err := NewWithBuilder(c, logger, func(c config.Config, transport http.RoundTripper, logger *zap.Logger, limits map[string]*middleware.Limiter) (Generation, error) {
 		generation, err := gateway.NewWithDiscovery(c, logger, transport, limits, manager)
 		if err != nil {
 			return nil, err
 		}
 		return generation, nil
 	})
+	if err != nil {
+		return nil, err
+	}
+	r.discoveryManager = manager
+	return r, nil
 }
 
 // NewWithBuilder is used by tests and future configuration sources to supply
@@ -286,6 +292,32 @@ func (r *Runtime) DiscoverySnapshot() map[string]discovery.Status {
 		return nil
 	}
 	return view.DiscoverySnapshot()
+}
+
+// RegistryHealth performs an explicit admin-only connectivity probe for one
+// configured registry. It is intentionally separate from service discovery
+// status because a registry may be healthy even when it has no subscriptions.
+func (r *Runtime) RegistryHealth(name string) discovery.RegistryHealth {
+	result := discovery.RegistryHealth{Registry: name, CheckedAt: time.Now()}
+	started := time.Now()
+	if r == nil || r.discoveryManager == nil {
+		result.Error = "discovery manager is not configured"
+		return result
+	}
+	current := r.ConfigSnapshot()
+	registry, ok := current.Discovery.Nacos[name]
+	if !ok {
+		result.Error = "nacos registry is not configured"
+		return result
+	}
+	if err := r.discoveryManager.CheckRegistry(registry); err != nil {
+		result.Error = err.Error()
+		result.LatencyMS = time.Since(started).Milliseconds()
+		return result
+	}
+	result.Healthy = true
+	result.LatencyMS = time.Since(started).Milliseconds()
+	return result
 }
 
 // ServeHTTP delegates to the stable dispatcher.

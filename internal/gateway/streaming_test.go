@@ -61,7 +61,7 @@ func TestSSEPassesEventsBeforeBackendCompletes(t *testing.T) {
 		Listen:   "127.0.0.1:8080",
 		Settings: config.Settings{Request: config.RequestSettings{MaximumDuration: config.Duration(100 * time.Millisecond)}, Server: config.ServerSettings{WriteTimeout: config.Duration(200 * time.Millisecond)}},
 		Services: map[string]config.Service{"events": {Upstreams: []string{backend.URL}}},
-		Routes:   []config.Route{{Name: "events", PathPrefix: "/events", Protocols: []string{config.RouteProtocolSSE}, Service: "events"}},
+		Routes:   []config.Route{{Name: "events", Match: "PathPrefix(`/events`) && Protocol(`sse`)", Service: "events"}},
 	})
 	defer cleanup()
 
@@ -125,7 +125,7 @@ func TestWebSocketUpgradeIsProxied(t *testing.T) {
 	address, cleanup := startStreamingGateway(t, config.Config{
 		Listen:   "127.0.0.1:8080",
 		Services: map[string]config.Service{"socket": {Upstreams: []string{backend.URL}}},
-		Routes:   []config.Route{{Name: "socket", PathPrefix: "/socket", Protocols: []string{config.RouteProtocolWebSocket}, Service: "socket"}},
+		Routes:   []config.Route{{Name: "socket", Match: "PathPrefix(`/socket`) && Protocol(`websocket`)", Service: "socket"}},
 	})
 	defer cleanup()
 
@@ -186,7 +186,7 @@ func TestWebSocketStreamTimeoutClosesUpgradedConnection(t *testing.T) {
 		Listen:   "127.0.0.1:8080",
 		Settings: settings,
 		Services: map[string]config.Service{"socket": {Upstreams: []string{backend.URL}}},
-		Routes:   []config.Route{{Name: "socket", PathPrefix: "/socket", Protocols: []string{config.RouteProtocolWebSocket}, Service: "socket"}},
+		Routes:   []config.Route{{Name: "socket", Match: "PathPrefix(`/socket`) && Protocol(`websocket`)", Service: "socket"}},
 	})
 	defer cleanup()
 

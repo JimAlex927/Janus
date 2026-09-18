@@ -9,7 +9,11 @@ import "./inspector.css";
 import "./state.css";
 import "./modal.css";
 import "./simulation.css";
+import "./resource.css";
 import { BuilderPage } from "./builder";
+import { addConfigNode, KIND_META, removeNode, renameNode, updateNode, type GraphNode, type NodeKind } from "./graph-model";
+import { InspectorModal } from "./inspector";
+import { RegistryPage } from "./registry";
 
 type JsonObject = Record<string, any>;
 type Config = JsonObject & { routes?: JsonObject[]; services?: Record<string, JsonObject>; middlewares?: Record<string, JsonObject> };
@@ -53,17 +57,16 @@ function App() {
     sample(); const timer = window.setInterval(sample, 5000); return () => window.clearInterval(timer);
   }, [loggedIn]);
 
-  const services = draft?.services || {}; const middlewares = draft?.middlewares || {};
   const updateDraft = (next: Config) => { dirtyRef.current = true; setDraft(next); setJsonText(JSON.stringify(next, null, 2)); setJsonError(""); setDirty(true); };
   const validate = async () => { if (!draft || jsonError) { setMessage(jsonError || "没有可校验的配置"); return; } try { await api("/api/v1/config/validate", { method: "POST", body: JSON.stringify(draft) }); setMessage("配置校验通过"); } catch (error) { setMessage(String(error)); } };
   const publish = async () => { if (!draft || !snapshot || jsonError) { setMessage(jsonError || "请先修复配置"); return; } if (!dirty) { setMessage("当前没有未发布变更"); return; } try { const value = await api<{ revision: number }>("/api/v1/config/publish", { method: "POST", headers: { "X-Janus-Revision": String(snapshot.revision) }, body: JSON.stringify(draft) }); setMessage(`已发布配置版本 ${value.revision}`); await load(true); } catch (error) { setMessage(String(error)); } };
   const logout = async () => { await api("/api/v1/auth/logout", { method: "POST" }).catch(() => undefined); setLoggedIn(false); };
   const onJSONChange = (text: string) => { dirtyRef.current = true; setJsonText(text); setDirty(true); try { setDraft(JSON.parse(text) as Config); setJsonError(""); } catch { setJsonError("JSON 尚未完成，当前文本已保留，修复后才能校验或发布"); } };
   const refresh = () => { if (dirty && !window.confirm("当前有未发布变更，刷新会丢弃草稿。继续吗？")) return; load(true).catch((error: APIError) => setMessage(error.message)); };
-  const title = ({ overview: "系统概览", builder: "配置画布", services: "Services", middlewares: "Middleware" } as Record<string, string>)[page];
+  const title = ({ overview: "系统概览", builder: "路由配置", registries: "Nacos Registry", services: "Services", middlewares: "Middleware" } as Record<string, string>)[page];
   if (!loggedIn) return <Login onLogin={() => setLoggedIn(true)} />;
 
-  return <div className="app-shell"><aside><div className="brand"><div className="brand-mark">J</div><div><strong>Janus</strong><small>Gateway Console</small></div></div><nav>{[["overview", "概览"], ["builder", "配置画布"], ["services", "Services"], ["middlewares", "Middleware"]].map(([id, label]) => <button className={page === id ? "active" : ""} onClick={() => setPage(id)} key={id}><span className="nav-dot" />{label}</button>)}</nav><div className="side-foot"><span className="status-dot" />运行中<br /><small>Revision {snapshot?.revision ?? "—"}</small></div></aside><main><header><div><span className="eyebrow">CONTROL PLANE</span><div className="title-line"><h1>{title}</h1><span className={`draft-state ${dirty ? "dirty" : ""}`}>{dirty ? "未发布变更" : "已同步"}</span></div></div><div className="header-actions"><button className="ghost" onClick={refresh}>刷新</button><button className="ghost" onClick={logout}>退出</button><button className="primary" disabled={!dirty || Boolean(jsonError)} onClick={publish}>发布变更</button></div></header>{message && <div className="toast">{message}<button onClick={() => setMessage("")}>×</button></div>}{page === "overview" && <Overview points={points} snapshot={snapshot} summary={summary} />}{page === "builder" && <BuilderPage draft={draft} revision={snapshot?.revision} dirty={dirty} jsonText={jsonText} jsonError={jsonError} onChange={updateDraft} onJSONChange={onJSONChange} onValidate={validate} />}{page === "services" && <ListPage title="Services" description="上游池、健康检查和 Service Middleware。" items={Object.entries(services).map(([name, value]) => ({ name, detail: `${value.upstreams?.length || 0} upstream · ${(value.middlewares || []).length} middleware` }))} />}{page === "middlewares" && <ListPage title="Middleware" description="当前支持的可复用策略组件。" items={Object.entries(middlewares).map(([name, value]) => ({ name, detail: Object.keys(value).join(" · ") }))} />}</main></div>;
+  return <div className="app-shell"><aside><div className="brand"><div className="brand-mark">J</div><div><strong>Janus</strong><small>Gateway Console</small></div></div><nav>{[["overview", "概览"], ["builder", "路由配置"], ["registries", "Nacos Registry"], ["services", "Services"], ["middlewares", "Middleware"]].map(([id, label]) => <button className={page === id ? "active" : ""} onClick={() => setPage(id)} key={id}><span className="nav-dot" />{label}</button>)}</nav><div className="side-foot"><span className="status-dot" />运行中<br /><small>Revision {snapshot?.revision ?? "—"}</small></div></aside><main><header><div><span className="eyebrow">CONTROL PLANE</span><div className="title-line"><h1>{title}</h1><span className={`draft-state ${dirty ? "dirty" : ""}`}>{dirty ? "未发布变更" : "已同步"}</span></div></div><div className="header-actions"><button className="ghost" onClick={refresh}>刷新</button><button className="ghost" onClick={logout}>退出</button><button className="primary" disabled={!dirty || Boolean(jsonError)} onClick={publish}>发布变更</button></div></header>{message && <div className="toast">{message}<button onClick={() => setMessage("")}>×</button></div>}{page === "overview" && <Overview points={points} snapshot={snapshot} summary={summary} />}{page === "builder" && <BuilderPage draft={draft} revision={snapshot?.revision} dirty={dirty} jsonText={jsonText} jsonError={jsonError} onChange={updateDraft} onJSONChange={onJSONChange} onValidate={validate} />}{page === "registries" && <RegistryPage draft={draft} onChange={updateDraft} />}{page === "services" && <ResourcePage kind="service" draft={draft} onChange={updateDraft} />}{page === "middlewares" && <ResourcePage kind="middleware" draft={draft} onChange={updateDraft} />}</main></div>;
 }
 
 function Overview({ points, snapshot, summary }: { points: { time: string; value: number }[]; snapshot: Snapshot | null; summary: Summary }) {
@@ -86,7 +89,64 @@ function ActivityChart({ points }: { points: { time: string; value: number }[] }
   return <div className="chart"><svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="请求数量趋势" preserveAspectRatio="none"><defs><linearGradient id="request-area" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stopColor="#536dfe" stopOpacity=".24" /><stop offset="1" stopColor="#536dfe" stopOpacity="0" /></linearGradient></defs><polygon points={area} fill="url(#request-area)" /><polyline points={coordinates.join(" ")} fill="none" stroke="#536dfe" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" /></svg>{points.length === 0 && <span className="chart-empty">等待请求数据…</span>}</div>;
 }
 function Stat({ label, value, accent }: { label: string; value: string; accent?: string }) { return <div className="stat-card"><span>{label}</span><strong className={accent || ""}>{value}</strong><small>当前快照</small></div>; }
-function ListPage({ title, description, items }: { title: string; description: string; items: { name: string; detail: string }[] }) { return <section className="content"><div className="section-head"><div><h2>{title}</h2><p>{description}</p></div></div><div className="list">{items.map(item => <div className="list-row" key={item.name}><div className="list-icon">{item.name.slice(0, 1).toUpperCase()}</div><div><strong>{item.name}</strong><small>{item.detail}</small></div><span className="chevron">›</span></div>)}{items.length === 0 && <div className="empty">暂无配置</div>}</div></section>; }
+function ResourcePage({ kind, draft, onChange }: { kind: "service" | "middleware"; draft: Config | null; onChange: (next: Config) => void }) {
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [creatingId, setCreatingId] = useState<string | null>(null);
+  const [beforeCreate, setBeforeCreate] = useState<Config | null>(null);
+  if (!draft) return <section className="content"><div className="empty">正在加载配置…</div></section>;
+  const config = draft;
+  const entries = kind === "service" ? Object.entries(config.services || {}) : Object.entries(config.middlewares || {});
+  const nodes = entries.map(([name, value], index) => {
+    const policy = ["buffer", "body_limit", "in_flight"].find(type => value[type] != null) || "尚未配置";
+    const scope = value.scope === "route" ? "Route" : value.scope === "service" ? "Service" : "Route + Service";
+    const serviceSubtitle = value.nacos ? `Nacos · ${value.nacos.service_name || "未配置服务"}` : `${value.upstreams?.length || 0} upstream`;
+    return { id: `${kind}:${name}`, kind, name, subtitle: kind === "service" ? serviceSubtitle : `${scope} · ${policy}`, badges: kind === "service" ? value.middlewares || [] : [], x: 0, y: index * 100 } as GraphNode;
+  });
+  const editing = nodes.find(node => node.id === editingId);
+  const description = kind === "service" ? "先在这里创建和维护上游 Service，Route 只负责引用。" : "先在这里创建可复用策略，Route 再编排已有 Middleware。";
+  function create() {
+    const result = addConfigNode(config, kind as NodeKind);
+    setBeforeCreate(config);
+    setCreatingId(result.id);
+    onChange(result.config);
+    setEditingId(result.id);
+  }
+  function update(patch: JsonObject) {
+    if (!editing) return;
+    onChange(updateNode(config, editing, patch));
+  }
+  function rename(nextName: string) {
+    if (!editing) return "找不到正在编辑的 Middleware";
+    const result = renameNode(config, editing, nextName);
+    if (result.error) return result.error;
+    onChange(result.config);
+    setEditingId(`${kind}:${nextName.trim()}`);
+    return undefined;
+  }
+  function remove() {
+    if (!editing) return;
+    onChange(removeNode(config, editing));
+    setCreatingId(null);
+    setBeforeCreate(null);
+    setEditingId(null);
+  }
+  function confirmCreate() {
+    setCreatingId(null);
+    setBeforeCreate(null);
+    setEditingId(null);
+  }
+  function cancelCreate() {
+    if (creatingId && beforeCreate) onChange(beforeCreate);
+    setCreatingId(null);
+    setBeforeCreate(null);
+    setEditingId(null);
+  }
+  function closeEditor() {
+    if (creatingId) cancelCreate();
+    else setEditingId(null);
+  }
+  return <section className="content resource-page"><div className="section-head"><div><p>{description}</p></div><button className="primary" onClick={create}>＋ 新建 {kind === "service" ? "Service" : "Middleware"}</button></div><div className="list">{nodes.map(node => <button className="list-row resource-row" key={node.id} onClick={() => setEditingId(node.id)}><div className="list-icon" style={{ background: KIND_META[kind].color, color: "#fff" }}>{KIND_META[kind].icon}</div><div><strong>{node.name}</strong><small>{node.subtitle || "尚未配置"}</small></div><span className="chevron">›</span></button>)}{nodes.length === 0 && <div className="empty">暂无配置，点击右上角创建。</div>}</div>{editing && <InspectorModal node={editing} draft={draft} onUpdate={update} onRemove={remove} onClose={closeEditor} onRename={kind === "middleware" ? rename : undefined} onConfirm={creatingId === editingId ? confirmCreate : undefined} onCancel={creatingId === editingId ? cancelCreate : undefined} />}</section>;
+}
 function Login({ onLogin }: { onLogin: () => void }) { const [username, setUsername] = useState(""); const [password, setPassword] = useState(""); const [error, setError] = useState(""); const submit = async (event: FormEvent) => { event.preventDefault(); try { await api("/api/v1/auth/login", { method: "POST", body: JSON.stringify({ username, password }) }); onLogin(); } catch { setError("账号或密码错误"); } }; return <div className="login-shell"><form className="login-card" onSubmit={submit}><div className="brand-mark">J</div><span className="eyebrow">JANUS CONSOLE</span><h2>欢迎回来</h2><p>登录后管理你的网关配置。</p><input autoFocus placeholder="管理员账号" value={username} onChange={event => setUsername(event.target.value)} /><input type="password" placeholder="密码" value={password} onChange={event => setPassword(event.target.value)} /><button className="primary" type="submit">登录</button>{error && <small className="login-error">{error}</small>}</form></div>; }
 
 createRoot(document.getElementById("root")!).render(<App />);

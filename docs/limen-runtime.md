@@ -25,7 +25,7 @@ requests already executing. Protocol enablement and reload are separate changes.
 
 An HTTP version describes the wire protocol, not the duration of a request.
 HTTP/2 and HTTP/3 multiplex requests on persistent connections. SSE and classic
-HTTP/1 WebSocket proxying are supported through explicit route protocol modes.
+HTTP/1 WebSocket proxying is selected through the Match DSL's Protocol rule.
 WebSocket extended CONNECT over HTTP/2, gRPC, CONNECT tunnels, and raw TCP/UDP
 forwarding need separate contracts and remain outside this delivery. Raw TCP/UDP
 cannot generally be converted into an HTTP request. Enabling HTTP/2 alone does
@@ -102,9 +102,10 @@ document, with:
   budget.
 - The existing `routes`, `services`, and `middlewares` model in the same
   document; route attachments may reference named Limens.
-- Route protocol modes: omitted or `http` for ordinary requests, `sse` for
-  EventSource responses, and `websocket` for classic HTTP/1 upgrades. A route
-  must opt into the long-lived modes explicitly; both modes require `GET`.
+- Route application protocol modes are expressed with the Match DSL's
+  `Protocol(...)` rule. There is no separate Route `protocols` field; routes
+  without a Protocol rule are protocol-agnostic. The long-lived modes require
+  `GET`.
 - TLS identity: one configured certificate/key pair per TLS Limen initially.
   Multi-certificate SNI selection, mTLS policy reload, and ACME come later.
 

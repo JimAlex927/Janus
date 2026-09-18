@@ -55,25 +55,25 @@ not build a duplicate generation.
 
 The `配置画布` page has two synchronized modes:
 
-- `画布` mode shows Limen, Route, Service, and Redirect/Respond Action nodes.
-  Middleware is intentionally edited inside the Route editor instead of being
-  a top-level canvas node. Other nodes can be added from the palette, dragged
-  around the canvas, zoomed, automatically arranged, and edited in a
-  standalone node editor modal. Click or drag from a node's output port to
-  another node's input port (or the highlighted target node) to create a
-  supported relation.
-- Services referenced by a Route but missing from the `services` map are still
-  rendered as `未定义 Service` nodes so they can be completed in the Inspector.
+- `画布` mode shows only Limen and Route nodes. Service and Middleware are
+  managed in their own resource pages and referenced from the Route editor.
+  Nodes can be added from the palette, dragged around the canvas, zoomed,
+  automatically arranged, and edited in a standalone node editor modal. Click
+  or drag from a node's output port to another node's input port (or the
+  highlighted target node) to create a supported relation.
 - Node parameters open in a type-specific modal from the card's `…` action.
   Route editing includes a larger Match text area and an inline Middleware flow
   with create, select, and explicit reorder controls; closing the modal leaves
   the canvas layout unchanged.
-- Limen and Route protocol fields use fixed multi-select options backed by the
-  supported protocol matrix. Middleware creation and parameter editing expose
+- Limen protocol fields use fixed multi-select options backed by the supported
+  transport protocol matrix. Route application protocols are written in the
+  Match DSL with `Protocol(...)`. Middleware creation and parameter editing expose
   only the policies supported by the current scope: Route supports `buffer`
   and `body_limit`, while Service additionally supports `in_flight`. Existing
   invalid references remain visible so an operator can remove them without
-  falling back to JSON.
+  falling back to JSON. Middleware names can be edited in place; references in
+  every Route and Service are updated atomically. Each new Middleware declares
+  a `scope` of `route`, `service`, or the backwards-compatible shared scope.
 - The canvas includes a request simulation drawer. It evaluates the current
   browser draft, accepts a full URL or path plus Host and Header fields, shows
   the winning Route, Action, Middleware chain, and Service, and lists every

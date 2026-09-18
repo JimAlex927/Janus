@@ -103,11 +103,16 @@ func TestAdminLoginProtectsConfigurationPublishing(t *testing.T) {
 	}
 	current := config.Config{Settings: config.Settings{Admin: config.AdminSettings{Username: "admin", PasswordHash: string(hash)}}}
 	published := false
+	var publishedConfig config.Config
 	h := NewHandlerWithOptions(Options{
 		State: NewState(), Current: func() config.Config { return current }, Revision: func() uint64 { return 1 },
-		Publish: func(config.Config) error { published = true; return nil },
+		Publish: func(candidate config.Config) error {
+			published = true
+			publishedConfig = candidate
+			return candidate.Validate()
+		},
 	})
-	body := `{"listen":"127.0.0.1:8080","services":{"s":{"upstreams":["http://localhost:9000"]}},"routes":[{"name":"r","path_prefix":"/","service":"s"}]}`
+	body := `{"listen":"127.0.0.1:8080","settings":{"admin":{"username":"admin"}},"services":{"s":{"upstreams":["http://localhost:9000"]}},"routes":[{"name":"r","path_prefix":"/","service":"s"}]}`
 	unauthorized := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/config/publish", bytes.NewBufferString(body))
 	req.Header.Set("X-Janus-Revision", "1")
@@ -126,7 +131,7 @@ func TestAdminLoginProtectsConfigurationPublishing(t *testing.T) {
 	req.Header.Set("X-Janus-Revision", "1")
 	req.AddCookie(cookie)
 	h.ServeHTTP(authorized, req)
-	if authorized.Code != http.StatusOK || !published {
+	if authorized.Code != http.StatusOK || !published || publishedConfig.Settings.Admin.PasswordHash != current.Settings.Admin.PasswordHash {
 		t.Fatalf("authorized publish = %d, published=%v", authorized.Code, published)
 	}
 }
@@ -159,6 +164,37 @@ func TestDiscoveryEndpointRequiresAuthAndReturnsLocalSnapshot(t *testing.T) {
 	h.ServeHTTP(authorized, req)
 	if authorized.Code != http.StatusOK || !strings.Contains(authorized.Body.String(), `"orders"`) || !strings.Contains(authorized.Body.String(), `"instances":2`) {
 		t.Fatalf("discovery response = %d %q", authorized.Code, authorized.Body.String())
+	}
+}
+
+func TestRegistryHealthEndpointRequiresAuthAndReturnsProbe(t *testing.T) {
+	hash, err := bcrypt.GenerateFromPassword([]byte("secret"), bcrypt.MinCost)
+	if err != nil {
+		t.Fatal(err)
+	}
+	current := config.Config{Settings: config.Settings{Admin: config.AdminSettings{Username: "admin", PasswordHash: string(hash)}}}
+	h := NewHandlerWithOptions(Options{
+		State: NewState(), Current: func() config.Config { return current },
+		RegistryHealth: func(name string) discovery.RegistryHealth {
+			return discovery.RegistryHealth{Registry: name, Healthy: true, LatencyMS: 4}
+		},
+	})
+	unauthorized := httptest.NewRecorder()
+	h.ServeHTTP(unauthorized, httptest.NewRequest(http.MethodPost, "/api/v1/discovery/registries/health", bytes.NewBufferString(`{"name":"platform"}`)))
+	if unauthorized.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthorized health status = %d, want 401", unauthorized.Code)
+	}
+	login := httptest.NewRecorder()
+	h.ServeHTTP(login, httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", bytes.NewBufferString(`{"Username":"admin","Password":"secret"}`)))
+	if login.Code != http.StatusOK {
+		t.Fatalf("login status = %d", login.Code)
+	}
+	authorized := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/discovery/registries/health", bytes.NewBufferString(`{"name":"platform"}`))
+	req.AddCookie(login.Result().Cookies()[0])
+	h.ServeHTTP(authorized, req)
+	if authorized.Code != http.StatusOK || !strings.Contains(authorized.Body.String(), `"healthy":true`) || !strings.Contains(authorized.Body.String(), `"registry":"platform"`) {
+		t.Fatalf("health response = %d %q", authorized.Code, authorized.Body.String())
 	}
 }
 

@@ -1,0 +1,7 @@
+.canvas-edges {
+  pointer-events: none;
+}
+
+.graph-node {
+  z-index: 1;
+}

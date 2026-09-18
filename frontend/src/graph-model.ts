@@ -18,34 +18,20 @@ export const KIND_META: Record<NodeKind, { label: string; icon: string; descript
   action: { label: "Action", icon: "→", description: "重定向或直接响应", color: "#be123c" },
 };
 
-// The graph is a view of the draft, not a second configuration format. Every
-// node and edge is derived from the draft so JSON mode and canvas mode stay in
-// sync without maintaining two independent sources of truth.
+// The graph is a view of the draft, not a second configuration format. The
+// canvas intentionally models only the inbound topology: Limen -> Route.
+// Services and Middleware are reusable resources managed in their own pages
+// and referenced from the Route editor.
 export function buildGraph(draft: Config): { nodes: GraphNode[]; edges: GraphEdge[] } {
   const nodes: GraphNode[] = [];
   const edges: GraphEdge[] = [];
   const limens = Object.entries(draft.limens || {});
   const routes = draft.routes || [];
-  const serviceMap = new Map(Object.entries(draft.services || {}));
-  routes.forEach(route => { const name = route.action?.forward?.service || route.service; if (name && !serviceMap.has(name)) serviceMap.set(name, {}); });
-  const services = [...serviceMap.entries()];
   limens.forEach(([name, value], index) => { const position = stackPosition(index, limens.length, 28, 40, 150); nodes.push({ id: `limen:${name}`, kind: "limen", name, subtitle: value.address || "未配置地址", badges: value.protocols || [], ...position }); });
   routes.forEach((route, index) => { const position = stackPosition(index, routes.length, 300, 34, 112); nodes.push({ id: `route:${route.name}`, kind: "route", name: route.name || `route-${index + 1}`, subtitle: route.match || "未配置匹配规则", badges: route.middlewares || [], ...position }); });
-  services.forEach(([name, value], index) => { const missing = !draft.services?.[name]; const position = stackPosition(index, services.length, 1010, 52, 145); nodes.push({ id: `service:${name}`, kind: "service", name, subtitle: missing ? "未定义 Service" : `${(value.upstreams || []).length} upstream`, badges: missing ? ["未定义"] : value.middlewares || [], ...position }); });
-  const actionRoutes = routes.filter(route => route.action?.redirect || route.action?.respond);
-  routes.forEach((route, index) => {
+  routes.forEach(route => {
     const routeID = `route:${route.name}`;
     if (route.limen && (draft.limens || {})[route.limen]) edges.push({ from: `limen:${route.limen}`, to: routeID });
-    let previous = routeID;
-    const action = route.action || {};
-    const forwardService = action.forward?.service || route.service;
-    let target = forwardService ? `service:${forwardService}` : undefined;
-    if (action.redirect || action.respond) {
-      const actionID = `action:${route.name}`;
-      if (!nodes.some(node => node.id === actionID)) { const position = stackPosition(actionRoutes.indexOf(route), actionRoutes.length, 1260, 52, 145); nodes.push({ id: actionID, kind: "action", name: `${route.name} action`, subtitle: action.redirect ? "Redirect" : "Direct response", badges: [], ...position }); }
-      target = actionID;
-    }
-    if (target && nodes.some(node => node.id === target)) edges.push({ from: previous, to: target });
   });
   return { nodes, edges };
 }
@@ -66,22 +52,28 @@ function stackPosition(index: number, count: number, baseX: number, top: number,
 export function addConfigNode(draft: Config, kind: NodeKind): { config: Config; id: string } {
   if (kind === "route") { const name = uniqueName("route", (draft.routes || []).map(item => item.name)); return { config: { ...draft, routes: [...(draft.routes || []), { name, match: "PathPrefix(`/new`)", action: { forward: { service: "" } }, middlewares: [] }] }, id: `route:${name}` }; }
   if (kind === "service") { const name = uniqueName("service", Object.keys(draft.services || {})); return { config: { ...draft, services: { ...(draft.services || {}), [name]: { upstreams: ["http://127.0.0.1:9000"], middlewares: [] } } }, id: `service:${name}` }; }
-  if (kind === "middleware") { const name = uniqueName("middleware", Object.keys(draft.middlewares || {})); return { config: { ...draft, middlewares: { ...(draft.middlewares || {}), [name]: { buffer: { max_response_body_bytes: 1048576 } } } }, id: `middleware:${name}` }; }
+  if (kind === "middleware") { const name = uniqueName("middleware", Object.keys(draft.middlewares || {})); return { config: { ...draft, middlewares: { ...(draft.middlewares || {}), [name]: { scope: "route", buffer: { max_response_body_bytes: 1048576 } } } }, id: `middleware:${name}` }; }
   const name = uniqueName("limen", Object.keys(draft.limens || {})); return { config: { ...draft, limens: { ...(draft.limens || {}), [name]: { address: "127.0.0.1:8080", protocols: ["http1"] } } }, id: `limen:${name}` };
 }
 
-// Route editing owns Middleware composition. Creating one here updates both
-// the reusable definition and the selected Route in one draft transaction.
-export function addMiddlewareToRoute(draft: Config, routeName: string): { config: Config; name: string } {
-  const name = uniqueName("middleware", Object.keys(draft.middlewares || {}));
-  const route = (draft.routes || []).find(item => item.name === routeName);
-  if (!route) return { config: draft, name };
+export function renameNode(draft: Config, node: GraphNode, requestedName: string): { config: Config; error?: string } {
+  if (node.kind !== "middleware") return { config: draft, error: "只有 Middleware 支持在此修改名称" };
+  const name = requestedName.trim();
+  if (!name) return { config: draft, error: "Middleware 名称不能为空" };
+  if (name === node.name) return { config: draft };
+  if (draft.middlewares?.[name]) return { config: draft, error: `Middleware 名称 ${name} 已存在` };
+  const definition = draft.middlewares?.[node.name];
+  if (!definition) return { config: draft, error: `找不到 Middleware ${node.name}` };
+  const middlewares = { ...(draft.middlewares || {}) };
+  delete middlewares[node.name];
+  middlewares[name] = definition;
+  const replace = (items: string[] | undefined) => (items || []).map(item => item === node.name ? name : item);
   return {
-    name,
     config: {
       ...draft,
-      middlewares: { ...(draft.middlewares || {}), [name]: { buffer: { max_response_body_bytes: 1048576 } } },
-      routes: (draft.routes || []).map(item => item.name === routeName ? { ...item, middlewares: [...(item.middlewares || []), name] } : item),
+      middlewares,
+      routes: (draft.routes || []).map(route => ({ ...route, middlewares: replace(route.middlewares) })),
+      services: Object.fromEntries(Object.entries(draft.services || {}).map(([serviceName, service]) => [serviceName, { ...service, middlewares: replace(service.middlewares) }])),
     },
   };
 }

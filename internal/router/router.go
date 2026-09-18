@@ -17,7 +17,6 @@ type Route struct {
 	Limen      string
 	Match      string
 	Priority   int
-	Protocols  []string
 	Host       string
 	PathPrefix string
 	Handler    http.Handler
@@ -40,12 +39,11 @@ type hostIndex struct {
 }
 
 type compiledRoute struct {
-	route               Route
-	matcher             *rules.Matcher
-	hints               rules.IndexHints
-	order               int
-	hostScoped          bool
-	legacyProtocolCheck bool
+	route      Route
+	matcher    *rules.Matcher
+	hints      rules.IndexHints
+	order      int
+	hostScoped bool
 }
 
 // New compiles the route expressions and builds the immutable candidate
@@ -75,7 +73,7 @@ func NewWithRegistry(routes []Route, registry *rules.Registry) (*Router, error) 
 			return nil, fmt.Errorf("route %q: %w", route.Name, err)
 		}
 		hints := matcher.IndexHints()
-		compiled := &compiledRoute{route: route, matcher: matcher, hints: hints, order: order, hostScoped: hints.Host != "", legacyProtocolCheck: route.Match == ""}
+		compiled := &compiledRoute{route: route, matcher: matcher, hints: hints, order: order, hostScoped: hints.Host != ""}
 		index := rt.any
 		if route.Limen != "" {
 			index = rt.byLimen[route.Limen]
@@ -143,11 +141,6 @@ func (rt *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	if best.legacyProtocolCheck && !routeProtocolMatches(best.route.Protocols, facts.Protocol) {
-		telemetry.MarkError(r.Context(), "unsupported_protocol")
-		http.Error(w, "request protocol is not enabled for this route", http.StatusNotImplemented)
-		return
-	}
 	best.route.Handler.ServeHTTP(w, r)
 }
 
@@ -207,18 +200,6 @@ func requestFacts(r *http.Request) *rules.Facts {
 		applicationProtocol = "sse"
 	}
 	return &rules.Facts{Host: host, Path: r.URL.Path, Method: r.Method, Protocol: applicationProtocol, Header: r.Header, Query: r.URL.Query()}
-}
-
-func routeProtocolMatches(protocols []string, actual string) bool {
-	if len(protocols) == 0 {
-		return actual == "http"
-	}
-	for _, name := range protocols {
-		if name == actual {
-			return true
-		}
-	}
-	return false
 }
 
 type pathRadixTree struct{ root *pathNode }

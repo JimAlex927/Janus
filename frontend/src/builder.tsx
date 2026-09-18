@@ -1,7 +1,10 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent as ReactDragEvent, type PointerEvent as ReactPointerEvent, type WheelEvent as ReactWheelEvent } from "react";
-import { addConfigNode, addMiddlewareToRoute, buildGraph, canConnectNodes, CANVAS_HEIGHT, CANVAS_WIDTH, clampPosition, connectNodes, KIND_META, NODE_HEIGHT, NODE_WIDTH, removeNode, updateNode, type Config, type GraphEdge, type GraphNode, type JsonObject, type NodeKind, type Position } from "./graph-model";
+import { addConfigNode, buildGraph, canConnectNodes, CANVAS_HEIGHT, CANVAS_WIDTH, clampPosition, connectNodes, KIND_META, NODE_HEIGHT, NODE_WIDTH, removeNode, updateNode, type Config, type GraphEdge, type GraphNode, type JsonObject, type NodeKind, type Position } from "./graph-model";
 import { InspectorModal } from "./inspector";
 import { simulateRequest, type SimulationResult } from "./simulation";
+import "./canvas-wheel.css";
+import "./canvas-interaction.css";
+import "./route-topology.css";
 
 const POSITION_KEY = "janus-console-canvas-positions-v1";
 
@@ -10,6 +13,7 @@ export function BuilderPage({ draft, revision, dirty = false, jsonText, jsonErro
   const [selectedId, setSelectedId] = useState("");
   const [positions, setPositions] = useState<Record<string, Position>>(() => readPositions());
   const [zoom, setZoom] = useState(0.68);
+  const [canvasActive, setCanvasActive] = useState(false);
   const [pan, setPan] = useState<Position>({ x: 24, y: 20 });
   const [moving, setMoving] = useState<{ id: string; start: Position; origin: Position } | null>(null);
   const [panning, setPanning] = useState<{ start: Position; origin: Position } | null>(null);
@@ -61,6 +65,14 @@ export function BuilderPage({ draft, revision, dirty = false, jsonText, jsonErro
     observer.observe(viewport);
     return () => observer.disconnect();
   }, [nodes.length]);
+  useEffect(() => {
+    const deactivateCanvas = (event: PointerEvent) => {
+      const viewport = canvasRef.current;
+      if (viewport && !viewport.contains(event.target as Node)) setCanvasActive(false);
+    };
+    document.addEventListener("pointerdown", deactivateCanvas);
+    return () => document.removeEventListener("pointerdown", deactivateCanvas);
+  }, []);
 
   function fitView() {
     const viewport = canvasRef.current;
@@ -97,22 +109,21 @@ export function BuilderPage({ draft, revision, dirty = false, jsonText, jsonErro
     setPanning({ start: { x: event.clientX, y: event.clientY }, origin: pan });
   }
   function zoomCanvas(event: ReactWheelEvent<HTMLDivElement>) {
+    if (!canvasActive) return;
     event.preventDefault();
+    event.stopPropagation();
     setZoom(value => Math.min(1.35, Math.max(0.55, value + (event.deltaY < 0 ? 0.06 : -0.06))));
   }
+  function activateCanvas() {
+    setCanvasActive(true);
+    canvasRef.current?.focus({ preventScroll: true });
+  }
   function addNode(kind: NodeKind, position?: Position) {
-    if (!draft || !["limen", "route", "service"].includes(kind)) return;
+    if (!draft || !["limen", "route"].includes(kind)) return;
     const next = addConfigNode(draft, kind);
     commitConfig(next.config);
     setPositions(old => ({ ...old, [next.id]: clampPosition(position || { x: 120 + nodes.length * 24, y: 120 + nodes.length * 18 }) }));
     setSelectedId(next.id);
-  }
-  function createMiddlewareForRoute(routeName: string) {
-    if (!draft) return;
-    const result = addMiddlewareToRoute(draft, routeName);
-    if (result.config === draft) { setNotice("找不到来源 Route"); return; }
-    commitConfig(result.config);
-    setNotice(`已创建并加入 ${result.name}`);
   }
   function updateMiddleware(name: string, definition: JsonObject) {
     if (!draft) return;
@@ -158,15 +169,11 @@ export function BuilderPage({ draft, revision, dirty = false, jsonText, jsonErro
   }
   function openEditor(nodeId: string) { setSelectedId(nodeId); setEditingId(nodeId); }
   function updateSelected(patch: JsonObject) {
-    if (!draft || !selected || selected.kind === "action") return;
+    if (!draft || !selected || selected.kind === "action" || selected.kind === "limen") return;
     commitConfig(updateNode(draft, selected, patch));
   }
   function removeSelected(): boolean {
-    if (!draft || !selected || selected.kind === "action") return false;
-    if (selected.kind === "service" && (draft.routes || []).some(route => route.action?.forward?.service === selected.name)) {
-      setNotice("这个 Service 仍被 Route 使用，请先断开 Route 连接");
-      return false;
-    }
+    if (!draft || !selected || selected.kind === "action" || selected.kind === "limen") return false;
     commitConfig(removeNode(draft, selected));
     setSelectedId("");
     return true;
@@ -208,26 +215,66 @@ export function BuilderPage({ draft, revision, dirty = false, jsonText, jsonErro
   if (!draft) return <section className="builder-empty">正在加载配置…</section>;
   return <section className="builder-shell">
     <div className="builder-toolbar">
-      <div><span className="eyebrow">CONFIGURATION WORKSPACE</span><h2>配置画布</h2><p>把入口、路由、策略和上游连接成一条可读的请求链路。</p></div>
+      <div><span className="eyebrow">CONFIGURATION WORKSPACE</span><p>只展示入口到路由的请求拓扑；Service 和 Middleware 在资源页面中管理。</p></div>
       <div className="builder-actions"><div className="history-actions"><button className="icon-action" title="撤销" disabled={history.length === 0} onClick={undo}>↶</button><button className="icon-action" title="重做" disabled={future.length === 0} onClick={redo}>↷</button></div><div className="mode-switch"><button className={mode === "visual" ? "active" : ""} onClick={() => setMode("visual")}>画布</button><button className={mode === "json" ? "active" : ""} onClick={() => setMode("json")}>JSON</button></div><span className={`builder-draft-state ${dirty ? "dirty" : ""}`}>{dirty ? "草稿未发布" : "已同步"}</span><button className="ghost" onClick={onValidate}>校验</button></div>
     </div>
-    {mode === "json" ? <div className="builder-json"><div className="builder-json-head"><div><h3>原始配置</h3><p>JSON 与画布共享同一份草稿，适合批量调整高级字段。</p></div>{jsonError && <span className="builder-error">{jsonError}</span>}</div><textarea className="json-editor" value={jsonText} onChange={event => changeJSON(event.target.value)} spellCheck={false} /></div> : <div className="builder-workspace">
-      <NodePalette onAdd={addNode} />
-      <div className="canvas-panel">
-        <div className="canvas-help"><span>拖动节点调整布局 · 右上角 … 编辑参数</span><span>输出端口 → 输入端口或目标节点连线 · 滚轮缩放</span></div>
-        {notice && <div className={`connect-notice ${connectingFrom ? "active" : ""}`}><span>{notice}</span><button onClick={() => { setConnectingFrom(null); setWirePosition(null); setNotice(""); }}>×</button></div>}
-        <div ref={canvasRef} className="canvas-viewport" tabIndex={0} onKeyDown={event => { if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z") { event.preventDefault(); event.shiftKey ? redo() : undo(); } else if (event.key === "Escape") { setConnectingFrom(null); setWirePosition(null); setNotice(""); } else if (event.key === "Delete") { removeSelected(); } }} onPointerDown={startPan} onPointerMove={moveCanvas} onPointerUp={endCanvas} onPointerCancel={endCanvas} onWheel={zoomCanvas} onDragOver={event => event.preventDefault()} onDrop={dropNode}>
-          <div className="canvas-world" style={{ width: CANVAS_WIDTH, height: CANVAS_HEIGHT, transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})` }}>
-            <svg className="canvas-edges" width={CANVAS_WIDTH} height={CANVAS_HEIGHT} aria-hidden="true">{edges.map(edge => { const from = nodes.find(node => node.id === edge.from); const to = nodes.find(node => node.id === edge.to); if (!from || !to) return null; return <GraphEdge key={`${edge.from}-${edge.to}`} from={visiblePosition(from)} to={visiblePosition(to)} />; })}{connectingFrom && wirePosition && (() => { const from = nodes.find(node => node.id === connectingFrom); if (!from) return null; return <GraphEdge preview from={visiblePosition(from)} to={{ x: wirePosition.x, y: wirePosition.y - NODE_HEIGHT / 2 }} />; })()}</svg>
-            {nodes.map(node => <GraphNodeCard key={node.id} node={node} position={visiblePosition(node)} selected={node.id === selected?.id || node.id === connectingFrom} connectionMode={Boolean(connectingFrom) && node.id !== connectingFrom} connectable={connectionTargets.has(node.id)} onPointerDown={moveNode} onSelect={setSelectedId} onEdit={openEditor} onPort={handlePort} />)}
-        </div>
-        <SimulationPanel draft={draft} onSelectRoute={name => setSelectedId(`route:${name}`)} />
-      </div>
-        <div className="canvas-zoom"><button onClick={() => setZoom(value => Math.max(.35, value - .1))}>−</button><span>{Math.round(zoom * 100)}%</span><button onClick={() => setZoom(value => Math.min(1.35, value + .1))}>＋</button><button onClick={fitView}>适配</button><button onClick={formatGraph}>自动排版</button></div>
-      </div>
-    </div>}
-    {editing && <InspectorModal node={editing} draft={draft} onUpdate={updateSelected} onCreateMiddleware={editing.kind === "route" ? () => createMiddlewareForRoute(editing.name) : undefined} onUpdateMiddleware={updateMiddleware} onRemove={() => { if (removeSelected()) setEditingId(null); }} onClose={() => setEditingId(null)} />}
+    {mode === "json" ? <div className="builder-json"><div className="builder-json-head"><div><h3>原始配置</h3><p>JSON 与路由列表共享同一份草稿，适合批量调整高级字段。</p></div>{jsonError && <span className="builder-error">{jsonError}</span>}</div><textarea className="json-editor" value={jsonText} onChange={event => changeJSON(event.target.value)} spellCheck={false} /></div> : <RouteTopology draft={draft} onChange={onChange} />}
   </section>;
+}
+
+function RouteTopology({ draft, onChange }: { draft: Config; onChange: (next: Config) => void }) {
+  const limens = Object.entries(draft.limens || {});
+  const [selectedLimen, setSelectedLimen] = useState("all");
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const routeNodes = buildGraph(draft).nodes.filter(node => node.kind === "route");
+  const editing = routeNodes.find(node => node.id === editingId);
+  const selectedName = selectedLimen === "all" ? "全部 Limen" : selectedLimen;
+  const routes = (draft.routes || []).filter(route => selectedLimen === "all" || route.limen === selectedLimen || (!route.limen && limens.length === 1));
+
+  function addRoute() {
+    const result = addConfigNode(draft, "route");
+    const existingRoutes = result.config.routes || [];
+    const route = existingRoutes[existingRoutes.length - 1];
+    if (!route) return;
+    const nextRoute = selectedLimen !== "all" ? { ...route, limen: selectedLimen } : route;
+    onChange({ ...result.config, routes: [...existingRoutes.slice(0, -1), nextRoute] });
+    setEditingId(result.id);
+  }
+  function updateSelected(patch: JsonObject) {
+    if (editing) onChange(updateNode(draft, editing, patch));
+  }
+  function updateMiddleware(name: string, definition: JsonObject) {
+    onChange({ ...draft, middlewares: { ...(draft.middlewares || {}), [name]: definition } });
+  }
+  function removeSelected() {
+    if (!editing) return;
+    onChange(removeNode(draft, editing));
+    setEditingId(null);
+  }
+  return (
+    <div className="route-topology">
+      <aside className="limen-directory">
+        <div className="directory-head"><div><strong>Limen</strong><small>选择入口查看 Route</small></div><span>{limens.length}</span></div>
+        <button className={`limen-item ${selectedLimen === "all" ? "active" : ""}`} onClick={() => setSelectedLimen("all")}><span className="list-icon registry-icon">∑</span><span><strong>全部入口</strong><small>显示所有 Route</small></span></button>
+        {limens.map(([name, limen]) => <button className={`limen-item ${selectedLimen === name ? "active" : ""}`} key={name} onClick={() => setSelectedLimen(name)}><span className="list-icon limen-directory-icon">◉</span><span><strong>{name}</strong><small>{limen.address || "未配置地址"}</small><small>{(limen.protocols || []).join(" · ")}</small></span></button>)}
+        {limens.length === 0 && <div className="empty">暂无 Limen</div>}
+      </aside>
+      <section className="route-directory">
+        <div className="route-directory-head"><div><span className="eyebrow">ROUTE RULES</span><h3>{selectedName}</h3><p>按入口查看请求规则；Service 和 Middleware 在 Route 编辑器中配置。</p></div><button className="primary" onClick={addRoute}>＋ 新建 Route</button></div>
+        <div className="route-cards">
+          {routes.map(route => {
+            const node = routeNodes.find(item => item.name === route.name);
+            if (!node) return null;
+            const action = route.action?.forward ? `→ ${route.action.forward.service || "未选择 Service"}` : route.action?.redirect ? `↗ ${route.action.redirect.location || "Redirect"}` : "响应";
+            return <button className="route-rule-card" key={route.name} onClick={() => setEditingId(node.id)}><span className="route-rule-icon">↗</span><span className="route-rule-main"><strong>{route.name}</strong><small>{route.match || `${route.host || "*"} · ${route.path_prefix || "/"}`}</small><small>{action}</small>{(route.middlewares || []).length > 0 && <span className="route-rule-badges">{route.middlewares.map(name => <em key={name}>{name}</em>)}</span>}</span><span className="chevron">›</span></button>;
+          })}
+          {routes.length === 0 && <div className="empty route-empty">当前 Limen 暂无 Route，点击右上角创建。</div>}
+        </div>
+        <SimulationPanel draft={draft} onSelectRoute={name => { const node = routeNodes.find(item => item.name === name); if (node) setEditingId(node.id); }} />
+      </section>
+      {editing && <InspectorModal node={editing} draft={draft} onUpdate={updateSelected} onUpdateMiddleware={updateMiddleware} onRemove={removeSelected} onClose={() => setEditingId(null)} />}
+    </div>
+  );
 }
 
 function SimulationPanel({ draft, onSelectRoute }: { draft: Config; onSelectRoute: (name: string) => void }) {
@@ -258,12 +305,12 @@ function SimulationResultView({ result }: { result: SimulationResult }) {
 }
 
 function NodePalette({ onAdd }: { onAdd: (kind: NodeKind) => void }) {
-  return <aside className="node-palette"><div className="palette-head"><h3>节点</h3><span>点击添加或拖入画布</span></div>{(["limen", "route", "service"] as NodeKind[]).map(kind => <button key={kind} className="palette-item" draggable onDragStart={event => event.dataTransfer.setData("application/x-janus-node", kind)} onClick={() => onAdd(kind)}><span className="palette-icon" style={{ background: KIND_META[kind].color }}>{KIND_META[kind].icon}</span><span><strong>{KIND_META[kind].label}</strong><small>{KIND_META[kind].description}</small></span><b>＋</b></button>)}<div className="palette-note"><strong>连接关系</strong><span>Limen → Route → Service</span><small>Middleware 在 Route 编辑器中创建、选择和排序。</small></div></aside>;
+  return <aside className="node-palette"><div className="palette-head"><h3>节点</h3><span>点击添加或拖入画布</span></div>{(["limen", "route"] as NodeKind[]).map(kind => <button key={kind} className="palette-item" draggable onDragStart={event => event.dataTransfer.setData("application/x-janus-node", kind)} onClick={() => onAdd(kind)}><span className="palette-icon" style={{ background: KIND_META[kind].color }}>{KIND_META[kind].icon}</span><span><strong>{KIND_META[kind].label}</strong><small>{KIND_META[kind].description}</small></span><b>＋</b></button>)}<div className="palette-note"><strong>连接关系</strong><span>Limen → Route</span><small>Service 和 Middleware 在各自资源页面创建，再由 Route 编辑器引用。</small></div></aside>;
 }
 
-function GraphNodeCard({ node, position, selected, connectionMode, connectable, onPointerDown, onSelect, onEdit, onPort }: { node: GraphNode; position: Position; selected: boolean; connectionMode: boolean; connectable: boolean; onPointerDown: (event: ReactPointerEvent<HTMLDivElement>, node: GraphNode) => void; onSelect: (id: string) => void; onEdit: (id: string) => void; onPort: (nodeId: string, direction: "in" | "out") => void }) {
+function GraphNodeCard({ node, position, selected, connectionMode, connectable, onPointerDown, onPointerMove, onPointerUp, onSelect, onEdit, onPort }: { node: GraphNode; position: Position; selected: boolean; connectionMode: boolean; connectable: boolean; onPointerDown: (event: ReactPointerEvent<HTMLDivElement>, node: GraphNode) => void; onPointerMove: (event: ReactPointerEvent<HTMLDivElement>) => void; onPointerUp: () => void; onSelect: (id: string) => void; onEdit: (id: string) => void; onPort: (nodeId: string, direction: "in" | "out") => void }) {
   const style: CSSProperties = { left: position.x, top: position.y, borderColor: selected ? KIND_META[node.kind].color : undefined };
-  return <div className={`graph-node ${selected ? "selected" : ""} ${connectable ? "connectable" : ""} ${connectionMode && !connectable ? "not-connectable" : ""}`} style={style} onPointerDown={event => onPointerDown(event, node)} onClick={() => connectionMode ? onPort(node.id, "in") : onSelect(node.id)}><div className="graph-node-head"><span className="graph-node-icon" style={{ background: KIND_META[node.kind].color }}>{KIND_META[node.kind].icon}</span><div><small>{KIND_META[node.kind].label}</small><strong>{node.name}</strong></div><button type="button" className="node-kebab" aria-label={`编辑 ${node.name}`} title="编辑节点" onPointerDown={event => event.stopPropagation()} onClick={event => { event.stopPropagation(); onEdit(node.id); }}>•••</button></div><p>{node.subtitle}</p>{node.badges.length > 0 && <div className="node-badges">{node.badges.slice(0, 3).map(badge => <span key={badge}>{badge}</span>)}</div>}<button type="button" className="port port-in" aria-label={`连接到 ${node.name}`} onPointerDown={event => event.stopPropagation()} onPointerUp={event => { event.stopPropagation(); onPort(node.id, "in"); }} onClick={event => { event.stopPropagation(); onPort(node.id, "in"); }} /><button type="button" className="port port-out" aria-label={`从 ${node.name} 连出`} onPointerDown={event => { event.stopPropagation(); onPort(node.id, "out"); }} onClick={event => event.stopPropagation()} /></div>;
+  return <div className={`graph-node ${selected ? "selected" : ""} ${connectable ? "connectable" : ""} ${connectionMode && !connectable ? "not-connectable" : ""}`} style={style} onPointerDown={event => onPointerDown(event, node)} onPointerMove={event => { event.stopPropagation(); onPointerMove(event); }} onPointerUp={event => { event.stopPropagation(); onPointerUp(); }} onPointerCancel={event => { event.stopPropagation(); onPointerUp(); }} onClick={() => connectionMode ? onPort(node.id, "in") : onSelect(node.id)}><div className="graph-node-head"><span className="graph-node-icon" style={{ background: KIND_META[node.kind].color }}>{KIND_META[node.kind].icon}</span><div><small>{KIND_META[node.kind].label}</small><strong>{node.name}</strong></div><button type="button" className="node-kebab" aria-label={`编辑 ${node.name}`} title="编辑节点" onPointerDown={event => event.stopPropagation()} onClick={event => { event.stopPropagation(); onEdit(node.id); }}>•••</button></div><p>{node.subtitle}</p>{node.badges.length > 0 && <div className="node-badges">{node.badges.slice(0, 3).map(badge => <span key={badge}>{badge}</span>)}</div>}<button type="button" className="port port-in" aria-label={`连接到 ${node.name}`} onPointerDown={event => event.stopPropagation()} onPointerUp={event => { event.stopPropagation(); onPort(node.id, "in"); }} onClick={event => { event.stopPropagation(); onPort(node.id, "in"); }} /><button type="button" className="port port-out" aria-label={`从 ${node.name} 连出`} onPointerDown={event => { event.stopPropagation(); onPort(node.id, "out"); }} onClick={event => event.stopPropagation()} /></div>;
 }
 
 function GraphEdge({ from, to, preview = false }: { from: Position; to: Position; preview?: boolean }) {

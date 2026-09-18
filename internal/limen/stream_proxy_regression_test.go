@@ -37,7 +37,7 @@ func TestSSEProxyTimeoutReleasesBackendAndAdmission(t *testing.T) {
 				Listen: "127.0.0.1:8080", Settings: settings,
 				Services:    map[string]config.Service{"events": {Upstreams: []string{backend.URL}}},
 				Middlewares: map[string]config.Middleware{"buffer": {Buffer: &config.BufferSettings{MaxResponseBodyBytes: 1024}}},
-				Routes:      []config.Route{{Name: "events", PathPrefix: "/", Protocols: []string{"sse"}, Service: "events", Middlewares: []string{"buffer"}}},
+				Routes:      []config.Route{{Name: "events", Match: "PathPrefix(`/`) && Protocol(`sse`)", Service: "events", Middlewares: []string{"buffer"}}},
 			}, nil)
 			if err != nil {
 				t.Fatal(err)

@@ -15,19 +15,19 @@ test("simulation selects the highest-priority matching route", () => {
   assert.deepEqual(result.matchedRoute?.middlewares, ["auth"]);
 });
 
-test("simulation respects route protocol and path-prefix boundaries", () => {
-  const config = { routes: [{ name: "events", path_prefix: "/events", protocols: ["sse"], service: "events" }] };
+test("simulation respects Protocol rules and path-prefix boundaries", () => {
+  const config = { routes: [{ name: "events", match: "PathPrefix(`/events`) && Protocol(`sse`)", service: "events" }] };
 
   assert.equal(simulateRequest(config, { target: "/events/1", method: "GET", protocol: "sse" }).matchedRoute?.name, "events");
   assert.equal(simulateRequest(config, { target: "/events-extra", method: "GET", protocol: "sse" }).matchedRoute, undefined);
   assert.equal(simulateRequest(config, { target: "/events/1", method: "GET", protocol: "http" }).matchedRoute, undefined);
 });
 
-test("simulation treats an empty structured protocol list as HTTP-only", () => {
+test("simulation treats a match without Protocol as protocol-agnostic", () => {
   const config = { routes: [{ name: "api", path_prefix: "/api", service: "api" }] };
 
   assert.equal(simulateRequest(config, { target: "/api", method: "GET", protocol: "http" }).matchedRoute?.name, "api");
-  assert.equal(simulateRequest(config, { target: "/api", method: "GET", protocol: "sse" }).matchedRoute, undefined);
+  assert.equal(simulateRequest(config, { target: "/api", method: "GET", protocol: "sse" }).matchedRoute?.name, "api");
 });
 
 test("simulation reports unsupported custom rules instead of guessing", () => {

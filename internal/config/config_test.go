@@ -3,6 +3,7 @@ package config
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -179,6 +180,21 @@ func TestServiceMiddlewareConfig(t *testing.T) {
 	}
 }
 
+func TestMiddlewareScopeConfig(t *testing.T) {
+	base := `{"listen":"127.0.0.1:8080","middlewares":{"policy":{"scope":"%s","body_limit":{"max_bytes":1024}}},"services":{"s":{"upstreams":["http://localhost:9000"]}},"routes":[{"name":"r","path_prefix":"/api","service":"s","middlewares":["policy"]}]}`
+	if _, err := Load(strings.NewReader(fmt.Sprintf(base, MiddlewareScopeRoute))); err != nil {
+		t.Fatalf("route-scoped middleware should load without an attachment: %v", err)
+	}
+	serviceScoped := fmt.Sprintf(base, MiddlewareScopeService)
+	if _, err := Load(strings.NewReader(serviceScoped)); err == nil {
+		t.Fatal("expected service-scoped middleware to be rejected when attached to a route")
+	}
+	invalidScope := strings.Replace(fmt.Sprintf(base, MiddlewareScopeRoute), `"scope":"route"`, `"scope":"admin"`, 1)
+	if _, err := Load(strings.NewReader(invalidScope)); err == nil {
+		t.Fatal("expected unsupported middleware scope to be rejected")
+	}
+}
+
 func TestServiceHealthCheckConfigAndDefaults(t *testing.T) {
 	body := `{"listen":"127.0.0.1:8080","services":{"s":{"upstreams":["http://localhost:9000"],"health_check":{"path":"/healthz","jitter":"250ms","unhealthy_threshold":3,"healthy_threshold":2,"expected_status":204}}},"routes":[{"name":"r","path_prefix":"/api","service":"s"}]}`
 	c, err := Load(strings.NewReader(body))
@@ -232,20 +248,15 @@ func TestInFlightMiddlewareConfig(t *testing.T) {
 	}
 }
 
-func TestRouteProtocolConfig(t *testing.T) {
-	base := `{"listen":"127.0.0.1:8080","services":{"s":{"upstreams":["http://localhost:9000"]}},"routes":[{"name":"r","path_prefix":"/stream","protocols":["sse","websocket"],"service":"s"}]}`
+func TestRouteProtocolMatchConfig(t *testing.T) {
+	base := "{\"listen\":\"127.0.0.1:8080\",\"services\":{\"s\":{\"upstreams\":[\"http://localhost:9000\"]}},\"routes\":[{\"name\":\"r\",\"match\":\"PathPrefix(`/stream`) && Protocol(`sse`)\",\"service\":\"s\"}]}"
 	if _, err := Load(strings.NewReader(base)); err != nil {
 		t.Fatal(err)
 	}
-	for _, value := range []string{"http3", "sse"} {
-		body := base
-		if value == "http3" {
-			body = strings.Replace(body, `"sse","websocket"`, `"http3"`, 1)
-		} else {
-			body = strings.Replace(body, `"sse","websocket"`, `"`+value+`","`+value+`"`, 1)
-		}
+	for _, expression := range []string{"PathPrefix(`/stream`) && Protocol(`http3`)", "PathPrefix(`/stream`) && Protocol()"} {
+		body := strings.Replace(base, "PathPrefix(`/stream`) && Protocol(`sse`)", expression, 1)
 		if _, err := Load(strings.NewReader(body)); err == nil {
-			t.Fatalf("expected invalid route protocol configuration for %q", value)
+			t.Fatalf("expected invalid Protocol expression %q", expression)
 		}
 	}
 }

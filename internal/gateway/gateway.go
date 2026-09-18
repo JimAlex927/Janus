@@ -179,7 +179,7 @@ func NewWithDiscovery(c config.Config, logger *zap.Logger, transport http.RoundT
 		}
 		routeHandler := middleware.Chain(actionHandler, routeMiddlewares...)
 		routeHandler = middleware.RouteMetadata(r.Name, serviceName)(routeHandler)
-		routes = append(routes, router.Route{Name: r.Name, Limen: r.Limen, Match: r.Match, Priority: r.Priority, Protocols: r.Protocols, Host: r.Host, PathPrefix: r.PathPrefix, Handler: routeHandler})
+		routes = append(routes, router.Route{Name: r.Name, Limen: r.Limen, Match: r.Match, Priority: r.Priority, Host: r.Host, PathPrefix: r.PathPrefix, Handler: routeHandler})
 	}
 	//http.Handler is an interface.
 	// Router itself is a loop of match. It contains

@@ -77,7 +77,6 @@ func (c Config) EffectiveView() EffectiveConfig {
 	}
 	routes := make([]Route, len(c.Routes))
 	for index, route := range c.Routes {
-		route.Protocols = append([]string(nil), route.Protocols...)
 		route.Middlewares = append([]string(nil), route.Middlewares...)
 		routes[index] = route
 	}

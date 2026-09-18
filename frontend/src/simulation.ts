@@ -80,10 +80,6 @@ function evaluateRoute(route: any, facts: Facts, limen: string): { matched: bool
     if (route.host && route.host.toLowerCase().replace(/\.$/, "") !== facts.host) return { matched: false, reason: "Host 不匹配" };
     const prefix = route.path_prefix || "/";
     if (!(prefix === "/" || facts.path === prefix || facts.path.startsWith(`${prefix}/`))) return { matched: false, reason: "PathPrefix 不匹配" };
-    const protocols: string[] = Array.isArray(route.protocols) ? route.protocols : [];
-    // Keep the simulator aligned with router.routeProtocolMatches: an empty
-    // list means the legacy/default HTTP route, not every application shape.
-    if (protocols.length === 0 ? facts.protocol !== "http" : !protocols.includes(facts.protocol)) return { matched: false, reason: "Protocol 不匹配" };
     return { matched: true, reason: "结构化规则通过" };
   } catch (error) {
     return { matched: false, reason: error instanceof Error ? error.message : "规则无法在浏览器中模拟" };

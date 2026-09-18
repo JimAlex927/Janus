@@ -159,19 +159,13 @@ func TestHTTPSCertificateVerification(t *testing.T) {
 	}
 }
 
-func TestUnsupportedTunnelAndUpgrade(t *testing.T) {
+func TestUnsupportedTunnel(t *testing.T) {
 	g := testGateway(t, "http://127.0.0.1:9000")
-	for _, method := range []string{"CONNECT", "GET"} {
-		r := httptest.NewRequest(method, "http://gateway/api", nil)
-		if method == "GET" {
-			r.Header.Set("Upgrade", "websocket")
-			r.Header.Set("Connection", "Upgrade")
-		}
-		w := httptest.NewRecorder()
-		g.ServeHTTP(w, r)
-		if w.Code != 501 {
-			t.Fatalf("%s: got %d", method, w.Code)
-		}
+	r := httptest.NewRequest(http.MethodConnect, "http://gateway/api", nil)
+	w := httptest.NewRecorder()
+	g.ServeHTTP(w, r)
+	if w.Code != http.StatusNotImplemented {
+		t.Fatalf("CONNECT: got %d", w.Code)
 	}
 }
 

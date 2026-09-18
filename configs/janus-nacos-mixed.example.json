@@ -13,6 +13,8 @@
           { "address": "127.0.0.1", "port": 8848 }
         ],
         "namespace_id": "platform-dev",
+        "username": "nacos",
+        "password": "nacos",
         "timeout": "5s",
         "stale_after": "2m"
       }

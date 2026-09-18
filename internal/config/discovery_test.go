@@ -58,6 +58,25 @@ func TestNacosPlaintextPasswordIsAcceptedButRedacted(t *testing.T) {
 	}
 }
 
+func TestNacosAdminSnapshotInheritsRedactedPassword(t *testing.T) {
+	previous := DiscoveryConfig{Nacos: map[string]NacosRegistry{
+		"platform": {Username: "nacos", Password: "secret"},
+	}}
+	candidate := DiscoveryConfig{Nacos: map[string]NacosRegistry{
+		"platform": {Username: "nacos"},
+	}}
+	got := candidate.InheritSecrets(previous)
+	if got.Nacos["platform"].Password != "secret" {
+		t.Fatalf("password = %q, want inherited secret", got.Nacos["platform"].Password)
+	}
+
+	candidate.Nacos["platform"] = NacosRegistry{Username: "nacos", PasswordEnv: "JANUS_NACOS_PASSWORD"}
+	got = candidate.InheritSecrets(previous)
+	if got.Nacos["platform"].Password != "" || got.Nacos["platform"].PasswordEnv != "JANUS_NACOS_PASSWORD" {
+		t.Fatalf("explicit password_env was overwritten: %+v", got.Nacos["platform"])
+	}
+}
+
 func TestNacosConfigurationRejectsAmbiguousSources(t *testing.T) {
 	for name, mutate := range map[string]func(*Config){
 		"both": func(c *Config) {

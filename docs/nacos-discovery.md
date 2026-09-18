@@ -70,8 +70,9 @@ Nacos 服务端按 2.x 的 Naming/gRPC 模型接入，固定 Go SDK `v2.3.5`。�
 仓库中的可运行配置示例：
 
 - `configs/janus-nacos.example.json`：一个 namespace，两个 Nacos Service，共享一个连接和客户端。
-- `configs/janus-nacos-multi-namespace.example.json`：同一 Nacos 集群的两个 namespace、多个服务器和显式 gRPC 端口。
-- `configs/janus-nacos-mixed.example.json`：Nacos 动态 Service 与静态 URL Service 共存，并展示后端 HTTPS scheme。
+- `configs/janus-nacos-multi-namespace.example.json`：同一 Nacos 集群的两个 namespace、不同账号、多个服务器和显式 gRPC 端口。
+- `configs/janus-nacos-mixed.example.json`：带账号密码的 Nacos 动态 Service 与静态 URL Service 共存，并展示后端 HTTPS scheme。
+- `configs/janus-nacos-env.example.json`：账号写入 JSON，密码通过 `JANUS_NACOS_PASSWORD` 注入。
 
 这些示例只做配置检查，不会在 `-check` 模式连接 Nacos；正式启动前需要设置
 `password_env` 指定的环境变量，并确认 Nacos HTTP/gRPC 端口可访问。

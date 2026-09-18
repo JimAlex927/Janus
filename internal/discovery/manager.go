@@ -53,6 +53,16 @@ type Status struct {
 	Expired    bool      `json:"expired"`
 }
 
+// RegistryHealth is the safe result returned by an administrative registry
+// connectivity probe. It never contains registry credentials.
+type RegistryHealth struct {
+	Registry  string    `json:"registry"`
+	Healthy   bool      `json:"healthy"`
+	CheckedAt time.Time `json:"checked_at"`
+	LatencyMS int64     `json:"latency_ms"`
+	Error     string    `json:"error,omitempty"`
+}
+
 type Lease struct {
 	Pool    *upstream.DynamicPool
 	feed    *feedRef
@@ -77,6 +87,25 @@ func (l *Lease) Status() Status {
 
 func NewManager(factory Factory) *Manager {
 	return &Manager{factory: factory, clients: make(map[string]*clientRef), feeds: make(map[string]*feedRef)}
+}
+
+// CheckRegistry creates a short-lived client and performs a naming lookup.
+// The synthetic service name makes this a registry/authentication check and
+// does not depend on any configured application service.
+func (m *Manager) CheckRegistry(registry config.NacosRegistry) error {
+	if m == nil || m.factory == nil {
+		return fmt.Errorf("discovery manager is not configured")
+	}
+	client, err := m.factory(registry.WithDefaults())
+	if err != nil {
+		return err
+	}
+	if client == nil {
+		return fmt.Errorf("discovery factory returned a nil client")
+	}
+	defer client.Close()
+	_, err = client.Snapshot(config.NacosService{ServiceName: "__janus_registry_health__"})
+	return err
 }
 
 func key(value any) string { data, _ := json.Marshal(value); return string(data) }

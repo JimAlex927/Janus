@@ -87,6 +87,25 @@ func (d DiscoveryConfig) Redacted() DiscoveryConfig {
 	return result
 }
 
+// InheritSecrets restores credentials omitted by the redacted admin snapshot.
+// The console never receives plaintext passwords, so publishing an otherwise
+// unchanged configuration must retain the active registry credentials.
+func (d DiscoveryConfig) InheritSecrets(previous DiscoveryConfig) DiscoveryConfig {
+	if d.Nacos == nil || previous.Nacos == nil {
+		return d
+	}
+	result := d
+	result.Nacos = make(map[string]NacosRegistry, len(d.Nacos))
+	for name, registry := range d.Nacos {
+		if old, ok := previous.Nacos[name]; ok && registry.Password == "" && registry.PasswordEnv == "" {
+			registry.Password = old.Password
+			registry.PasswordEnv = old.PasswordEnv
+		}
+		result.Nacos[name] = registry
+	}
+	return result
+}
+
 var environmentName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
 func (c Config) validateDiscovery() error {

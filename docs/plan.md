@@ -236,8 +236,8 @@ capability and GOAWAY qualification remain in later protocol work.
 
 ## Phase 2E: long-lived HTTP protocols — complete
 
-Routes can explicitly declare `sse` or `websocket` in their `protocols` list.
-SSE uses the normal HTTP response path with immediate event flushing. Classic
+Routes select `sse` or `websocket` with the Match DSL's `Protocol(...)` rule;
+there is no separate Route `protocols` field. SSE uses the normal HTTP response path with immediate event flushing. Classic
 HTTP/1 WebSocket upgrades are forwarded through `ReverseProxy`; arbitrary
 upgrades, CONNECT, and HTTP/2 extended CONNECT remain rejected. Long-lived
 requests bypass the bounded API timeout and finite write deadline. They use the

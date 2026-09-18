@@ -153,11 +153,12 @@ upstream HTTP/2 capability alone is not a gRPC support claim. Janus supports SSE
 through the normal HTTP response path and proxies classic HTTP/1 WebSocket
 upgrades through `ReverseProxy`; HTTP/3 uses the same `http.Handler` contract
 for ordinary requests and SSE. WebSocket extended CONNECT over HTTP/2 or H3 is
-not enabled. WebSocket routes must be explicitly declared with
-`"protocols": ["websocket"]`; SSE routes use `"protocols": ["sse"]`. Both
-protocol classifiers require the standard `GET` request method. The route-level
-buffer policy bypasses both streaming modes so it cannot delay
-events or break the upgrade handshake.
+not enabled. Route application protocols are expressed in the Match DSL, for
+example `PathPrefix(/socket) && Protocol(websocket)` or
+`PathPrefix(/events) && Protocol(sse)`; there is no separate Route
+`protocols` field. Both protocol classifiers require the standard `GET` request
+method. The route-level buffer policy bypasses both streaming modes so it
+cannot delay events or break the upgrade handshake.
 
 ## Reading list
 

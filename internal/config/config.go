@@ -37,15 +37,12 @@ type Config struct {
 }
 
 const (
-	CurrentConfigVersion   = 1
-	ProtocolHTTP1          = "http1"
-	ProtocolHTTP2          = "http2"
-	ProtocolH2C            = "h2c"
-	ProtocolHTTP3          = "http3"
-	RouteProtocolHTTP      = "http"
-	RouteProtocolSSE       = "sse"
-	RouteProtocolWebSocket = "websocket"
-	MaxTrustedProxyCIDRs   = 128
+	CurrentConfigVersion = 1
+	ProtocolHTTP1        = "http1"
+	ProtocolHTTP2        = "http2"
+	ProtocolH2C          = "h2c"
+	ProtocolHTTP3        = "http3"
+	MaxTrustedProxyCIDRs = 128
 )
 
 // LimenConfig describes one inbound protocol binding. HTTP/2 means TLS-backed
@@ -92,11 +89,23 @@ func (s HTTP3Settings) Validate() error {
 }
 
 // Middleware is a named, typed route/service middleware definition.
-// Exactly one policy is allowed per definition.
+// Scope is optional for backwards compatibility: an empty scope means the
+// definition may be attached to either a route or a service. New definitions
+// should declare route or service explicitly.
 type Middleware struct {
+	Scope     string             `json:"scope,omitempty"`
 	Buffer    *BufferSettings    `json:"buffer,omitempty"`
 	BodyLimit *BodyLimitSettings `json:"body_limit,omitempty"`
 	InFlight  *InFlightSettings  `json:"in_flight,omitempty"`
+}
+
+const (
+	MiddlewareScopeRoute   = "route"
+	MiddlewareScopeService = "service"
+)
+
+func (m Middleware) AllowsScope(scope string) bool {
+	return m.Scope == "" || m.Scope == scope
 }
 
 type BufferSettings struct {
@@ -160,7 +169,6 @@ type Route struct {
 	Limen       string       `json:"limen,omitempty"`
 	Match       string       `json:"match,omitempty"`
 	Priority    int          `json:"priority,omitempty"`
-	Protocols   []string     `json:"protocols,omitempty"`
 	Host        string       `json:"host,omitempty"`
 	PathPrefix  string       `json:"path_prefix,omitempty"`
 	Service     string       `json:"service,omitempty"`
@@ -200,6 +208,42 @@ func Load(r io.Reader) (Config, error) {
 	if len(data) > MaxConfigBytes {
 		return Config{}, fmt.Errorf("config exceeds %d bytes", MaxConfigBytes)
 	}
+	return loadBytes(data, "")
+}
+
+// LoadWithAdminPasswordHash loads a configuration submitted by the admin
+// console. The console receives a redacted password_hash, so an empty value
+// may mean "keep the currently active hash". The normal Load path remains
+// strict; callers must explicitly provide the hash they want to inherit.
+func LoadWithAdminPasswordHash(r io.Reader, inheritedHash string) (Config, error) {
+	data, err := io.ReadAll(io.LimitReader(r, MaxConfigBytes+1))
+	if err != nil {
+		return Config{}, fmt.Errorf("read config: %w", err)
+	}
+	if len(data) > MaxConfigBytes {
+		return Config{}, fmt.Errorf("config exceeds %d bytes", MaxConfigBytes)
+	}
+	return loadBytes(data, inheritedHash)
+}
+
+// LoadWithAdminSecrets is the admin-console variant that also restores
+// redacted Nacos credentials from the currently active configuration.
+func LoadWithAdminSecrets(r io.Reader, inheritedHash string, previous DiscoveryConfig) (Config, error) {
+	data, err := io.ReadAll(io.LimitReader(r, MaxConfigBytes+1))
+	if err != nil {
+		return Config{}, fmt.Errorf("read config: %w", err)
+	}
+	if len(data) > MaxConfigBytes {
+		return Config{}, fmt.Errorf("config exceeds %d bytes", MaxConfigBytes)
+	}
+	return loadBytesWithSecrets(data, inheritedHash, previous)
+}
+
+func loadBytes(data []byte, inheritedHash string) (Config, error) {
+	return loadBytesWithSecrets(data, inheritedHash, DiscoveryConfig{})
+}
+
+func loadBytesWithSecrets(data []byte, inheritedHash string, previous DiscoveryConfig) (Config, error) {
 	if err := rejectDuplicateJSONKeys(data); err != nil {
 		return Config{}, fmt.Errorf("decode config: %w", err)
 	}
@@ -211,6 +255,12 @@ func Load(r io.Reader) (Config, error) {
 	}
 	if err := d.Decode(new(any)); err != io.EOF {
 		return c, fmt.Errorf("config must contain exactly one JSON object")
+	}
+	if inheritedHash != "" && c.Settings.Admin.PasswordHash == "" {
+		c.Settings.Admin.PasswordHash = inheritedHash
+	}
+	if len(previous.Nacos) > 0 {
+		c.Discovery = c.Discovery.InheritSecrets(previous)
 	}
 	c = c.WithDefaults()
 	return c, c.Validate()
@@ -416,7 +466,11 @@ func (c Config) Validate() error {
 			if _, ok := c.Middlewares[middlewareName]; !ok {
 				return fmt.Errorf("service %q references missing middleware %q", name, middlewareName)
 			}
-			if c.Middlewares[middlewareName].InFlight != nil {
+			definition := c.Middlewares[middlewareName]
+			if !definition.AllowsScope(MiddlewareScopeService) {
+				return fmt.Errorf("service %q cannot use %s-scoped middleware %q", name, definition.Scope, middlewareName)
+			}
+			if definition.InFlight != nil {
 				inFlightPolicies++
 			}
 		}
@@ -446,16 +500,6 @@ func (c Config) Validate() error {
 		} else if _, ok := bindings[r.Limen]; !ok {
 			return fmt.Errorf("route %q references missing limen %q", r.Name, r.Limen)
 		}
-		seenProtocols := map[string]bool{}
-		for _, routeProtocol := range r.Protocols {
-			if routeProtocol != RouteProtocolHTTP && routeProtocol != RouteProtocolSSE && routeProtocol != RouteProtocolWebSocket {
-				return fmt.Errorf("route %q has unsupported protocol %q", r.Name, routeProtocol)
-			}
-			if seenProtocols[routeProtocol] {
-				return fmt.Errorf("route %q enables protocol %q more than once", r.Name, routeProtocol)
-			}
-			seenProtocols[routeProtocol] = true
-		}
 		seenMiddlewares := map[string]bool{}
 		for _, middlewareName := range r.Middlewares {
 			if middlewareName == "" {
@@ -468,13 +512,17 @@ func (c Config) Validate() error {
 			if _, ok := c.Middlewares[middlewareName]; !ok {
 				return fmt.Errorf("route %q references missing middleware %q", r.Name, middlewareName)
 			}
-			if c.Middlewares[middlewareName].InFlight != nil {
+			definition := c.Middlewares[middlewareName]
+			if !definition.AllowsScope(MiddlewareScopeRoute) {
+				return fmt.Errorf("route %q cannot use %s-scoped middleware %q", r.Name, definition.Scope, middlewareName)
+			}
+			if definition.InFlight != nil {
 				return fmt.Errorf("route %q cannot use service-only in_flight middleware %q", r.Name, middlewareName)
 			}
 		}
 		if r.Match != "" {
-			if r.Host != "" || r.PathPrefix != "" || len(r.Protocols) != 0 {
-				return fmt.Errorf("route %q cannot combine match with host, path_prefix, or protocols", r.Name)
+			if r.Host != "" || r.PathPrefix != "" {
+				return fmt.Errorf("route %q cannot combine match with host or path_prefix", r.Name)
 			}
 			if _, err := rules.DefaultRegistry().Compile(r.Match); err != nil {
 				return fmt.Errorf("route %q match: %w", r.Name, err)
@@ -507,6 +555,9 @@ func (c Config) Validate() error {
 		if name == "" {
 			return fmt.Errorf("middleware names must be nonempty")
 		}
+		if definition.Scope != "" && definition.Scope != MiddlewareScopeRoute && definition.Scope != MiddlewareScopeService {
+			return fmt.Errorf("middleware %q has unsupported scope %q", name, definition.Scope)
+		}
 		defined := 0
 		if definition.Buffer != nil {
 			defined++
@@ -519,6 +570,9 @@ func (c Config) Validate() error {
 		}
 		if defined != 1 {
 			return fmt.Errorf("middleware %q must define exactly one policy", name)
+		}
+		if definition.Scope == MiddlewareScopeRoute && definition.InFlight != nil {
+			return fmt.Errorf("middleware %q: in_flight is service-scoped", name)
 		}
 		if definition.Buffer != nil && (definition.Buffer.MaxResponseBodyBytes < 1 || definition.Buffer.MaxResponseBodyBytes > MaxBufferedResponseBytes) {
 			return fmt.Errorf("middleware %q buffer.max_response_body_bytes must be between 1 and %d bytes", name, MaxBufferedResponseBytes)
