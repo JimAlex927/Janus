@@ -1,0 +1,92 @@
+{
+  "version": 1,
+  "limens": {
+    "internal-http": {
+      "address": "127.0.0.1:8081",
+      "protocols": ["http1"]
+    }
+  },
+  "discovery": {
+    "nacos": {
+      "orders-prod": {
+        "servers": [
+          { "address": "nacos-1.internal", "port": 8848, "grpc_port": 9848 },
+          { "address": "nacos-2.internal", "port": 8848, "grpc_port": 9848 }
+        ],
+        "namespace_id": "orders-production",
+        "username": "janus",
+        "password_env": "JANUS_NACOS_PASSWORD",
+        "timeout": "5s",
+        "stale_after": "3m"
+      },
+      "payments-prod": {
+        "servers": [
+          { "address": "nacos-1.internal", "port": 8848, "grpc_port": 9848 },
+          { "address": "nacos-2.internal", "port": 8848, "grpc_port": 9848 }
+        ],
+        "namespace_id": "payments-production",
+        "username": "janus",
+        "password_env": "JANUS_NACOS_PASSWORD",
+        "timeout": "5s",
+        "stale_after": "3m"
+      }
+    }
+  },
+  "settings": {
+    "request": {
+      "read_timeout": "30s",
+      "maximum_duration": "30s",
+      "max_in_flight": 2048
+    },
+    "server": {
+      "read_header_timeout": "5s",
+      "write_timeout": "35s",
+      "idle_timeout": "60s",
+      "max_header_bytes": 32768
+    },
+    "backend": {
+      "connect_timeout": "3s",
+      "keep_alive": "30s",
+      "response_header_timeout": "10s",
+      "max_idle_conns": 256,
+      "max_idle_conns_per_host": 32,
+      "max_conns_per_host": 256,
+      "idle_conn_timeout": "90s",
+      "disable_compression": true
+    }
+  },
+  "services": {
+    "orders": {
+      "nacos": {
+        "registry": "orders-prod",
+        "service_name": "order-service",
+        "group_name": "DEFAULT_GROUP",
+        "clusters": ["DEFAULT"],
+        "scheme": "http"
+      }
+    },
+    "payments": {
+      "nacos": {
+        "registry": "payments-prod",
+        "service_name": "payment-service",
+        "group_name": "DEFAULT_GROUP",
+        "clusters": ["DEFAULT"],
+        "scheme": "http"
+      }
+    }
+  },
+  "routes": [
+    {
+      "name": "orders-api",
+      "limen": "internal-http",
+      "match": "PathPrefix(`/orders`) && Method(`GET`) && Protocol(`http`)",
+      "action": { "forward": { "service": "orders" } }
+    },
+    {
+      "name": "payments-api",
+      "limen": "internal-http",
+      "match": "PathPrefix(`/payments`) && Protocol(`http`)",
+      "action": { "forward": { "service": "payments" } }
+    }
+  ]
+}

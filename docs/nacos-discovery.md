@@ -66,6 +66,15 @@ Nacos 服务端按 2.x 的 Naming/gRPC 模型接入，固定 Go SDK `v2.3.5`。�
 - `stale_after` 默认 2m（30s..24h），表示最后一次观察到新的服务快照后，最多继续使用地址多久。应大于 Nacos 的正常刷新周期。
 - 本轮支持的 Nacos 连接使用 SDK 默认内网 HTTP/gRPC；Nacos TLS/mTLS、RAM 动态身份不在当前配置契约中。`scheme: https` 控制的是后端实例连接，不是 Nacos 连接。
 
+仓库中的可运行配置示例：
+
+- `configs/janus-nacos.example.json`：一个 namespace，两个 Nacos Service，共享一个连接和客户端。
+- `configs/janus-nacos-multi-namespace.example.json`：同一 Nacos 集群的两个 namespace、多个服务器和显式 gRPC 端口。
+- `configs/janus-nacos-mixed.example.json`：Nacos 动态 Service 与静态 URL Service 共存，并展示后端 HTTPS scheme。
+
+这些示例只做配置检查，不会在 `-check` 模式连接 Nacos；正式启动前需要设置
+`password_env` 指定的环境变量，并确认 Nacos HTTP/gRPC 端口可访问。
+
 ## 分层和所有权
 
 ```text

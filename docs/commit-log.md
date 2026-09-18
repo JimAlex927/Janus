@@ -32,6 +32,10 @@ The next working-tree change adds the authenticated `GET /api/v1/discovery`
 endpoint and its Admin regression test, exposing only the Runtime's local
 discovery snapshot for the console.
 
+The configuration examples were then expanded with single-namespace,
+multi-namespace, and mixed static/Nacos files. Each new Nacos example passes
+`go run ./cmd/janus -check`; `-check` intentionally does not connect to Nacos.
+
 ## 2026-09-17
 
 ### Improve console editing workflow

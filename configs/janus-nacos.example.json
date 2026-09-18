@@ -1,0 +1,82 @@
+{
+  "version": 1,
+  "limens": {
+    "public-http": {
+      "address": "127.0.0.1:8080",
+      "protocols": ["http1"]
+    }
+  },
+  "discovery": {
+    "nacos": {
+      "default": {
+        "servers": [
+          { "address": "127.0.0.1", "port": 8848 }
+        ],
+        "namespace_id": "public",
+        "username": "nacos",
+        "password_env": "JANUS_NACOS_PASSWORD",
+        "timeout": "5s",
+        "stale_after": "2m"
+      }
+    }
+  },
+  "settings": {
+    "request": {
+      "read_timeout": "30s",
+      "maximum_duration": "30s",
+      "max_in_flight": 1024
+    },
+    "backend": {
+      "connect_timeout": "3s",
+      "response_header_timeout": "10s",
+      "max_idle_conns": 128,
+      "max_idle_conns_per_host": 32,
+      "max_conns_per_host": 128,
+      "idle_conn_timeout": "90s"
+    }
+  },
+  "middlewares": {
+    "api-in-flight": {
+      "in_flight": { "max_concurrent": 256 }
+    },
+    "api-buffer": {
+      "buffer": { "max_response_body_bytes": 8388608 }
+    }
+  },
+  "services": {
+    "orders": {
+      "nacos": {
+        "registry": "default",
+        "service_name": "order-service",
+        "group_name": "DEFAULT_GROUP",
+        "clusters": ["DEFAULT"],
+        "scheme": "http"
+      },
+      "middlewares": ["api-in-flight"]
+    },
+    "payments": {
+      "nacos": {
+        "registry": "default",
+        "service_name": "payment-service",
+        "group_name": "DEFAULT_GROUP",
+        "scheme": "http"
+      },
+      "middlewares": ["api-in-flight"]
+    }
+  },
+  "routes": [
+    {
+      "name": "orders-api",
+      "limen": "public-http",
+      "match": "Host(`api.example.internal`) && PathPrefix(`/orders`) && Protocol(`http`)",
+      "middlewares": ["api-buffer"],
+      "action": { "forward": { "service": "orders" } }
+    },
+    {
+      "name": "payments-api",
+      "limen": "public-http",
+      "match": "Host(`api.example.internal`) && PathPrefix(`/payments`) && Protocol(`http`)",
+      "action": { "forward": { "service": "payments" } }
+    }
+  ]
+}
