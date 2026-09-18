@@ -405,139 +405,7 @@ export function RegistryForm({ value, onChange }: { value: NacosRegistry; onChan
   );
 }
 
-export function LimenEditor({
-  name,
-  value,
-  isNew,
-  activeExists,
-  onName,
-  onChange,
-  onConfirm,
-  onCancel,
-  onClose,
-  onDelete,
-  onStageLimens,
-}: {
-  name: string;
-  value: Limen;
-  isNew: boolean;
-  activeExists: boolean;
-  onName?: (name: string) => void;
-  onChange: (value: Limen) => void;
-  onConfirm: () => void;
-  onCancel: () => void;
-  onClose: () => void;
-  onDelete?: () => void;
-  onStageLimens?: () => void;
-}) {
-  const tlsOn = Boolean(value.tls);
-  function toggleProtocol(protocol: string) {
-    const list = value.protocols || [];
-    onChange({ ...value, protocols: list.includes(protocol) ? list.filter((p) => p !== protocol) : [...list, protocol] });
-  }
-  function toggleTLS(checked: boolean) {
-    if (checked) {
-      // TLS 与 h2c 互斥：开 TLS 自动移除 h2c；清完后至少保留 http1
-      const kept = (value.protocols || []).filter((p) => p !== "h2c");
-      if (kept.length === 0) kept.push("http1");
-      onChange({ ...value, protocols: kept, tls: { cert_file: "certs/janus.crt", key_file: "certs/janus.key", min_version: "1.3" } });
-    } else {
-      // 关 TLS 自动移除依赖它的 http2 / http3；同样至少保留 http1
-      const kept = (value.protocols || []).filter((p) => p !== "http2" && p !== "http3");
-      if (kept.length === 0) kept.push("http1");
-      onChange({ ...value, protocols: kept, tls: undefined, http3: undefined });
-    }
-  }
-  const noTcpFallback = (value.protocols || []).includes("http3") && !(value.protocols || []).includes("http1") && !(value.protocols || []).includes("http2");
-  return (
-    <Drawer
-      title={isNew ? "新建入口" : `编辑入口 ${name}`}
-      subtitle="入口的监听配置是启动级的：发布后路由部分即时生效，入口变更需改文件并重启。"
-      onClose={onClose}
-      onConfirm={onConfirm}
-      onCancel={onCancel}
-      onDelete={onDelete}
-    >
-      <p>
-        {activeExists ? <em className="badge badge-success">线上已有</em> : <em className="badge badge-warn">草稿新增（发布需重启）</em>}
-      </p>
-      {isNew && (
-        <Field label="名称">
-          <input value={name} onChange={(e) => onName?.(e.target.value)} placeholder="public-http" />
-        </Field>
-      )}
-      <Field label="Address" hint="host:port，例如 127.0.0.1:8080">
-        <input value={value.address} onChange={(e) => onChange({ ...value, address: e.target.value })} />
-      </Field>
-      <div className="check-group">
-        <div className="field-label">Protocols</div>
-        {([
-          ["http1", "HTTP/1.1", "", false],
-          ["http2", "HTTP/2", "需 TLS", !tlsOn],
-          ["h2c", "h2c（明文）", tlsOn ? "不可与 TLS 共存" : "", tlsOn],
-          ["http3", "HTTP/3", "需 TLS＋TCP 回退", !tlsOn],
-        ] as [string, string, string, boolean][]).map(([v, label, reason, disabled]) => (
-          <label className={`check-row ${disabled ? "disabled" : ""}`} key={v} title={disabled && reason ? reason : label}>
-            <input type="checkbox" checked={(value.protocols || []).includes(v)} disabled={disabled} onChange={() => toggleProtocol(v)} />
-            <span><strong>{label}</strong>{disabled && reason && <small>{reason}，当前不可选</small>}</span>
-          </label>
-        ))}
-        {noTcpFallback && <small className="error-text">HTTP/3 需要同时保留 HTTP/1.1 或 HTTP/2 作为 TCP 回退，否则确认时会被拒绝。</small>}
-      </div>
-      <Field label="Trusted proxies" hint="每行一个 CIDR，可留空">
-        <DraftTextarea rows={2} value={(value.trusted_proxies || []).join("\n")} parse={splitLines} onChange={(next) => onChange({ ...value, trusted_proxies: next as string[] })} placeholder="10.0.0.0/8" />
-      </Field>
-      <label className="check-row">
-        <input
-          type="checkbox"
-          checked={tlsOn}
-          onChange={(e) => toggleTLS(e.target.checked)}
-        />
-        <span><strong>启用 TLS</strong><small>开启会自动移除互斥的 h2c；关闭会自动移除 http2 / http3</small></span>
-      </label>
-      {value.tls && (
-        <>
-          <Field label="cert_file">
-            <input value={value.tls.cert_file} onChange={(e) => onChange({ ...value, tls: { ...value.tls!, cert_file: e.target.value } })} />
-          </Field>
-          <Field label="key_file">
-            <input value={value.tls.key_file} onChange={(e) => onChange({ ...value, tls: { ...value.tls!, key_file: e.target.value } })} />
-          </Field>
-          <Field label="min_version">
-            <select value={value.tls.min_version || "1.3"} onChange={(e) => onChange({ ...value, tls: { ...value.tls!, min_version: e.target.value } })}>
-              <option value="1.2">TLS 1.2</option>
-              <option value="1.3">TLS 1.3</option>
-            </select>
-          </Field>
-          <label className="check-row">
-            <input
-              type="checkbox"
-              checked={Boolean(value.http3)}
-              disabled={!value.tls}
-              onChange={(e) =>
-                onChange({
-                  ...value,
-                  http3: e.target.checked ? { max_concurrent_streams: 100 } : undefined,
-                  protocols: e.target.checked ? [...new Set([...(value.protocols || []), "http3"])] : (value.protocols || []).filter((p) => p !== "http3"),
-                })
-              }
-            />
-            <span><strong>启用 HTTP/3</strong></span>
-          </label>
-        </>
-      )}
-      {onStageLimens && (
-        <div className="stage-box">
-          <div className="field-label">入口写文件</div>
-          <small className="muted">写入的是已保存草稿中的入口（抽屉未确认、草稿未保存请先处理）。运行不受影响，重启后生效。</small>
-          <button type="button" className="btn small" onClick={onStageLimens}>写入文件（需重启生效）</button>
-        </div>
-      )}
-    </Drawer>
-  );
-}
-
-export function LimenViewer({ name, limen, onClose }: { name: string; limen: Limen; onClose: () => void }) {
+export function LimenViewer({ name, limen, onClose, onStageLimens }: { name: string; limen: Limen; onClose: () => void; onStageLimens?: () => void }) {
   return (
     <Drawer
       title={`入口 ${name}`}
@@ -563,6 +431,13 @@ export function LimenViewer({ name, limen, onClose }: { name: string; limen: Lim
         <Field label="HTTP/3 max_concurrent_streams">
           <input value={String(limen.http3.max_concurrent_streams ?? "")} readOnly />
         </Field>
+      )}
+      {onStageLimens && (
+        <div className="stage-box">
+          <div className="field-label">入口写文件</div>
+          <small className="muted">入口变更不通过热发布；保存草稿后可将已保存入口写入生效文件，重启后生效。</small>
+          <button type="button" className="btn small" onClick={onStageLimens}>写入文件（需重启生效）</button>
+        </div>
       )}
     </Drawer>
   );

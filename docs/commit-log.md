@@ -2025,3 +2025,27 @@ Verification:
 - Reviewed the plan against `config.MiddlewareCapabilities` and the gateway
   constructor switch
 - `git diff --check`
+
+## 2026-09-18
+
+### Make Limen nodes read-only in the console
+
+Commit message: `fix(console): keep limen editing startup-only`
+
+Scope:
+
+- Replaced the canvas Limen editor with the existing read-only viewer. Address,
+  protocol and TLS values can no longer be changed through the hot-publish
+  canvas, matching the runtime rule that listener changes require restart.
+- Removed Limen creation from the canvas palette and removed the unused editable
+  Limen form. Existing Limen nodes remain visible for route wiring and expose
+  the controlled “write saved Limens to file” operation for restart-based
+  changes.
+- Refreshed and verified the embedded console bundle.
+
+Verification:
+
+- `cd frontend; npm run build`
+- Compared SHA-256 hashes for `index.html`, JS and CSS release assets with the
+  embedded copies
+- `git diff --check`

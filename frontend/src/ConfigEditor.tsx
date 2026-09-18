@@ -26,7 +26,7 @@ import {
   validateConfig,
   type StoredConfig,
 } from "./api";
-import { createMiddlewareDefinition, LimenEditor, ServiceEditor } from "./editors";
+import { createMiddlewareDefinition, LimenViewer, ServiceEditor } from "./editors";
 import { cloneConfig, limenNames, routeActionLabel, routeMatchLabel, serviceSubtitle, uniqueName } from "./model";
 import { MiddlewareManagerModal, type MiddlewareScopeFilter } from "./MiddlewareManager";
 import { RegistryManagerModal } from "./RegistryManager";
@@ -478,7 +478,7 @@ function ConfigEditor({ store, id, onBack, onStatusChange }: { store: ConfigStor
     const draft = draftRef.current;
     if (!draft) return;
     if (kind === "limen") {
-      addLimenNode(position);
+      store.setMessage("Limen 是启动级入口，只读展示；请修改配置文件并重启 Janus。能力变化不会通过画布发布。");
       return;
     }
     if (kind === "route") {
@@ -499,18 +499,6 @@ function ConfigEditor({ store, id, onBack, onStatusChange }: { store: ConfigStor
       setNodes((old) => [...old, { id: nid, type: "janus", position: position || autoPosition("service", old.length), data: { kind, name, subtitle: "1 upstream", detail: "0 middleware" } }]);
       setEditing({ kind: "service", name, originalName: name, value, isNew: true });
     }
-  }
-
-  function addLimenNode(position?: { x: number; y: number }) {
-    const draft = draftRef.current;
-    if (!draft) return;
-    const name = uniqueName("limen", Object.keys(draft.limens || {}));
-    const value: Limen = { address: "127.0.0.1:8080", protocols: ["http1"] };
-    mutate((prev) => ({ ...prev, limens: { ...(prev.limens || {}), [name]: value } }));
-    const nid = nodeId("limen", name);
-    const desc = describe({ ...draft, limens: { ...(draft.limens || {}), [name]: value } }, "limen", name);
-    setNodes((old) => [...old, { id: nid, type: "janus", position: position || autoPosition("limen", old.length), data: { kind: "limen", name, ...desc, onOpen: () => openEditor(nid) } }]);
-    setEditing({ kind: "limen", name, originalName: name, value, isNew: true });
   }
 
   function onDrop(event: DragEvent) {
@@ -1007,7 +995,7 @@ function translateWarning(warning: string): string {
       <div className="editor-body">
         <aside className="palette">
           <div className="palette-head"><h3>节点</h3><span>拖入画布或点击添加</span></div>
-          {(["limen", "route", "service"] as const).map((kind) => (
+          {(["route", "service"] as const).map((kind) => (
             <div
               key={kind}
               className="palette-item"
@@ -1024,10 +1012,11 @@ function translateWarning(warning: string): string {
           ))}
           <div className="palette-note">
             <strong>连线规则</strong>
+            <span>Limen 仅展示当前启动入口（只读）</span>
             <span>Limen → Route 指定入口</span>
             <span>Route → Service 设置转发</span>
             <small>中间件在 Route / Service 的编辑器中新建、改参、排序。</small>
-            <small>入口监听配置是启动级的，新增/修改后需重启；选中节点按 Backspace/Delete 删除，双击编辑。</small>
+            <small>入口地址、协议和 TLS 必须改配置文件并重启；Route / Service 节点可拖动、删除和双击编辑。</small>
           </div>
           <button type="button" className="btn ghost" onClick={() => openRegistryManager(false)}>注册中心管理</button>
         </aside>
@@ -1083,17 +1072,10 @@ function translateWarning(warning: string): string {
         />
       )}
       {editing?.kind === "limen" && (
-        <LimenEditor
+        <LimenViewer
           name={editing.name}
-          value={editing.value}
-          isNew={editing.isNew}
-          activeExists={Boolean(store.draft?.limens?.[editing.name])}
-          onName={(name) => setEditing({ ...editing, name })}
-          onChange={(value) => setEditing({ ...editing, value })}
-          onConfirm={confirmEditing}
-          onCancel={() => { if (editing.isNew) removeFlowNode(nodeId("limen", editing.originalName)); setEditing(null); }}
-          onClose={() => { if (editing.isNew) removeFlowNode(nodeId("limen", editing.originalName)); setEditing(null); }}
-          onDelete={editing.isNew ? undefined : deleteEditing}
+          limen={editing.value}
+          onClose={() => setEditing(null)}
           onStageLimens={stageSavedLimens}
         />
       )}
