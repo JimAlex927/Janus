@@ -8,7 +8,9 @@
   },
   "settings": {
     "admin": {
-      "address": "127.0.0.1:9090"
+      "address": "127.0.0.1:9090",
+      "username": "admin",
+      "password_hash": "$2a$10$CnflajovpvVzgJ64FhyWRekUxAwDK6cemVBok7FE9qgoE7PM1yIvO"
     },
     "shutdown": {
       "drain_timeout": "35s",

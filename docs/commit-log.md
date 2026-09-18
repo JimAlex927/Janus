@@ -5,6 +5,153 @@ repository commit. Add a new dated section before every future commit.
 
 ## 2026-09-17
 
+### Improve console editing workflow
+
+Commit message: `refactor(console): improve draft editing and route selection`
+
+Scope:
+
+- Added route selection so the visual editor always operates on the chosen
+  route instead of implicitly editing the first route.
+- Kept incomplete JSON drafts in the editor, surfaced parse errors, and
+  prevented validation or publishing until the draft becomes valid.
+- Added logout behavior, live generation refresh, and cumulative request
+  activity sampling for the overview chart.
+- Excluded frontend dependencies and build output from version control while
+  keeping the compiled assets required by Go `embed`.
+- Removed an unused frontend data-fetching dependency and split the initial
+  JavaScript payload into React, chart, and drag-and-drop chunks.
+- Replaced the single-purpose chart dependency with a small responsive SVG
+  chart, keeping the embedded console lightweight and avoiding a large chart
+  bundle on every admin page.
+- Corrected the chart time-window label and added explicit SVG sizing and an
+  empty-state overlay for narrow or newly started consoles.
+- Added `cmd/janus-hash` for interactive or stdin-based bcrypt hash generation
+  without exposing the password as a command-line argument.
+- Added an explicit synced/dirty draft state, disabled publish when there is
+  no valid unpublished change, and reset the state after reload/publish.
+- Added canvas draft undo/redo documentation and grouped rapid inspector edits
+  into a single history step.
+- Protected unpublished drafts from being silently overwritten by runtime
+  refresh events; manual refresh now requires confirmation before discarding.
+- Made canvas connections forgiving: while connecting, the whole highlighted
+  target node accepts the relation, and output-port clicks no longer bubble into
+  accidental node selection.
+- Rendered missing Route-referenced Services as repairable nodes and rejected
+  ambiguous shared-Middleware connections instead of silently editing the first
+  matching Route.
+- Extracted graph construction and configuration mutations into
+  `frontend/src/graph-model.ts`, keeping the canvas component focused on UI
+  interaction.
+- Added five Node model tests and the `npm run test:model` script for connection
+  semantics, missing Services, shared Middleware safety, and position bounds.
+- Added the Service→Middleware model regression and clarified the graph model's
+  single-source-of-truth and non-mutating failure behavior with comments.
+- Replaced the permanent Inspector column with a type-specific node editor
+  modal, added a Route Middleware mini-canvas with reorder controls, and made
+  Match editing a larger multiline field.
+- Added browser-side numeric bounds that mirror the backend validation ranges
+  for middleware, health checks, actions, and HTTP/3 settings.
+- Centralized the connection predicate used by both graph mutations and target
+  highlighting, so valid targets are visibly distinct and unsupported targets
+  are subdued while connecting.
+- Marked Route-referenced Middleware definitions that are missing from the
+  configuration inside the Route editor, where they can be removed or replaced.
+- Preserved legacy Route Service references as visible Service edges, so
+  unresolved upstream configuration remains repairable.
+- Made the default graph layout wrap nodes into bounded columns and expanded
+  the drawable world, preventing larger configurations from placing nodes past
+  the visible canvas; added a large-graph bounds regression test.
+- Removed Middleware nodes and Middleware edges from the top-level canvas. Route
+  editing now owns Middleware creation, selection, and ordering, while new
+  canvas Routes start without an implicit Service connection.
+- Replaced free-form Limen/Route protocol inputs with fixed multi-select
+  controls and added Route-scoped Middleware type and parameter editing.
+- Restricted Middleware selectors to backend-supported policies by scope,
+  surfaced each definition's type, and made Service Middleware use the same
+  safe selector instead of free-form names.
+- Added a draft-only request simulation drawer that evaluates built-in matching
+  rules, accepts Host and Header inputs, reports candidates, and selects the
+  winning Route without sending a request.
+- Removed the duplicate publish action and retired the unused drag-and-drop
+  Route editor and its frontend dependency chunks.
+- Added modal focus placement, focus restoration, and keyboard Tab trapping for
+  predictable keyboard editing.
+- Updated `configs/janus-admin.example.json` with a bcrypt hash for the sample
+  password `123456` so the example console can be entered immediately.
+- Replaced the basic configuration page with a synchronized visual canvas and
+  JSON editor, including node creation, graph layout, inspectors, deletion,
+  and route Middleware selection.
+- Added interactive port-to-port connections, automatic canvas fitting, and
+  explicit Service visibility in the default graph layout.
+- Added canvas drag boundaries, connection previews, reference-safe Service
+  deletion, and grouped Limen/Service inspector controls for TLS, HTTP/3, and
+  health checks.
+
+Verification:
+
+- `frontend: tsc -b`
+- `frontend: vite build`
+- `go build ./cmd/janus`
+- `go test ./...`
+- `go vet ./...`
+- `git diff --check`
+
+## 2026-09-17
+
+### Harden and polish the embedded console
+
+Commit message: `refactor(admin): harden console publishing and metrics`
+
+Scope:
+
+- Protected status, configuration, metrics, validation, and event APIs when
+  administrator credentials are configured; bounded active sessions and added
+  no-store API responses.
+- Added real metrics summary sampling to the console, runtime generation event
+  coverage, stronger bcrypt validation, and private-network admin address
+  validation.
+- Split frontend vendor output, refreshed embedded assets, and removed stale
+  bundles from the embedded resource set.
+
+Verification:
+
+- `frontend: tsc -b`
+- `frontend: vite build`
+- `go test ./...`
+- `go vet ./...`
+
+## 2026-09-17
+
+### Add embedded Janus administration console
+
+Commit message: `feat(admin): add embedded configuration console`
+
+Scope:
+
+- Added the independent `frontend/` React/TypeScript console with overview,
+  route middleware ordering, Service/Middleware lists, JSON editing, draft
+  validation, and a visual style suitable for later extension.
+- Embedded the production frontend build in the Admin server and added
+  authenticated configuration/status APIs, revision checks, SSE generation
+  events, and low-cardinality metrics snapshots.
+- Added bcrypt administrator settings, loopback/private admin binding
+  validation, atomic configuration persistence with runtime rollback, and
+  protection against duplicate file-reloader generations.
+- Redacted the administrator password hash from effective configuration output
+  and added documentation in `docs/admin-console.md`.
+
+Verification:
+
+- `frontend: tsc -b`
+- `frontend: vite build`
+- `go test ./...`
+- `go vet ./...`
+- `go test -race` was attempted but the local Windows ThreadSanitizer failed
+  to reserve its shadow memory before tests ran.
+
+## 2026-09-17
+
 ### Add explicit cleartext HTTP/2 Limen support
 
 Commit message: `feat(limen): support explicit h2c bindings`
@@ -1544,6 +1691,29 @@ Verification:
 - `go test -race -count=1 ./cmd/janus-loadtest`
 - `go vet ./cmd/janus-loadtest`
 - Direct-backend and Janus forwarding smoke runs with a 100 request/s target
+
+## 2026-09-17
+
+### Separate type-specific node editors from the graph canvas
+
+Commit message: `refactor(admin-ui): extract node inspector editors`
+
+Scope:
+
+- Moved the Limen, Route, Middleware, Service, and Action editors into
+  `frontend/src/inspector.tsx`.
+- Kept `builder.tsx` focused on graph projection, canvas navigation, node
+  movement, connection gestures, and draft history.
+- Preserved the standalone modal editor, Route match text area, Route
+  Middleware flow/reordering controls, and type-specific parameter fields.
+
+Verification:
+
+- `cd frontend; npm run build`
+- `cd frontend; npm run test:model`
+- `go test ./...`
+- `go vet ./...`
+- `git diff --check`
 
 ## 2026-09-17
 

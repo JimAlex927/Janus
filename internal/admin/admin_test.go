@@ -1,12 +1,15 @@
 package admin
 
 import (
+	"bytes"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
+	"golang.org/x/crypto/bcrypt"
+	"janus/internal/config"
 	"janus/internal/telemetry"
 )
 
@@ -39,6 +42,15 @@ func TestHealthEndpointsFollowState(t *testing.T) {
 	h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/livez", nil))
 	if w.Code != http.StatusServiceUnavailable {
 		t.Fatalf("not-live status = %d, want 503", w.Code)
+	}
+}
+
+func TestEmbeddedConsoleIsServed(t *testing.T) {
+	h := NewHandler(NewState())
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/", nil))
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "Janus Console") {
+		t.Fatalf("console response = %d %q", w.Code, w.Body.String())
 	}
 }
 
@@ -80,5 +92,40 @@ func TestMetricsEndpointUsesPrivateRegistry(t *testing.T) {
 	h.ServeHTTP(post, httptest.NewRequest(http.MethodPost, "/metrics", nil))
 	if post.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("metrics POST status = %d", post.Code)
+	}
+}
+
+func TestAdminLoginProtectsConfigurationPublishing(t *testing.T) {
+	hash, err := bcrypt.GenerateFromPassword([]byte("secret"), bcrypt.MinCost)
+	if err != nil {
+		t.Fatal(err)
+	}
+	current := config.Config{Settings: config.Settings{Admin: config.AdminSettings{Username: "admin", PasswordHash: string(hash)}}}
+	published := false
+	h := NewHandlerWithOptions(Options{
+		State: NewState(), Current: func() config.Config { return current }, Revision: func() uint64 { return 1 },
+		Publish: func(config.Config) error { published = true; return nil },
+	})
+	body := `{"listen":"127.0.0.1:8080","services":{"s":{"upstreams":["http://localhost:9000"]}},"routes":[{"name":"r","path_prefix":"/","service":"s"}]}`
+	unauthorized := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/config/publish", bytes.NewBufferString(body))
+	req.Header.Set("X-Janus-Revision", "1")
+	h.ServeHTTP(unauthorized, req)
+	if unauthorized.Code != http.StatusUnauthorized || published {
+		t.Fatalf("unauthorized publish = %d, published=%v", unauthorized.Code, published)
+	}
+	login := httptest.NewRecorder()
+	h.ServeHTTP(login, httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", bytes.NewBufferString(`{"Username":"admin","Password":"secret"}`)))
+	if login.Code != http.StatusOK {
+		t.Fatalf("login status = %d", login.Code)
+	}
+	cookie := login.Result().Cookies()[0]
+	authorized := httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/config/publish", bytes.NewBufferString(body))
+	req.Header.Set("X-Janus-Revision", "1")
+	req.AddCookie(cookie)
+	h.ServeHTTP(authorized, req)
+	if authorized.Code != http.StatusOK || !published {
+		t.Fatalf("authorized publish = %d, published=%v", authorized.Code, published)
 	}
 }

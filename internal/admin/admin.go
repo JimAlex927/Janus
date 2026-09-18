@@ -1,102 +1,416 @@
-// Package admin provides the private process-health HTTP endpoints.
+// Package admin provides the private health endpoints and operator console.
 package admin
 
 import (
+	"crypto/rand"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
+	"strings"
+	"sync"
 	"sync/atomic"
+	"time"
 
+	"embed"
+	"janus/internal/config"
+	janusruntime "janus/internal/runtime"
 	"janus/internal/telemetry"
+
+	"golang.org/x/crypto/bcrypt"
 )
 
-type State struct {
-	live  atomic.Bool
-	ready atomic.Bool
-}
+//go:embed ui/* ui/assets/*
+var uiFiles embed.FS
 
-func NewState() *State {
-	state := &State{}
-	state.live.Store(true)
-	return state
-}
+type State struct{ live, ready atomic.Bool }
 
+func NewState() *State { state := &State{}; state.live.Store(true); return state }
 func (s *State) SetLive(value bool) {
 	if s != nil {
 		s.live.Store(value)
 	}
 }
-
 func (s *State) SetReady(value bool) {
 	if s != nil {
 		s.ready.Store(value)
 	}
 }
-
-func (s *State) Live() bool { return s != nil && s.live.Load() }
-
+func (s *State) Live() bool  { return s != nil && s.live.Load() }
 func (s *State) Ready() bool { return s != nil && s.ready.Load() }
 
-func NewHandler(state *State) http.Handler {
-	return NewHandlerWithMetrics(state, nil, nil)
+// Options connects the admin process to the stable Runtime without putting
+// admin concerns into the business request path.
+type Options struct {
+	State     *State
+	Metrics   *telemetry.Metrics
+	Health    func() []telemetry.BackendHealth
+	Current   func() config.Config
+	Revision  func() uint64
+	Publish   func(config.Config) error
+	Subscribe func() (<-chan janusruntime.Event, func())
 }
 
-// NewHandlerWithMetrics adds a scrape-only metrics endpoint to the private
-// admin listener. The health callback must return a bounded active-generation
-// snapshot and may be nil when no health checks are configured.
+type Handler struct {
+	state      *State
+	metrics    *telemetry.Metrics
+	health     func() []telemetry.BackendHealth
+	current    func() config.Config
+	revision   func() uint64
+	publish    func(config.Config) error
+	subscribe  func() (<-chan janusruntime.Event, func())
+	sessionsMu sync.Mutex
+	sessions   map[string]time.Time
+}
+
+const maxSessions = 128
+
+func NewHandler(state *State) http.Handler { return NewHandlerWithMetrics(state, nil, nil) }
 func NewHandlerWithMetrics(state *State, metrics *telemetry.Metrics, health func() []telemetry.BackendHealth) http.Handler {
-	if state == nil {
-		state = NewState()
-	}
-	mux := http.NewServeMux()
-	mux.HandleFunc("/livez", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet && r.Method != http.MethodHead {
-			w.Header().Set("Allow", "GET, HEAD")
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
-		if !state.Live() {
-			http.Error(w, "not live", http.StatusServiceUnavailable)
-			return
-		}
-		writeOK(w, r)
-	})
-	mux.HandleFunc("/readyz", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet && r.Method != http.MethodHead {
-			w.Header().Set("Allow", "GET, HEAD")
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
-		if !state.Ready() {
-			http.Error(w, "not ready", http.StatusServiceUnavailable)
-			return
-		}
-		writeOK(w, r)
-	})
-	if metrics != nil {
-		mux.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
-			if r.Method != http.MethodGet && r.Method != http.MethodHead {
-				w.Header().Set("Allow", "GET, HEAD")
-				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-				return
-			}
-			w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
-			w.WriteHeader(http.StatusOK)
-			if r.Method == http.MethodHead {
-				return
-			}
-			var snapshot []telemetry.BackendHealth
-			if health != nil {
-				snapshot = health()
-			}
-			_, _ = w.Write(metrics.Render(snapshot))
-		})
-	}
-	return mux
+	return NewHandlerWithOptions(Options{State: state, Metrics: metrics, Health: health})
 }
 
+func NewHandlerWithOptions(options Options) http.Handler {
+	if options.State == nil {
+		options.State = NewState()
+	}
+	h := &Handler{state: options.State, metrics: options.Metrics, health: options.Health, current: options.Current, revision: options.Revision, publish: options.Publish, subscribe: options.Subscribe, sessions: make(map[string]time.Time)}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/livez", h.livez)
+	mux.HandleFunc("/readyz", h.readyz)
+	if options.Metrics != nil {
+		mux.HandleFunc("/metrics", h.metricsHandler)
+	}
+	mux.HandleFunc("/", h.ui)
+	mux.HandleFunc("/api/v1/auth/login", h.login)
+	mux.HandleFunc("/api/v1/auth/logout", h.logout)
+	mux.HandleFunc("/api/v1/status", h.status)
+	mux.HandleFunc("/api/v1/metrics", h.metricsSummary)
+	mux.HandleFunc("/api/v1/config", h.configHandler)
+	mux.HandleFunc("/api/v1/config/validate", h.validate)
+	mux.HandleFunc("/api/v1/config/publish", h.publishConfig)
+	mux.HandleFunc("/api/v1/events", h.events)
+	return securityHeaders(mux)
+}
+
+func (h *Handler) livez(w http.ResponseWriter, r *http.Request) {
+	if !allowMethod(w, r, http.MethodGet, http.MethodHead) {
+		return
+	}
+	if !h.state.Live() {
+		http.Error(w, "not live", 503)
+		return
+	}
+	writeOK(w, r)
+}
+func (h *Handler) readyz(w http.ResponseWriter, r *http.Request) {
+	if !allowMethod(w, r, http.MethodGet, http.MethodHead) {
+		return
+	}
+	if !h.state.Ready() {
+		http.Error(w, "not ready", 503)
+		return
+	}
+	writeOK(w, r)
+}
+func (h *Handler) metricsHandler(w http.ResponseWriter, r *http.Request) {
+	if !allowMethod(w, r, http.MethodGet, http.MethodHead) {
+		return
+	}
+	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+	w.WriteHeader(200)
+	if r.Method == http.MethodHead {
+		return
+	}
+	var snapshot []telemetry.BackendHealth
+	if h.health != nil {
+		snapshot = h.health()
+	}
+	_, _ = w.Write(h.metrics.Render(snapshot))
+}
+func (h *Handler) ui(w http.ResponseWriter, r *http.Request) {
+	path := strings.TrimPrefix(r.URL.Path, "/")
+	if path == "" {
+		path = "index.html"
+	}
+	data, err := uiFiles.ReadFile("ui/" + path)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	if strings.HasSuffix(path, ".html") {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	}
+	if strings.HasSuffix(path, ".js") {
+		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+	}
+	if strings.HasSuffix(path, ".css") {
+		w.Header().Set("Content-Type", "text/css; charset=utf-8")
+	}
+	_, _ = w.Write(data)
+}
+func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
+	if !allowMethod(w, r, http.MethodPost) {
+		return
+	}
+	var input struct{ Username, Password string }
+	if !decodeJSON(w, r, &input) {
+		return
+	}
+	if h.current == nil {
+		http.Error(w, "admin login is unavailable", 503)
+		return
+	}
+	a := h.current().Settings.Admin
+	if a.Username == "" || a.PasswordHash == "" || input.Username != a.Username || bcrypt.CompareHashAndPassword([]byte(a.PasswordHash), []byte(input.Password)) != nil {
+		http.Error(w, "invalid credentials", 401)
+		return
+	}
+	var raw [32]byte
+	if _, err := rand.Read(raw[:]); err != nil {
+		http.Error(w, "session unavailable", 500)
+		return
+	}
+	token := hex.EncodeToString(raw[:])
+	h.sessionsMu.Lock()
+	now := time.Now()
+	for existing, expiry := range h.sessions {
+		if now.After(expiry) {
+			delete(h.sessions, existing)
+		}
+	}
+	if len(h.sessions) >= maxSessions {
+		h.sessionsMu.Unlock()
+		http.Error(w, "too many admin sessions", http.StatusTooManyRequests)
+		return
+	}
+	h.sessions[token] = now.Add(8 * time.Hour)
+	h.sessionsMu.Unlock()
+	http.SetCookie(w, &http.Cookie{Name: "janus_session", Value: token, Path: "/", HttpOnly: true, SameSite: http.SameSiteStrictMode, MaxAge: 8 * 60 * 60})
+	writeJSON(w, 200, map[string]any{"ok": true})
+}
+func (h *Handler) logout(w http.ResponseWriter, r *http.Request) {
+	if !allowMethod(w, r, http.MethodPost) {
+		return
+	}
+	if c, err := r.Cookie("janus_session"); err == nil {
+		h.sessionsMu.Lock()
+		delete(h.sessions, c.Value)
+		h.sessionsMu.Unlock()
+	}
+	http.SetCookie(w, &http.Cookie{Name: "janus_session", Path: "/", MaxAge: -1, HttpOnly: true, SameSite: http.SameSiteStrictMode})
+	writeJSON(w, 200, map[string]any{"ok": true})
+}
+func (h *Handler) status(w http.ResponseWriter, r *http.Request) {
+	if !allowMethod(w, r, http.MethodGet) {
+		return
+	}
+	if !h.guard(r) {
+		http.Error(w, "authentication required", http.StatusUnauthorized)
+		return
+	}
+	result := map[string]any{"live": h.state.Live(), "ready": h.state.Ready(), "revision": h.revisionValue()}
+	writeJSON(w, 200, result)
+}
+
+func (h *Handler) metricsSummary(w http.ResponseWriter, r *http.Request) {
+	if !allowMethod(w, r, http.MethodGet) {
+		return
+	}
+	if !h.guard(r) {
+		http.Error(w, "authentication required", http.StatusUnauthorized)
+		return
+	}
+	if h.metrics == nil {
+		http.Error(w, "metrics unavailable", http.StatusNotImplemented)
+		return
+	}
+	writeJSON(w, http.StatusOK, h.metrics.Summary())
+}
+func (h *Handler) configHandler(w http.ResponseWriter, r *http.Request) {
+	if !allowMethod(w, r, http.MethodGet) || h.current == nil {
+		return
+	}
+	if !h.guard(r) {
+		http.Error(w, "authentication required", http.StatusUnauthorized)
+		return
+	}
+	c := h.current()
+	c.Settings.Admin.PasswordHash = ""
+	writeJSON(w, 200, map[string]any{"config": c, "revision": h.revisionValue()})
+}
+func (h *Handler) validate(w http.ResponseWriter, r *http.Request) {
+	if !allowMethod(w, r, http.MethodPost) {
+		return
+	}
+	if !h.guard(r) {
+		http.Error(w, "authentication required", http.StatusUnauthorized)
+		return
+	}
+	c, ok := h.decodeConfig(w, r)
+	if !ok {
+		return
+	}
+	if err := c.Validate(); err != nil {
+		writeJSON(w, 422, map[string]any{"ok": false, "error": err.Error()})
+		return
+	}
+	writeJSON(w, 200, map[string]any{"ok": true})
+}
+func (h *Handler) publishConfig(w http.ResponseWriter, r *http.Request) {
+	if !allowMethod(w, r, http.MethodPost) {
+		return
+	}
+	if h.publish == nil {
+		http.Error(w, "publishing is unavailable", 503)
+		return
+	}
+	if !h.authenticated(r) {
+		http.Error(w, "authentication required", 401)
+		return
+	}
+	if h.revision != nil && r.Header.Get("X-Janus-Revision") != fmt.Sprint(h.revision()) {
+		http.Error(w, "configuration revision conflict", 409)
+		return
+	}
+	c, ok := h.decodeConfig(w, r)
+	if !ok {
+		return
+	}
+	if err := h.publish(c); err != nil {
+		writeJSON(w, 422, map[string]any{"ok": false, "error": err.Error()})
+		return
+	}
+	writeJSON(w, 200, map[string]any{"ok": true, "revision": h.revisionValue()})
+}
+func (h *Handler) events(w http.ResponseWriter, r *http.Request) {
+	if !allowMethod(w, r, http.MethodGet) || h.subscribe == nil {
+		http.Error(w, "events unavailable", 501)
+		return
+	}
+	if !h.guard(r) {
+		http.Error(w, "authentication required", http.StatusUnauthorized)
+		return
+	}
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming unavailable", 500)
+		return
+	}
+	ch, cancel := h.subscribe()
+	defer cancel()
+	_, _ = fmt.Fprintf(w, "event: ready\ndata: {\"revision\":%d}\n\n", h.revisionValue())
+	flusher.Flush()
+	ticker := time.NewTicker(15 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case event, open := <-ch:
+			if !open {
+				return
+			}
+			data, _ := json.Marshal(event)
+			_, _ = fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event.Type, data)
+			flusher.Flush()
+		case <-ticker.C:
+			_, _ = io.WriteString(w, ": keep-alive\n\n")
+			flusher.Flush()
+		}
+	}
+}
+func (h *Handler) authenticated(r *http.Request) bool {
+	c, err := r.Cookie("janus_session")
+	if err != nil {
+		return false
+	}
+	h.sessionsMu.Lock()
+	expiry, ok := h.sessions[c.Value]
+	if ok && time.Now().After(expiry) {
+		delete(h.sessions, c.Value)
+		ok = false
+	}
+	h.sessionsMu.Unlock()
+	return ok
+}
+
+func (h *Handler) guard(r *http.Request) bool {
+	if h.current == nil {
+		return false
+	}
+	a := h.current().Settings.Admin
+	return (a.Username == "" && a.PasswordHash == "") || h.authenticated(r)
+}
+func (h *Handler) revisionValue() uint64 {
+	if h.revision == nil {
+		return 0
+	}
+	return h.revision()
+}
+func (h *Handler) decodeConfig(w http.ResponseWriter, r *http.Request) (config.Config, bool) {
+	body, err := io.ReadAll(io.LimitReader(r.Body, config.MaxConfigBytes+1))
+	if err != nil {
+		http.Error(w, err.Error(), 400)
+		return config.Config{}, false
+	}
+	if len(body) > config.MaxConfigBytes {
+		http.Error(w, "config is too large", 413)
+		return config.Config{}, false
+	}
+	c, err := config.Load(strings.NewReader(string(body)))
+	if err != nil {
+		writeJSON(w, 422, map[string]any{"ok": false, "error": err.Error()})
+		return config.Config{}, false
+	}
+	if h.current != nil && c.Settings.Admin.PasswordHash == "" {
+		c.Settings.Admin.PasswordHash = h.current().Settings.Admin.PasswordHash
+	}
+	return c, true
+}
+func decodeJSON(w http.ResponseWriter, r *http.Request, dst any) bool {
+	d := json.NewDecoder(io.LimitReader(r.Body, 1<<20))
+	d.DisallowUnknownFields()
+	if err := d.Decode(dst); err != nil {
+		http.Error(w, "invalid JSON: "+err.Error(), 400)
+		return false
+	}
+	return true
+}
+func writeJSON(w http.ResponseWriter, status int, value any) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(value)
+}
+func allowMethod(w http.ResponseWriter, r *http.Request, methods ...string) bool {
+	for _, method := range methods {
+		if r.Method == method {
+			return true
+		}
+	}
+	w.Header().Set("Allow", strings.Join(methods, ", "))
+	http.Error(w, "method not allowed", 405)
+	return false
+}
 func writeOK(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	w.WriteHeader(http.StatusOK)
+	w.WriteHeader(200)
 	if r.Method != http.MethodHead {
 		_, _ = w.Write([]byte("ok\n"))
 	}
+}
+func securityHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("X-Frame-Options", "DENY")
+		w.Header().Set("Referrer-Policy", "same-origin")
+		if strings.HasPrefix(r.URL.Path, "/api/") {
+			w.Header().Set("Cache-Control", "no-store")
+		}
+		next.ServeHTTP(w, r)
+	})
 }

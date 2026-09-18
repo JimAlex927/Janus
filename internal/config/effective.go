@@ -36,6 +36,8 @@ type EffectiveService struct {
 // so the output is safe to include in diagnostics and deployment checks.
 func (c Config) EffectiveView() EffectiveConfig {
 	c = c.WithDefaults()
+	settings := c.Settings
+	settings.Admin.PasswordHash = ""
 	bindings := c.LimenBindings()
 	limens := make(map[string]EffectiveLimen, len(bindings))
 	for name, binding := range bindings {
@@ -79,7 +81,7 @@ func (c Config) EffectiveView() EffectiveConfig {
 	return EffectiveConfig{
 		Version:     CurrentConfigVersion,
 		Limens:      limens,
-		Settings:    c.Settings,
+		Settings:    settings,
 		Middlewares: middlewares,
 		Services:    services,
 		Routes:      routes,

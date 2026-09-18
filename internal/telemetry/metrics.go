@@ -41,6 +41,15 @@ type Metrics struct {
 	drainSet     bool
 }
 
+// Summary is a low-cardinality snapshot for the private admin console. It is
+// intentionally separate from Prometheus text so the UI does not parse a
+// scrape format or expose request paths and hosts.
+type Summary struct {
+	Requests uint64 `json:"requests"`
+	Errors   uint64 `json:"errors"`
+	InFlight int64  `json:"in_flight"`
+}
+
 type requestMetricKey struct {
 	route   string
 	service string
@@ -86,6 +95,25 @@ func NewMetrics() *Metrics {
 		rejections: make(map[rejectionMetricKey]uint64),
 		reloads:    make(map[string]uint64),
 	}
+}
+
+func (m *Metrics) Summary() Summary {
+	if m == nil {
+		return Summary{}
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var summary Summary
+	for _, count := range m.requests {
+		summary.Requests += count
+	}
+	for _, count := range m.errors {
+		summary.Errors += count
+	}
+	for _, count := range m.inFlight {
+		summary.InFlight += count
+	}
+	return summary
 }
 
 // RecordRequest records one completed observed request.

@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"reflect"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	"janus/internal/config"
 	"janus/internal/gateway"
@@ -58,6 +60,19 @@ type Runtime struct {
 	serviceLimiterRegistry *serviceLimiterRegistry
 	metrics                *telemetry.Metrics
 	handler                http.Handler
+	config                 config.Config
+	revision               atomic.Uint64
+	eventsMu               sync.Mutex
+	events                 map[chan Event]struct{}
+}
+
+// Event describes a published runtime change. Subscribers receive a bounded,
+// best-effort stream for the private admin console; request handling never
+// waits for an administrator to read an event.
+type Event struct {
+	Type     string    `json:"type"`
+	Revision uint64    `json:"revision"`
+	At       time.Time `json:"at"`
 }
 
 type generationRef struct {
@@ -121,7 +136,10 @@ func NewWithBuilder(c config.Config, logger *zap.Logger, builder Builder) (*Runt
 		global:                 middleware.NewLimiterWithMetrics(c.Settings.Request.MaxInFlight, metrics, "global", ""),
 		serviceLimiterRegistry: serviceLimiterRegistry,
 		metrics:                metrics,
+		config:                 c,
 	}
+	r.revision.Store(1)
+	r.events = make(map[chan Event]struct{})
 	// This chain is process-owned and remains stable while generations reload.
 	// Its order preserves the existing behavior: observation wraps protocol
 	// guards, timeout, and active-generation dispatch.
@@ -169,6 +187,54 @@ func (r *Runtime) Handler() http.Handler { return r.handler }
 // Metrics returns the process-owned metrics registry used by the stable
 // observer, admission gates and lifecycle components.
 func (r *Runtime) Metrics() *telemetry.Metrics { return r.metrics }
+
+// ConfigSnapshot returns the last successfully published configuration. The
+// returned value is treated as immutable by callers.
+func (r *Runtime) ConfigSnapshot() config.Config {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.config
+}
+
+func (r *Runtime) Revision() uint64 { return r.revision.Load() }
+
+// Subscribe returns a bounded event channel. The caller must call the
+// returned cancel function; slow subscribers only lose events, never block
+// request handling.
+func (r *Runtime) Subscribe() (<-chan Event, func()) {
+	ch := make(chan Event, 16)
+	r.mu.Lock()
+	closed := r.closed
+	if !closed {
+		r.eventsMu.Lock()
+		r.events[ch] = struct{}{}
+		r.eventsMu.Unlock()
+	}
+	r.mu.Unlock()
+	if closed {
+		close(ch)
+		return ch, func() {}
+	}
+	return ch, func() {
+		r.eventsMu.Lock()
+		if _, ok := r.events[ch]; ok {
+			delete(r.events, ch)
+			close(ch)
+		}
+		r.eventsMu.Unlock()
+	}
+}
+
+func (r *Runtime) publish(event Event) {
+	r.eventsMu.Lock()
+	defer r.eventsMu.Unlock()
+	for ch := range r.events {
+		select {
+		case ch <- event:
+		default:
+		}
+	}
+}
 
 // HealthSnapshot protects the active generation while copying its bounded
 // service/target health state for the admin metrics endpoint.
@@ -249,6 +315,11 @@ func (r *Runtime) Replace(c config.Config) error {
 	if shouldCloseOld {
 		old.generation.Close()
 	}
+	r.mu.Lock()
+	r.config = c
+	newRevision := r.revision.Add(1)
+	r.mu.Unlock()
+	r.publish(Event{Type: "generation_changed", Revision: newRevision, At: time.Now().UTC()})
 	return nil
 }
 
@@ -291,6 +362,12 @@ func (r *Runtime) Close() {
 		old.generation.Close()
 	}
 	r.transport.CloseIdleConnections()
+	r.eventsMu.Lock()
+	for ch := range r.events {
+		close(ch)
+		delete(r.events, ch)
+	}
+	r.eventsMu.Unlock()
 }
 
 func (r *Runtime) dispatch(w http.ResponseWriter, req *http.Request) {

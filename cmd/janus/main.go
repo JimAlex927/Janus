@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"sort"
 	"sync"
 	"syscall"
@@ -27,7 +28,7 @@ import (
 func main() {
 
 	//1、parse the argument in the exe command-----------
-	path := flag.String("config", "configs/janus-body-limit.example.json", "configuration file")
+	path := flag.String("config", "configs/janus-admin.example.json", "configuration file")
 	check := flag.Bool("check", false, "validate configuration and exit")
 	printEffective := flag.Bool("print-effective-config", false, "print normalized configuration without TLS asset paths and exit")
 	reloadInterval := flag.Duration("reload-interval", time.Second, "poll interval for versioned configuration and TLS files")
@@ -104,7 +105,12 @@ func run(ctx context.Context, path string, check, printEffective bool, reloadInt
 	if address := c.Settings.Admin.Address; address != "" {
 		adminState = admin.NewState()
 		adminServer = &http.Server{
-			Handler:           admin.NewHandlerWithMetrics(adminState, requestRuntime.Metrics(), requestRuntime.HealthSnapshot),
+			Handler: admin.NewHandlerWithOptions(admin.Options{
+				State: adminState, Metrics: requestRuntime.Metrics(), Health: requestRuntime.HealthSnapshot,
+				Current: requestRuntime.ConfigSnapshot, Revision: requestRuntime.Revision,
+				Publish:   func(candidate config.Config) error { return publishConfig(path, requestRuntime, candidate) },
+				Subscribe: requestRuntime.Subscribe,
+			}),
 			ReadHeaderTimeout: c.Settings.Server.ReadHeaderTimeout.Duration(),
 			WriteTimeout:      c.Settings.Server.WriteTimeout.Duration(),
 			IdleTimeout:       c.Settings.Server.IdleTimeout.Duration(),
@@ -293,4 +299,49 @@ func closeServers(servers []*limen.Limen) {
 	for _, server := range servers {
 		_ = server.Close()
 	}
+}
+
+// publishConfig keeps the file and active Runtime aligned. Runtime validates
+// and builds the candidate before the file is replaced; an I/O failure rolls
+// the in-memory generation back to the previous snapshot.
+func publishConfig(path string, r *janusruntime.Runtime, candidate config.Config) error {
+	previous := r.ConfigSnapshot()
+	if candidate.Settings.Admin.PasswordHash == "" {
+		candidate.Settings.Admin.PasswordHash = previous.Settings.Admin.PasswordHash
+	}
+	if err := r.Replace(candidate); err != nil {
+		return err
+	}
+	if err := writeConfigAtomically(path, candidate); err != nil {
+		_ = r.Replace(previous)
+		return fmt.Errorf("persist configuration: %w", err)
+	}
+	return nil
+}
+
+func writeConfigAtomically(path string, c config.Config) error {
+	directory := filepath.Dir(path)
+	temp, err := os.CreateTemp(directory, ".janus-config-*")
+	if err != nil {
+		return err
+	}
+	tempName := temp.Name()
+	defer func() { _ = os.Remove(tempName) }()
+	encoder := json.NewEncoder(temp)
+	encoder.SetIndent("", "  ")
+	if err := encoder.Encode(c); err != nil {
+		_ = temp.Close()
+		return err
+	}
+	if err := temp.Sync(); err != nil {
+		_ = temp.Close()
+		return err
+	}
+	if err := temp.Close(); err != nil {
+		return err
+	}
+	if info, statErr := os.Stat(path); statErr == nil {
+		_ = os.Chmod(tempName, info.Mode().Perm())
+	}
+	return os.Rename(tempName, path)
 }

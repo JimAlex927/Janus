@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"fmt"
+	"reflect"
 	"sync"
 	"time"
 
@@ -72,6 +73,14 @@ func (f *FileReloader) ReloadOnce() error {
 	}
 	//如果当前hash已然加载就不需要重新构建runtime
 	if f.isApplied(hash) {
+		return nil
+	}
+	// A configuration may have been published through the admin API before the
+	// file poller observes the atomic rename. Recognize that already-active
+	// snapshot and only advance the watcher's hash; do not build a duplicate
+	// generation.
+	if reflect.DeepEqual(f.runtime.ConfigSnapshot(), c) {
+		f.markApplied(hash)
 		return nil
 	}
 	//否则用新的配置 构建generation 完成替换

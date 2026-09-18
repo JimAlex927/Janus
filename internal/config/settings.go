@@ -5,7 +5,10 @@ import (
 	"fmt"
 	"net"
 	"strconv"
+	"strings"
 	"time"
+
+	"golang.org/x/crypto/bcrypt"
 )
 
 const (
@@ -62,7 +65,9 @@ type Settings struct {
 }
 
 type AdminSettings struct {
-	Address string `json:"address"` // optional loopback-only private listener
+	Address      string `json:"address"` // optional loopback/private-network listener
+	Username     string `json:"username,omitempty"`
+	PasswordHash string `json:"password_hash,omitempty"`
 }
 
 type ShutdownSettings struct {
@@ -256,8 +261,19 @@ func (s Settings) Validate() error {
 		return err
 	}
 	if s.Admin.Address != "" {
-		if err := validateLoopbackAddress(s.Admin.Address); err != nil {
+		if err := validateAdminAddress(s.Admin.Address); err != nil {
 			return fmt.Errorf("admin.address: %w", err)
+		}
+		if (s.Admin.Username == "") != (s.Admin.PasswordHash == "") {
+			return fmt.Errorf("admin.username and admin.password_hash must be configured together")
+		}
+		if s.Admin.PasswordHash != "" {
+			if !strings.HasPrefix(s.Admin.PasswordHash, "$2") {
+				return fmt.Errorf("admin.password_hash must be a bcrypt hash")
+			}
+			if _, err := bcrypt.Cost([]byte(s.Admin.PasswordHash)); err != nil {
+				return fmt.Errorf("admin.password_hash must be a valid bcrypt hash")
+			}
 		}
 	}
 	if err := validateDurationBound("shutdown.drain_timeout", s.Shutdown.DrainTimeout, MaxServerWriteTimeout); err != nil {
@@ -298,6 +314,25 @@ func (s Settings) Validate() error {
 	}
 	if s.Backend.MaxIdleConnsPerHost > s.Backend.MaxConnsPerHost {
 		return fmt.Errorf("backend.max_idle_conns_per_host must not exceed backend.max_conns_per_host")
+	}
+	return nil
+}
+
+func validateAdminAddress(address string) error {
+	host, port, err := net.SplitHostPort(address)
+	if err != nil {
+		return fmt.Errorf("must be host:port: %w", err)
+	}
+	portNumber, err := strconv.Atoi(port)
+	if err != nil || portNumber < 1 || portNumber > 65535 {
+		return fmt.Errorf("port must be between 1 and 65535")
+	}
+	if host == "" {
+		return fmt.Errorf("wildcard addresses are not allowed")
+	}
+	ip := net.ParseIP(host)
+	if ip == nil || (!ip.IsLoopback() && !ip.IsPrivate()) {
+		return fmt.Errorf("must be a loopback or private address")
 	}
 	return nil
 }

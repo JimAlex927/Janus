@@ -241,6 +241,32 @@ func TestRuntimePanicStillReleasesGeneration(t *testing.T) {
 	}
 }
 
+func TestRuntimePublishesGenerationEvent(t *testing.T) {
+	c := validRuntimeConfig("first")
+	builder := func(_ config.Config, _ http.RoundTripper, _ *zap.Logger, _ map[string]*middleware.Limiter) (Generation, error) {
+		return &testGeneration{handler: http.NotFoundHandler(), closed: make(chan struct{})}, nil
+	}
+	r, err := NewWithBuilder(c, zap.NewNop(), builder)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	events, cancel := r.Subscribe()
+	defer cancel()
+	replacement := validRuntimeConfig("second")
+	if err := r.Replace(replacement); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case event := <-events:
+		if event.Type != "generation_changed" || event.Revision != 2 {
+			t.Fatalf("event = %+v", event)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("generation event was not published")
+	}
+}
+
 func TestRuntimeBoundsRetiredGenerations(t *testing.T) {
 	release := make(chan struct{})
 	started := make(chan struct{}, maxRetiredGenerations+1)

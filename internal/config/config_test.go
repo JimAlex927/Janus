@@ -430,18 +430,35 @@ func TestSettingsRejectInvalidBounds(t *testing.T) {
 	}
 }
 
-func TestAdminAddressMustBeLoopback(t *testing.T) {
+func TestAdminAddressMustBeLoopbackOrPrivate(t *testing.T) {
 	base := `{"listen":"127.0.0.1:8080","settings":{"admin":{"address":"127.0.0.1:9090"}},"services":{"s":{"upstreams":["http://localhost:9000"]}},"routes":[{"name":"r","path_prefix":"/api","service":"s"}]}`
 	if _, err := Load(strings.NewReader(base)); err != nil {
 		t.Fatal(err)
 	}
-	for _, address := range []string{"0.0.0.0:9090", "localhost:9090", "127.0.0.1:0", "127.0.0.1:not-a-port"} {
+	for _, address := range []string{"10.0.0.5:9090", "192.168.1.5:9090", "172.16.1.5:9090", "0.0.0.0:9090", "localhost:9090", "127.0.0.1:0", "127.0.0.1:not-a-port"} {
 		t.Run(address, func(t *testing.T) {
 			body := strings.Replace(base, "127.0.0.1:9090", address, 1)
-			if _, err := Load(strings.NewReader(body)); err == nil {
+			valid := strings.HasPrefix(address, "10.") || strings.HasPrefix(address, "192.168.") || strings.HasPrefix(address, "172.16.")
+			if _, err := Load(strings.NewReader(body)); (err == nil) != valid {
 				t.Fatal("expected invalid admin address")
 			}
 		})
+	}
+}
+
+func TestAdminCredentialsMustBeCompleteBcryptHash(t *testing.T) {
+	base := `{"listen":"127.0.0.1:8080","settings":{"admin":{"address":"10.0.0.5:9090","username":"admin","password_hash":"$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy"}},"services":{"s":{"upstreams":["http://localhost:9000"]}},"routes":[{"name":"r","path_prefix":"/","service":"s"}]}`
+	if _, err := Load(strings.NewReader(base)); err != nil {
+		t.Fatal(err)
+	}
+	for _, replacement := range []string{`"username":""`, `"password_hash":""`, `"password_hash":"plain-text"`} {
+		body := strings.Replace(base, `"username":"admin"`, replacement, 1)
+		if strings.Contains(replacement, "password_hash") {
+			body = strings.Replace(base, `"password_hash":"$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy"`, replacement, 1)
+		}
+		if _, err := Load(strings.NewReader(body)); err == nil {
+			t.Fatalf("expected invalid admin credentials for %s", replacement)
+		}
 	}
 }
 

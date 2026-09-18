@@ -57,7 +57,9 @@
       "disable_compression": true
     },
     "admin": {
-      "address": "127.0.0.1:9090"
+      "address": "127.0.0.1:9090",
+      "username": "admin",
+      "password_hash": "$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy"
     },
     "shutdown": {
       "drain_timeout": "35s",
