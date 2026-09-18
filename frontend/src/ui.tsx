@@ -94,6 +94,16 @@ export function Empty({ text, action }: { text: string; action?: ReactNode }) {
   );
 }
 
-export function Badge({ text }: { text: string }) {
-  return <em className="badge">{text}</em>;
+export function Badge({ text, variant = "default" }: { text: string; variant?: "default" | "success" | "warn" | "danger" }) {
+  return <em className={`badge badge-${variant}`}>{text}</em>;
+}
+
+export function StatCard({ label, value, sub }: { label: string; value: string | number; sub?: string }) {
+  return (
+    <div className="stat-card">
+      <span>{label}</span>
+      <strong>{value}</strong>
+      {sub != null && sub !== "" && <small className="muted">{sub}</small>}
+    </div>
+  );
 }

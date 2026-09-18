@@ -1,31 +1,26 @@
 import { useState, type FormEvent } from "react";
 import { login, logout } from "./api";
-import { JsonPage } from "./JsonPage";
-import { LimensPage } from "./Limens";
-import { MiddlewaresPage } from "./Middlewares";
-import { Overview, pageTitle } from "./Overview";
-import { RegistriesPage } from "./Registries";
-import { RoutesPage } from "./Routes";
-import { ServicesPage } from "./Services";
+import { ConfigEditorPage } from "./ConfigEditor";
+import { ConfigsPage } from "./Configs";
+import { Overview } from "./Overview";
 import { SettingsPage } from "./Settings";
 import { useConfig } from "./useConfig";
 
-type Page = "overview" | "routes" | "services" | "middlewares" | "registries" | "limens" | "settings" | "json";
+type Page = "overview" | "configs" | "settings";
 
 const NAV: { id: Page; label: string }[] = [
   { id: "overview", label: "概览" },
-  { id: "routes", label: "路由" },
-  { id: "services", label: "服务" },
-  { id: "middlewares", label: "中间件" },
-  { id: "registries", label: "注册中心" },
-  { id: "limens", label: "入口" },
+  { id: "configs", label: "Config" },
   { id: "settings", label: "全局设置" },
-  { id: "json", label: "JSON" },
 ];
+
+const TITLES: Record<Page, string> = { overview: "系统概览", configs: "配置", settings: "全局设置" };
 
 export function App() {
   const store = useConfig();
   const [page, setPage] = useState<Page>("overview");
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [configsTick, setConfigsTick] = useState(0);
 
   if (store.status === "loading" || store.status === "error") {
     return (
@@ -33,7 +28,7 @@ export function App() {
         <div className="login-card">
           <div className="brand-mark">J</div>
           <h2>正在连接 Janus…</h2>
-          <p>{store.status === "error" ? store.message || "加载失败" : "正在读取配置快照"}</p>
+          <p>{store.status === "error" ? store.message || "加载失败" : "正在读取运行状态"}</p>
           {store.status === "error" && (
             <button type="button" className="btn primary" onClick={() => store.load(true)}>
               重试
@@ -48,11 +43,6 @@ export function App() {
     return <Login onDone={() => store.load(true)} />;
   }
 
-  async function refresh() {
-    if (store.dirty && !window.confirm("本地有未发布草稿，刷新会丢弃草稿。继续吗？")) return;
-    await store.load(true);
-  }
-
   return (
     <div className="app-shell">
       <aside className="side">
@@ -65,7 +55,15 @@ export function App() {
         </div>
         <nav>
           {NAV.map((item) => (
-            <button key={item.id} type="button" className={page === item.id ? "active" : ""} onClick={() => setPage(item.id)}>
+            <button
+              key={item.id}
+              type="button"
+              className={page === item.id ? "active" : ""}
+              onClick={() => {
+                setPage(item.id);
+                if (item.id !== "configs") setEditingId(null);
+              }}
+            >
               <span className="nav-dot" />
               {item.label}
             </button>
@@ -83,21 +81,13 @@ export function App() {
           <div>
             <div className="eyebrow">CONTROL PLANE</div>
             <div className="title-line">
-              <h1>{pageTitle(page)}</h1>
-              <span className={`draft-state ${store.dirty ? "dirty" : ""}`}>{store.dirty ? "未发布变更" : "已同步"}</span>
+              <h1>{editingId != null ? "配置画布" : TITLES[page]}</h1>
             </div>
           </div>
           <div className="header-actions">
-            <button type="button" className="btn ghost" disabled={store.busy} onClick={refresh}>
-              刷新
-            </button>
-            <button type="button" className="btn ghost" disabled={store.busy} onClick={() => store.validate()}>
-              校验
-            </button>
             <button
               type="button"
               className="btn ghost"
-              disabled={store.busy}
               onClick={async () => {
                 await logout().catch(() => undefined);
                 store.setStatus("unauthorized");
@@ -105,19 +95,8 @@ export function App() {
             >
               退出
             </button>
-            <button type="button" className="btn primary" disabled={store.busy || !store.dirty} onClick={() => store.publish()}>
-              发布变更
-            </button>
           </div>
         </header>
-        {store.remoteChanged && (
-          <div className="notice">
-            远端配置发生变化。
-            <button type="button" onClick={() => store.discard()}>
-              丢弃草稿并刷新
-            </button>
-          </div>
-        )}
         {store.message && (
           <div className="toast">
             {store.message}
@@ -127,13 +106,21 @@ export function App() {
           </div>
         )}
         {page === "overview" && <Overview store={store} />}
-        {page === "routes" && <RoutesPage store={store} />}
-        {page === "services" && <ServicesPage store={store} />}
-        {page === "middlewares" && <MiddlewaresPage store={store} />}
-        {page === "registries" && <RegistriesPage store={store} />}
-        {page === "limens" && <LimensPage store={store} />}
+        {page === "configs" &&
+          (editingId != null ? (
+            <ConfigEditorPage
+              store={store}
+              id={editingId}
+              onBack={() => {
+                setEditingId(null);
+                setConfigsTick((t) => t + 1);
+              }}
+              onStatusChange={() => setConfigsTick((t) => t + 1)}
+            />
+          ) : (
+            <ConfigsPage key={configsTick} store={store} onEdit={(id) => setEditingId(id)} />
+          ))}
         {page === "settings" && <SettingsPage store={store} />}
-        {page === "json" && <JsonPage store={store} />}
       </main>
     </div>
   );

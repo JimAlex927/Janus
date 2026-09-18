@@ -6,10 +6,10 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "preview": "vite preview",
-    "test:model": "node --experimental-strip-types --test src/simulate.test.mjs"
+    "preview": "vite preview"
   },
   "dependencies": {
+    "@xyflow/react": "^12.11.6",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },

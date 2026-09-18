@@ -6,3 +6,7 @@
 /frontend/node_modules/
 /frontend/dist/
 *.tsbuildinfo
+# Runtime SQLite configuration library (created next to the active config).
+configs/*.db
+configs/*.db-shm
+configs/*.db-wal

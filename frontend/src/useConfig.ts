@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError, getConfig, publishConfig, subscribeEvents, validateConfig } from "./api";
-import { cloneConfig, validateLocal } from "./model";
+import { cloneConfig } from "./model";
+import { validateLocal } from "./validate";
 import type { JanusConfig } from "./types";
 
 export type ConfigStatus = "loading" | "ready" | "unauthorized" | "error";

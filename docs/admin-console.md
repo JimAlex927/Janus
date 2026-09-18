@@ -39,13 +39,16 @@ The command writes only the bcrypt hash to standard output. Copy that value to
 
 ## Configuration lifecycle
 
-The console keeps a browser draft separate from the running configuration. A
-publish request is checked against `X-Janus-Revision`, validated, built as a
-new Runtime generation, and then persisted with an atomic rename. If
-persistence fails, the previous generation is restored. Settings that affect
-listeners or process-wide request infrastructure remain startup-owned; a
-configuration containing those changes is rejected by Runtime and must be
-applied after a restart.
+The console manages a library of named configurations stored in SQLite next
+to the active file (`janus-configs.db`). Exactly one record is `active`;
+publishing another record archives the previous one. A publish request
+normalizes the draft to the active startup-owned sections (settings and
+limens), validates it, builds a new Runtime generation, and then persists
+the active file with an atomic rename. If persistence fails, the previous
+generation is restored. Settings that affect listeners or process-wide
+request infrastructure remain startup-owned; they are normalized away on
+publish and must be changed through `全局设置`, which rewrites the file and
+requires a restart.
 
 The API also remains compatible with direct atomic edits of the JSON file. The
 file reloader recognizes a snapshot already published by the console and does
@@ -53,30 +56,29 @@ not build a duplicate generation.
 
 ## Console 页面
 
-控制台采用「表格列表 + 右侧抽屉表单」结构，所有页面共享同一份浏览器
-草稿，发布前统一校验：
+控制台只有三个模块：`概览`、`Config`、`全局设置`。
 
-- `概览`显示请求统计、Revision、未绑定 Service 的路由告警和操作顺序指引。
-- `路由`按入口过滤、按名称/规则搜索；新建与编辑在抽屉中完成，只能引用
-  已存在的 Service 与 Middleware；底部有请求模拟器，只评估当前草稿，
-  不发送真实流量。
-- `服务`维护静态上游池或 Nacos 引用（含健康检查）；被路由引用的服务
-  不允许直接删除。
-- `中间件`创建 buffer / body_limit / in_flight 策略；改名会自动同步所有
-  Route 与 Service 的引用，删除会同步清理引用。
-- `注册中心`管理 Nacos 连接并支持连通性测试；密码字段留空表示沿用远端
-  已保存的凭据。
-- `入口`管理监听地址、协议、TLS 与 HTTP/3；地址/协议/TLS 属于启动级
-  配置，发布后需重启 Janus。
-- `全局设置`编辑 request/stream/server/backend/admin/shutdown 各分组的
-  常用字段；留空表示使用后端默认值。
-- `JSON` 是全量兜底：表单未覆盖的高级字段只能在这里改。文本是局部
-  状态，只有点击「应用到草稿」才会进入全局草稿，避免与表单互相覆盖。
+- `概览`显示生效配置名、Revision、请求统计、配置库盘点和未绑定路由告警。
+- `Config`是配置库：卡片列表展示每套配置的名称、状态
+ （draft / active / archived）与更新时间，支持新建（空白模板、复制生效
+  配置或复制某一套）、删除草稿、一键发布，以及整套配置的 JSON 导入
+  （选文件后新建一条）与导出（下载完整配置 JSON；凭据为脱敏占位，
+  异机恢复需重填密码，同机复制请用“复制”按钮，凭据由服务端直接拷贝）。
+  点`编辑`进入画布。
+- 画布是三类节点的 DAG（React Flow）：`Limen`（监听入口，可增删改；
+  启动级配置，发布时路由部分即时生效，入口差异会明确提示需重启）、
+  `Route`（三段式节点：匹配 → 中间件 → 动作，点击分段直达对应编辑器）、
+  `Service`（上游池或 Nacos 引用）。连线即语义：Limen → Route 指定入口，
+  Route → Service 设置转发；Backspace/Delete 或“删除选中”按钮删节点，
+  被引用的节点会拒绝并点名；顶栏“整理布局”按引用关系分层重排，边尽量
+  不交叉。入口监听配置是启动级的：发布时路由部分即时生效，入口差异会
+  明确提示需重启；入口抽屉里的“写入文件”可把已保存草稿的入口合并进
+  生效文件（运行不受影响，重启后生效）。
+- `全局设置`编辑生效配置文件的 settings 段。保存只做校验并写文件，
+  不触碰运行中的 generation，保存后必须重启 Janus。
 
-抽屉的取消/确认语义在所有页面一致：打开时快照当前草稿，取消则整体
-回滚，确认才写入草稿。删除操作会先检查引用关系，被引用时拒绝并提示
-调用方。发布按钮仅在草稿变脏时可用；远端发生变更时若本地无脏草稿则
-自动刷新，有脏草稿则只提示，由操作者决定丢弃或先发布。
+Visual edits stay in a browser draft until saved to the library; publishing a
+record immediately replaces the running generation.
 
 ## Frontend development
 
@@ -91,5 +93,5 @@ The Vite development server proxies `/api`, `/metrics`, and `/readyz` to the
 local Admin listener. A release build is copied to `internal/admin/ui/` before
 `go build` so the Go `embed` package has the same UI that was reviewed in the
 frontend build. The typed API client, config model helpers, request simulator,
-and per-resource editors are kept in separate modules. Deterministic tests
-cover the request simulator's match semantics.
+node canvas editor, and per-resource drawer editors are kept in separate
+modules.

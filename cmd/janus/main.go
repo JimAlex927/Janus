@@ -20,6 +20,7 @@ import (
 	"janus/internal/config"
 	"janus/internal/limen"
 	janusruntime "janus/internal/runtime"
+	"janus/internal/store"
 	appLogger "janus/pkg/logger"
 
 	"go.uber.org/zap"
@@ -102,7 +103,9 @@ func run(ctx context.Context, path string, check, printEffective bool, reloadInt
 	var adminState *admin.State
 	var adminServer *http.Server
 	var adminListener net.Listener
+	var configLibrary *store.Store
 	if address := c.Settings.Admin.Address; address != "" {
+		configLibrary = openConfigLibrary(filepath.Join(filepath.Dir(path), "janus-configs.db"), c, logger)
 		adminState = admin.NewState()
 		adminServer = &http.Server{
 			Handler: admin.NewHandlerWithOptions(admin.Options{
@@ -112,6 +115,8 @@ func run(ctx context.Context, path string, check, printEffective bool, reloadInt
 				RegistryHealth: requestRuntime.RegistryHealthConfig,
 				Publish:        func(candidate config.Config) error { return publishConfig(path, requestRuntime, candidate) },
 				Subscribe:      requestRuntime.Subscribe,
+				Library:        configLibrary,
+				SaveActive:     func(updated config.Config) error { return writeConfigAtomically(path, updated) },
 			}),
 			ReadHeaderTimeout: c.Settings.Server.ReadHeaderTimeout.Duration(),
 			WriteTimeout:      c.Settings.Server.WriteTimeout.Duration(),
@@ -126,6 +131,9 @@ func run(ctx context.Context, path string, check, printEffective bool, reloadInt
 			return fmt.Errorf("admin listener: %w", err)
 		}
 		defer func() { _ = adminServer.Close() }()
+		if configLibrary != nil {
+			defer func() { _ = configLibrary.Close() }()
+		}
 	}
 	//=============================For various Limen protocol bindings ===================
 	for _, name := range names {
@@ -301,6 +309,33 @@ func closeServers(servers []*limen.Limen) {
 	for _, server := range servers {
 		_ = server.Close()
 	}
+}
+
+// openConfigLibrary opens the SQLite named-configuration library and seeds
+// it with the startup snapshot when empty, so the console always shows the
+// running configuration as one entry. A failure only disables the library
+// endpoints; the gateway itself keeps serving.
+func openConfigLibrary(dbPath string, startup config.Config, logger *zap.Logger) *store.Store {
+	library, err := store.Open(dbPath)
+	if err != nil {
+		logger.Warn("configuration library unavailable", zap.Error(err))
+		return nil
+	}
+	records, err := library.List()
+	if err != nil {
+		logger.Warn("configuration library unavailable", zap.Error(err))
+		_ = library.Close()
+		return nil
+	}
+	if len(records) == 0 {
+		record, err := library.Create("线上生效配置", startup)
+		if err != nil {
+			logger.Warn("configuration library seed failed", zap.Error(err))
+		} else if err := library.Publish(record.ID); err != nil {
+			logger.Warn("configuration library seed failed", zap.Error(err))
+		}
+	}
+	return library
 }
 
 // publishConfig keeps the file and active Runtime aligned. Runtime validates

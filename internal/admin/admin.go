@@ -17,6 +17,7 @@ import (
 	"janus/internal/config"
 	"janus/internal/discovery"
 	janusruntime "janus/internal/runtime"
+	"janus/internal/store"
 	"janus/internal/telemetry"
 
 	"golang.org/x/crypto/bcrypt"
@@ -43,6 +44,11 @@ func (s *State) Ready() bool { return s != nil && s.ready.Load() }
 
 // Options connects the admin process to the stable Runtime without putting
 // admin concerns into the business request path.
+//
+// Library enables the named-configuration library (/api/v1/configs...).
+// SaveActive enables POST /api/v1/config/settings, which validates and
+// atomically rewrites the active file without touching the running
+// generation; such changes require a process restart to take effect.
 type Options struct {
 	State          *State
 	Metrics        *telemetry.Metrics
@@ -53,6 +59,8 @@ type Options struct {
 	RegistryHealth func(string, *config.NacosRegistry) discovery.RegistryHealth
 	Publish        func(config.Config) error
 	Subscribe      func() (<-chan janusruntime.Event, func())
+	Library        *store.Store
+	SaveActive     func(config.Config) error
 }
 
 type Handler struct {
@@ -65,6 +73,8 @@ type Handler struct {
 	registryHealth func(string, *config.NacosRegistry) discovery.RegistryHealth
 	publish        func(config.Config) error
 	subscribe      func() (<-chan janusruntime.Event, func())
+	library        *store.Store
+	saveActive     func(config.Config) error
 	sessionsMu     sync.Mutex
 	sessions       map[string]time.Time
 }
@@ -80,7 +90,7 @@ func NewHandlerWithOptions(options Options) http.Handler {
 	if options.State == nil {
 		options.State = NewState()
 	}
-	h := &Handler{state: options.State, metrics: options.Metrics, health: options.Health, current: options.Current, revision: options.Revision, discovery: options.Discovery, registryHealth: options.RegistryHealth, publish: options.Publish, subscribe: options.Subscribe, sessions: make(map[string]time.Time)}
+	h := &Handler{state: options.State, metrics: options.Metrics, health: options.Health, current: options.Current, revision: options.Revision, discovery: options.Discovery, registryHealth: options.RegistryHealth, publish: options.Publish, subscribe: options.Subscribe, library: options.Library, saveActive: options.SaveActive, sessions: make(map[string]time.Time)}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/livez", h.livez)
 	mux.HandleFunc("/readyz", h.readyz)
@@ -97,6 +107,9 @@ func NewHandlerWithOptions(options Options) http.Handler {
 	mux.HandleFunc("/api/v1/config", h.configHandler)
 	mux.HandleFunc("/api/v1/config/validate", h.validate)
 	mux.HandleFunc("/api/v1/config/publish", h.publishConfig)
+	mux.HandleFunc("/api/v1/config/settings", h.saveSettings)
+	mux.HandleFunc("/api/v1/configs", h.configs)
+	mux.HandleFunc("/api/v1/configs/", h.configsSub)
 	mux.HandleFunc("/api/v1/events", h.events)
 	return securityHeaders(mux)
 }

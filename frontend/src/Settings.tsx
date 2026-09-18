@@ -1,18 +1,38 @@
-import { Empty, Field } from "./ui";
+import { useEffect, useState } from "react";
+import { ApiError, saveSettings } from "./api";
+import { Empty } from "./ui";
+import { Field } from "./ui";
 import type { ConfigStore } from "./useConfig";
 
-function get(settings: Record<string, unknown>, section: string, key: string): string {
-  const group = (settings?.[section] as Record<string, unknown>) || {};
-  const value = group[key];
-  if (value === undefined || value === null) return "";
-  if (typeof value === "boolean") return value ? "true" : "false";
-  return String(value);
-}
-
+/**
+ * 全局设置编辑的是生效配置文件的 settings 段。
+ * 保存 = 校验后直接写文件，不触碰运行中的 generation（热发布不支持改
+ * 启动级参数），因此保存后必须重启 Janus。页面用文件基线判断脏状态，
+ * 而不是运行快照。
+ */
 export function SettingsPage({ store }: { store: ConfigStore }) {
   const draft = store.draft;
+  const [fileBaseline, setFileBaseline] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (draft && !fileBaseline) {
+      setFileBaseline(JSON.stringify(draft.settings || {}));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [store.revision]);
+
   if (!draft) return <Empty text="正在加载配置…" />;
   const settings = (draft.settings || {}) as Record<string, unknown>;
+  const dirty = JSON.stringify(settings) !== fileBaseline;
+
+  function get(section: string, key: string): string {
+    const group = (settings?.[section] as Record<string, unknown>) || {};
+    const value = group[key];
+    if (value === undefined || value === null) return "";
+    if (typeof value === "boolean") return value ? "true" : "false";
+    return String(value);
+  }
 
   function set(section: string, key: string, raw: string, kind: "string" | "number" | "bool") {
     store.update((prev) => {
@@ -36,16 +56,39 @@ export function SettingsPage({ store }: { store: ConfigStore }) {
     });
   }
 
+  async function save() {
+    setBusy(true);
+    try {
+      await saveSettings(settings);
+      setFileBaseline(JSON.stringify(settings));
+      store.setMessage("设置已写入配置文件，重启 Janus 后生效。");
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) store.setStatus("unauthorized");
+      else store.setMessage(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   const text = (section: string, key: string, kind: "string" | "number" | "bool" = "string") => ({
-    value: get(settings, section, key),
+    value: get(section, key),
     onChange: (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => set(section, key, e.target.value, kind),
   });
 
   return (
     <section className="page">
-      <div className="warn-card">
-        <strong>注意：部分设置需要重启生效</strong>
-        <p>监听与进程级参数（含 admin 地址、server 超时、shutdown）修改后需重启；发布接口会直接返回错误，请按提示处理。</p>
+      <div className="toolbar">
+        <p className="muted">
+          {dirty ? "文件有未保存的修改。" : "与配置文件一致。"}保存后必须重启 Janus，运行中的流量不受影响。
+        </p>
+        <div className="toolbar-actions">
+          <button type="button" className="btn ghost" disabled={busy} onClick={() => store.validate()}>
+            校验
+          </button>
+          <button type="button" className="btn primary" disabled={busy || !dirty} onClick={save}>
+            保存（需重启生效）
+          </button>
+        </div>
       </div>
       <div className="settings-grid">
         <div className="card">
@@ -73,7 +116,7 @@ export function SettingsPage({ store }: { store: ConfigStore }) {
           <Field label="max_conns_per_host"><input type="number" min={1} {...text("backend", "max_conns_per_host", "number")} /></Field>
           <Field label="max_idle_conns_per_host"><input type="number" min={1} {...text("backend", "max_idle_conns_per_host", "number")} /></Field>
           <Field label="disable_compression">
-            <select value={get(settings, "backend", "disable_compression") || "true"} onChange={(e) => set("backend", "disable_compression", e.target.value, "bool")}>
+            <select value={get("backend", "disable_compression") || "true"} onChange={(e) => set("backend", "disable_compression", e.target.value, "bool")}>
               <option value="true">true</option>
               <option value="false">false</option>
             </select>
@@ -83,17 +126,13 @@ export function SettingsPage({ store }: { store: ConfigStore }) {
           <h3>管理 admin</h3>
           <Field label="address" hint="回环或私网地址，修改后需重启"><input {...text("admin", "address")} placeholder="127.0.0.1:9090" /></Field>
           <Field label="username"><input {...text("admin", "username")} placeholder="admin" /></Field>
-          <p className="muted">password_hash 不会在此显示；改密码请用 janus-hash 生成后写入配置文件并重启。</p>
+          <p className="muted">password_hash 不在此显示；改密码请用 janus-hash 生成后写入配置文件并重启。</p>
         </div>
         <div className="card">
           <h3>关闭 shutdown</h3>
           <Field label="drain_timeout"><input {...text("shutdown", "drain_timeout")} placeholder="35s" /></Field>
           <Field label="load_balancer_removal_delay"><input {...text("shutdown", "load_balancer_removal_delay")} placeholder="0s" /></Field>
         </div>
-      </div>
-      <div className="card">
-        <h3>高级字段</h3>
-        <p className="muted">未列出的 settings 字段请到 JSON 页编辑；留空表示使用后端默认值。</p>
       </div>
     </section>
   );

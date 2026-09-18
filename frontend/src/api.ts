@@ -78,6 +78,68 @@ export function testRegistry(
   });
 }
 
+export interface ConfigRecord {
+  id: number;
+  name: string;
+  status: "draft" | "active" | "archived" | string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface StoredConfig {
+  id: number;
+  name: string;
+  status: string;
+  content: JanusConfig;
+  layout: { nodes?: Record<string, { x: number; y: number }> } | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export function listConfigs(): Promise<{ configs: ConfigRecord[] }> {
+  return request("/api/v1/configs");
+}
+
+export function createConfig(name: string, from?: string, content?: JanusConfig): Promise<{ id: number }> {
+  return request("/api/v1/configs", {
+    method: "POST",
+    body: JSON.stringify({ name, from: from || "blank", content }),
+  });
+}
+
+export function getStoredConfig(id: number): Promise<StoredConfig> {
+  return request(`/api/v1/configs/${id}`);
+}
+
+export function saveStoredConfig(
+  id: number,
+  payload: { name?: string; content?: JanusConfig; layout?: Record<string, unknown> },
+): Promise<{ ok: boolean }> {
+  return request(`/api/v1/configs/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function deleteStoredConfig(id: number): Promise<{ ok: boolean }> {
+  return request(`/api/v1/configs/${id}`, { method: "DELETE" });
+}
+
+export function publishStoredConfig(id: number): Promise<{ ok: boolean; revision: number; warning?: string }> {
+  return request(`/api/v1/configs/${id}/publish`, { method: "POST" });
+}
+
+export function stageLimens(id: number): Promise<{ ok: boolean; restart_required: boolean; warning?: string }> {
+  return request(`/api/v1/configs/${id}/stage-limens`, { method: "POST" });
+}
+
+export function saveSettings(settings: unknown): Promise<{ ok: boolean; restart_required: boolean }> {
+  return request("/api/v1/config/settings", {
+    method: "POST",
+    body: JSON.stringify(settings),
+  });
+}
+
 /** 订阅远端 generation 变更；返回取消函数。401 时交由调用方处理。 */
 export function subscribeEvents(onGenerationChanged: () => void): () => void {
   const source = new EventSource("/api/v1/events");
