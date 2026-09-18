@@ -275,7 +275,7 @@ export function MiddlewareDefForm({ value, catalog, onChange }: { value: Middlew
       </Field>
       {capability?.description && <p className="form-note">{capability.description}</p>}
       {capability?.fields.map((field) => (
-        <Field key={field.name} label={field.label} hint={field.description}>
+        <Field key={field.name} label={`${field.label}${field.required ? " *" : ""}`} hint={field.description}>
           <CapabilityField
             field={field}
             value={policy[field.name]}

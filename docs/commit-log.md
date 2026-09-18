@@ -2049,3 +2049,30 @@ Verification:
 - Compared SHA-256 hashes for `index.html`, JS and CSS release assets with the
   embedded copies
 - `git diff --check`
+
+## 2026-09-18
+
+### Align dynamic middleware required-field validation
+
+Commit message: `fix(console): validate required middleware collections`
+
+Scope:
+
+- Made the console's local Middleware validation treat empty lists and maps as
+  missing when the backend capability catalog marks a field as required. This
+  keeps CORS `allow_origins` and `allow_methods` errors visible before publish,
+  instead of waiting for the backend 422 response.
+- Marked required fields in the catalog-driven Middleware editor and refreshed
+  the embedded console bundle.
+
+Verification:
+
+- `cd frontend; npm run build`
+- `go test ./...`
+- `go vet ./...`
+- Attempted `go test -race ./...`; Windows ThreadSanitizer failed to allocate
+  its shadow memory with error 87 before the affected package tests ran. The
+  race gate remains to be rerun on the target Linux environment.
+- Compared SHA-256 hashes for `index.html`, JS and CSS release assets with the
+  embedded copies
+- `git diff --check`

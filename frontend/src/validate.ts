@@ -19,7 +19,11 @@ export function validateLocal(config: JanusConfig, catalog: MiddlewareCapability
     const policy = def[type] && typeof def[type] === "object" ? def[type] as Record<string, unknown> : {};
     for (const field of capability.fields) {
       const value = policy[field.name];
-      const missing = value === undefined || value === null || value === "";
+      const missing = value === undefined
+        || value === null
+        || value === ""
+        || (field.kind === "string_list" && Array.isArray(value) && value.length === 0)
+        || (field.kind === "string_map" && value && typeof value === "object" && !Array.isArray(value) && Object.keys(value).length === 0);
       if (field.required && missing) {
         errors.push(`Middleware ${name} 的 ${field.label} 不能为空`);
         continue;
