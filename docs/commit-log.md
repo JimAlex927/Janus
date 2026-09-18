@@ -3,6 +3,31 @@
 This document records the purpose, scope, and verification for each Janus
 repository commit. Add a new dated section before every future commit.
 
+## 2026-09-18 — Nacos discovery core (working tree)
+
+Baseline committed before implementation: `705234e`
+(`feat(admin): add embedded visual configuration console`).
+
+Scope:
+
+- Added named Nacos registry connections and per-Service discovery selection,
+  including multiple namespaces, defaults, source exclusivity and validation.
+- Isolated the pinned Naming SDK adapter from shared discovery lifecycle and
+  local upstream selection; added reference-counted clients/subscriptions.
+- Added atomic weighted endpoint snapshots, authoritative empty membership,
+  bounded stale data, and no lease renewal on unchanged SDK cache reads.
+- Reused subscriptions across runtime generations and released provisional or
+  retired-generation leases on rollback/drain; fixed typed-nil Gateway builder
+  errors causing a panic in Runtime cleanup.
+- Added real HTTP forwarding/empty/recovery and generation lifecycle regression
+  tests; documented the architecture and follow-up UI work in
+  `docs/nacos-discovery.md`.
+
+Verification: `go test ./...` and `go vet ./...` passed. The Windows race
+runtime failed to initialize with a ThreadSanitizer allocation error (87);
+race checks must be rerun on Linux. Real Nacos cluster integration remains
+a separate deployment acceptance step.
+
 ## 2026-09-17
 
 ### Improve console editing workflow

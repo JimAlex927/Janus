@@ -3,6 +3,7 @@ package config
 // EffectiveConfig is the operator-facing, normalized view of a Config.
 // Secret-bearing TLS asset paths are intentionally not part of this type.
 type EffectiveConfig struct {
+	Discovery   DiscoveryConfig             `json:"discovery,omitempty"`
 	Version     int                         `json:"version"`
 	Limens      map[string]EffectiveLimen   `json:"limens"`
 	Settings    Settings                    `json:"settings"`
@@ -25,6 +26,7 @@ type EffectiveTLS struct {
 }
 
 type EffectiveService struct {
+	Nacos       *NacosService        `json:"nacos,omitempty"`
 	Upstreams   []string             `json:"upstreams"`
 	Middlewares []string             `json:"middlewares,omitempty"`
 	HealthCheck *HealthCheckSettings `json:"health_check,omitempty"`
@@ -63,6 +65,7 @@ func (c Config) EffectiveView() EffectiveConfig {
 	services := make(map[string]EffectiveService, len(c.Services))
 	for name, service := range c.Services {
 		item := EffectiveService{
+			Nacos:       service.Nacos,
 			Upstreams:   append([]string(nil), service.Upstreams...),
 			Middlewares: append([]string(nil), service.Middlewares...),
 		}
@@ -79,6 +82,7 @@ func (c Config) EffectiveView() EffectiveConfig {
 		routes[index] = route
 	}
 	return EffectiveConfig{
+		Discovery:   c.Discovery,
 		Version:     CurrentConfigVersion,
 		Limens:      limens,
 		Settings:    settings,

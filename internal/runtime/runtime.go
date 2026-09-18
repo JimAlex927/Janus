@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"janus/internal/config"
+	"janus/internal/discovery"
+	"janus/internal/discovery/nacos"
 	"janus/internal/gateway"
 	"janus/internal/middleware"
 	"janus/internal/proxy"
@@ -87,7 +89,19 @@ type generationRef struct {
 // New creates a runtime with the standard Gateway generation builder and one
 // process-owned outbound transport.
 func New(c config.Config, logger *zap.Logger) (*Runtime, error) {
-	return NewWithBuilder(c, logger, DefaultBuilder)
+	return NewWithDiscovery(c, logger, discovery.NewManager(nacos.New))
+}
+
+// NewWithDiscovery keeps client/subscription reuse outside immutable handler
+// generations and provides an injectable boundary for deterministic tests.
+func NewWithDiscovery(c config.Config, logger *zap.Logger, manager *discovery.Manager) (*Runtime, error) {
+	return NewWithBuilder(c, logger, func(c config.Config, transport http.RoundTripper, logger *zap.Logger, limits map[string]*middleware.Limiter) (Generation, error) {
+		generation, err := gateway.NewWithDiscovery(c, logger, transport, limits, manager)
+		if err != nil {
+			return nil, err
+		}
+		return generation, nil
+	})
 }
 
 // NewWithBuilder is used by tests and future configuration sources to supply
@@ -178,7 +192,13 @@ func NewWithBuilder(c config.Config, logger *zap.Logger, builder Builder) (*Runt
 
 // DefaultBuilder adapts the Gateway builder to Runtime's generation contract.
 func DefaultBuilder(c config.Config, transport http.RoundTripper, logger *zap.Logger, serviceLimiters map[string]*middleware.Limiter) (Generation, error) {
-	return gateway.NewWithTransportAndLimiters(c, logger, transport, serviceLimiters)
+	generation, err := gateway.NewWithTransportAndLimiters(c, logger, transport, serviceLimiters)
+	// Never convert a nil *Gateway into a non-nil Generation interface: the
+	// rollback path would try to close that typed nil value.
+	if err != nil {
+		return nil, err
+	}
+	return generation, nil
 }
 
 // Handler returns the stable dispatcher to install in Protocol Limen.
@@ -251,6 +271,21 @@ func (r *Runtime) HealthSnapshot() []telemetry.BackendHealth {
 		return nil
 	}
 	return snapshotter.HealthSnapshot()
+}
+
+func (r *Runtime) DiscoverySnapshot() map[string]discovery.Status {
+	ref, ok := r.acquire()
+	if !ok {
+		return nil
+	}
+	defer r.release(ref)
+	view, ok := ref.generation.(interface {
+		DiscoverySnapshot() map[string]discovery.Status
+	})
+	if !ok {
+		return nil
+	}
+	return view.DiscoverySnapshot()
 }
 
 // ServeHTTP delegates to the stable dispatcher.
@@ -472,6 +507,16 @@ func (g *managedGeneration) Close() {
 		defer g.release()
 		g.Generation.Close()
 	})
+}
+
+func (g *managedGeneration) DiscoverySnapshot() map[string]discovery.Status {
+	view, ok := g.Generation.(interface {
+		DiscoverySnapshot() map[string]discovery.Status
+	})
+	if !ok {
+		return nil
+	}
+	return view.DiscoverySnapshot()
 }
 
 type serviceLimiterRegistry struct {

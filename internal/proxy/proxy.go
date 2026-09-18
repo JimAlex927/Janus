@@ -14,7 +14,6 @@ import (
 	"janus/internal/forwarding"
 	"janus/internal/protocol"
 	"janus/internal/telemetry"
-	"janus/internal/upstream"
 
 	"go.uber.org/zap"
 )
@@ -66,13 +65,19 @@ func NewTransport(values ...config.BackendSettings) *http.Transport {
 	return t
 }
 
-func New(pool *upstream.Pool, transport http.RoundTripper, logger *zap.Logger) http.Handler {
+// TargetSelector lets static pools and discovered pools share the same proxy.
+// Selection is local and must never perform registry/network I/O.
+type TargetSelector interface {
+	NextHealthy() (url.URL, bool)
+}
+
+func New(pool TargetSelector, transport http.RoundTripper, logger *zap.Logger) http.Handler {
 	return NewWithForwarding(pool, transport, logger, forwarding.NewPolicies())
 }
 
 // NewWithForwarding builds a proxy that derives canonical forwarding headers
 // from the request's trusted Limen policy before contacting the backend.
-func NewWithForwarding(pool *upstream.Pool, transport http.RoundTripper, logger *zap.Logger, policies forwarding.Policies) http.Handler {
+func NewWithForwarding(pool TargetSelector, transport http.RoundTripper, logger *zap.Logger, policies forwarding.Policies) http.Handler {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
@@ -83,7 +88,7 @@ func NewWithForwarding(pool *upstream.Pool, transport http.RoundTripper, logger 
 			if !ok {
 				// Keep the ReverseProxy safe for direct embedding while the
 				// normal handler selects a target before entering it.
-				target = pool.Next()
+				target, _ = pool.NextHealthy()
 			}
 			r.SetURL(&target)
 			// Rewrite already removes the standard forwarding headers. Remove

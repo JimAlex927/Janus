@@ -8,6 +8,8 @@ import (
 	"strconv"
 
 	"janus/internal/config"
+	"janus/internal/discovery"
+	"janus/internal/discovery/nacos"
 	"janus/internal/forwarding"
 	"janus/internal/health"
 	"janus/internal/middleware"
@@ -26,6 +28,7 @@ type Gateway struct {
 	ownedTransport  *http.Transport
 	checkers        []*health.Checker
 	healthByService map[string]*health.Checker
+	discovered      map[string]*discovery.Lease
 }
 
 func New(c config.Config, logger *zap.Logger) (*Gateway, error) {
@@ -44,6 +47,12 @@ func NewWithTransport(c config.Config, logger *zap.Logger, transport http.RoundT
 // limiters. A nil map keeps the standalone Gateway path source-compatible by
 // creating generation-local service limiters.
 func NewWithTransportAndLimiters(c config.Config, logger *zap.Logger, transport http.RoundTripper, serviceLimiters map[string]*middleware.Limiter) (*Gateway, error) {
+	return NewWithDiscovery(c, logger, transport, serviceLimiters, discovery.NewManager(nacos.New))
+}
+
+// NewWithDiscovery uses Runtime-owned discovery resources. A generation owns
+// leases, not clients: rollback and drain release only that generation's leases.
+func NewWithDiscovery(c config.Config, logger *zap.Logger, transport http.RoundTripper, serviceLimiters map[string]*middleware.Limiter, resolver *discovery.Manager) (*Gateway, error) {
 	// 把配置填充默认值 同时里面还有个对server的health check填充默认值的操作
 	c = c.WithDefaults()
 	if err := c.Validate(); err != nil {
@@ -62,10 +71,14 @@ func NewWithTransportAndLimiters(c config.Config, logger *zap.Logger, transport 
 	}
 	checkers := make([]*health.Checker, 0)
 	healthByService := make(map[string]*health.Checker)
+	discovered := make(map[string]*discovery.Lease)
 	committed := false
 	defer func() {
 		if committed {
 			return
+		}
+		for _, lease := range discovered {
+			lease.Close()
 		}
 		for _, checker := range checkers {
 			checker.Close()
@@ -84,49 +97,61 @@ func NewWithTransportAndLimiters(c config.Config, logger *zap.Logger, transport 
 		forwardingPolicies.Set(name, policy)
 	}
 	for name, service := range c.Services {
-		targets := make([]*url.URL, 0, len(service.Upstreams))
-		//Notice that here is upstreams, consisting of multiple upstream.
-		for _, raw := range service.Upstreams {
-			u, err := config.ParseUpstream(raw)
+		var pool proxy.TargetSelector
+		if service.Nacos != nil {
+			if resolver == nil {
+				return nil, fmt.Errorf("service %q requires a discovery manager", name)
+			}
+			lease, err := resolver.Acquire(c.Discovery.Nacos[service.Nacos.Registry], *service.Nacos)
+			if err != nil {
+				return nil, fmt.Errorf("service %q: %w", name, err)
+			}
+			discovered[name] = lease
+			pool = lease.Pool
+		} else {
+			targets := make([]*url.URL, 0, len(service.Upstreams))
+			//Notice that here is upstreams, consisting of multiple upstream.
+			for _, raw := range service.Upstreams {
+				u, err := config.ParseUpstream(raw)
+				if err != nil {
+					return nil, err
+				}
+				targets = append(targets, u)
+			}
+			//pool is slice contains all the upstream url corresponding to a service
+			// pool 就是一个service的upstream的切片 然后有一个next方法 可以round robin的方式返回下一个url
+			// 这样就可以负载均衡
+			var healthChecker *health.Checker
+			var err error
+			if service.HealthCheck != nil {
+				check := service.HealthCheck.WithDefaults()
+				healthTargets := make([]url.URL, len(targets))
+				for i, target := range targets {
+					healthTargets[i] = *target
+				}
+				healthChecker, err = health.New(healthTargets, health.Settings{
+					Path:               check.Path,
+					Interval:           check.Interval.Duration(),
+					Timeout:            check.Timeout.Duration(),
+					Jitter:             check.Jitter.Duration(),
+					UnhealthyThreshold: check.UnhealthyThreshold,
+					HealthyThreshold:   check.HealthyThreshold,
+					ExpectedStatus:     check.ExpectedStatus,
+				}, transport, logger.With(zap.String("service", name)))
+				if err != nil {
+					return nil, fmt.Errorf("service %q health check: %w", name, err)
+				}
+				checkers = append(checkers, healthChecker)
+				healthByService[name] = healthChecker
+			}
+			if healthChecker != nil {
+				pool, err = upstream.NewWithHealth(targets, healthChecker.Store())
+			} else {
+				pool, err = upstream.New(targets)
+			}
 			if err != nil {
 				return nil, err
 			}
-			targets = append(targets, u)
-		}
-		//pool is slice contains all the upstream url corresponding to a service
-		// pool 就是一个service的upstream的切片 然后有一个next方法 可以round robin的方式返回下一个url
-		// 这样就可以负载均衡
-		var healthChecker *health.Checker
-		var pool *upstream.Pool
-		var err error
-		if service.HealthCheck != nil {
-			check := service.HealthCheck.WithDefaults()
-			healthTargets := make([]url.URL, len(targets))
-			for i, target := range targets {
-				healthTargets[i] = *target
-			}
-			healthChecker, err = health.New(healthTargets, health.Settings{
-				Path:               check.Path,
-				Interval:           check.Interval.Duration(),
-				Timeout:            check.Timeout.Duration(),
-				Jitter:             check.Jitter.Duration(),
-				UnhealthyThreshold: check.UnhealthyThreshold,
-				HealthyThreshold:   check.HealthyThreshold,
-				ExpectedStatus:     check.ExpectedStatus,
-			}, transport, logger.With(zap.String("service", name)))
-			if err != nil {
-				return nil, fmt.Errorf("service %q health check: %w", name, err)
-			}
-			checkers = append(checkers, healthChecker)
-			healthByService[name] = healthChecker
-		}
-		if healthChecker != nil {
-			pool, err = upstream.NewWithHealth(targets, healthChecker.Store())
-		} else {
-			pool, err = upstream.New(targets)
-		}
-		if err != nil {
-			return nil, err
 		}
 		//这里启用了proxy机制
 		serviceHandler := proxy.NewWithForwarding(pool, transport, logger.With(zap.String("service", name)), forwardingPolicies)
@@ -166,7 +191,8 @@ func NewWithTransportAndLimiters(c config.Config, logger *zap.Logger, transport 
 	}
 	committed = true
 	return &Gateway{
-		handler: routeHandler,
+		discovered: discovered,
+		handler:    routeHandler,
 		standalone: middleware.Chain(
 			routeHandler,
 			middleware.Observe(logger),
@@ -285,10 +311,23 @@ func (g *Gateway) HealthSnapshot() []telemetry.BackendHealth {
 }
 
 func (g *Gateway) Close() {
+	for _, lease := range g.discovered {
+		lease.Close()
+	}
 	for _, checker := range g.checkers {
 		checker.Close()
 	}
 	if g.ownedTransport != nil {
 		g.ownedTransport.CloseIdleConnections()
 	}
+}
+
+// DiscoverySnapshot is a read-only view for the control plane. It never asks
+// Nacos for data and must not be treated as a mutable configuration source.
+func (g *Gateway) DiscoverySnapshot() map[string]discovery.Status {
+	result := make(map[string]discovery.Status, len(g.discovered))
+	for name, lease := range g.discovered {
+		result[name] = lease.Status()
+	}
+	return result
 }

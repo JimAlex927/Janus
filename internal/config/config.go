@@ -33,6 +33,7 @@ type Config struct {
 	Middlewares    map[string]Middleware  `json:"middlewares"`
 	Services       map[string]Service     `json:"services"`
 	Routes         []Route                `json:"routes"`
+	Discovery      DiscoveryConfig        `json:"discovery,omitempty"`
 }
 
 const (
@@ -111,7 +112,8 @@ type InFlightSettings struct {
 }
 
 type Service struct {
-	Upstreams   []string             `json:"upstreams"`
+	Upstreams   []string             `json:"upstreams,omitempty"`
+	Nacos       *NacosService        `json:"nacos,omitempty"`
 	Middlewares []string             `json:"middlewares"`
 	HealthCheck *HealthCheckSettings `json:"health_check,omitempty"`
 }
@@ -353,6 +355,9 @@ func LoadFileBytes(path string, data []byte) (Config, error) {
 }
 
 func (c Config) Validate() error {
+	if err := c.validateDiscovery(); err != nil {
+		return err
+	}
 	bindings, err := c.validateLimenBindings()
 	if err != nil {
 		return err
@@ -375,8 +380,13 @@ func (c Config) Validate() error {
 		}
 	}
 	for name, s := range c.Services {
-		if name == "" || len(s.Upstreams) == 0 {
-			return fmt.Errorf("service %q needs a name and upstreams", name)
+		if name == "" || (len(s.Upstreams) == 0) == (s.Nacos == nil) {
+			return fmt.Errorf("service %q needs a name and exactly one upstream source: upstreams or nacos", name)
+		}
+		if s.Nacos != nil {
+			if err := c.validateNacosService(name, s); err != nil {
+				return err
+			}
 		}
 		if s.HealthCheck != nil {
 			if err := validateHealthCheck(name, s.HealthCheck.WithDefaults()); err != nil {
@@ -738,9 +748,14 @@ func validateTLSSettings(name string, settings *TLSSettings) error {
 // profile. Explicit non-zero values are preserved for validation.
 func (c Config) WithDefaults() Config {
 	c.Settings = c.Settings.WithDefaults() // 这里是配置进行一个矫正 没写的配置填充默认值的作用
+	c.Discovery = c.Discovery.WithDefaults()
 	if len(c.Services) > 0 {
 		services := make(map[string]Service, len(c.Services))
 		for name, service := range c.Services {
+			if service.Nacos != nil {
+				source := service.Nacos.WithDefaults()
+				service.Nacos = &source
+			}
 			if service.HealthCheck != nil {
 				check := service.HealthCheck.WithDefaults()
 				service.HealthCheck = &check
