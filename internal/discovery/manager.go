@@ -89,9 +89,10 @@ func NewManager(factory Factory) *Manager {
 	return &Manager{factory: factory, clients: make(map[string]*clientRef), feeds: make(map[string]*feedRef)}
 }
 
-// CheckRegistry creates a short-lived client and performs a naming lookup.
-// The synthetic service name makes this a registry/authentication check and
-// does not depend on any configured application service.
+// CheckRegistry creates a short-lived client and asks the SDK for the
+// registry's own server health. It must not query an application service (or a
+// synthetic service), because an empty registry is healthy and a missing
+// service is a normal Nacos response rather than a connectivity failure.
 func (m *Manager) CheckRegistry(registry config.NacosRegistry) error {
 	if m == nil || m.factory == nil {
 		return fmt.Errorf("discovery manager is not configured")
@@ -104,8 +105,10 @@ func (m *Manager) CheckRegistry(registry config.NacosRegistry) error {
 		return fmt.Errorf("discovery factory returned a nil client")
 	}
 	defer client.Close()
-	_, err = client.Snapshot(config.NacosService{ServiceName: "__janus_registry_health__"})
-	return err
+	if !client.ServerHealthy() {
+		return fmt.Errorf("nacos server is unhealthy or unreachable")
+	}
+	return nil
 }
 
 func key(value any) string { data, _ := json.Marshal(value); return string(data) }

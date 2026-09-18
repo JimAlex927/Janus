@@ -38,7 +38,7 @@ function middlewareOption(definition: JsonObject | undefined, allowedTypes: { va
   return allowedTypes.find(option => option.value === configured[0].value);
 }
 
-export function InspectorModal({ node, draft, readOnly = false, onUpdate, onRemove, onClose, onConfirm, onCancel, onRename, onUpdateMiddleware }: { node: GraphNode; draft: Config; readOnly?: boolean; onUpdate: (patch: JsonObject) => void; onRemove: () => void; onClose: () => void; onConfirm?: () => void; onCancel?: () => void; onRename?: (name: string) => string | undefined; onUpdateMiddleware?: (name: string, definition: JsonObject) => void }) {
+export function InspectorModal({ node, draft, readOnly = false, hideDelete = false, onUpdate, onRemove, onClose, onConfirm, onCancel, onRename, onUpdateMiddleware }: { node: GraphNode; draft: Config; readOnly?: boolean; hideDelete?: boolean; onUpdate: (patch: JsonObject) => void; onRemove: () => void; onClose: () => void; onConfirm?: () => void; onCancel?: () => void; onRename?: (name: string) => string | undefined; onUpdateMiddleware?: (name: string, definition: JsonObject) => void }) {
   const modalRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const previous = document.activeElement as HTMLElement | null;
@@ -58,7 +58,7 @@ export function InspectorModal({ node, draft, readOnly = false, onUpdate, onRemo
   }
   return <div className="inspector-modal-backdrop" onMouseDown={onClose}>
     <div ref={modalRef} className="inspector-modal" role="dialog" aria-modal="true" aria-labelledby="node-inspector-title" onMouseDown={event => event.stopPropagation()} onKeyDown={keepFocus}>
-      <div className="inspector-head"><div><span className="eyebrow">{KIND_META[node.kind].label.toUpperCase()} EDITOR</span><h3 id="node-inspector-title">{node.name}</h3></div><div className="inspector-head-actions">{node.kind !== "action" && !readOnly && !onConfirm && <button className="icon-button danger" title="删除节点" aria-label={`删除 ${node.name}`} onClick={onRemove}>删除</button>}<button className="icon-button close-button" title="关闭编辑器" aria-label="关闭编辑器" onClick={onClose}>×</button></div></div>
+      <div className="inspector-head"><div><span className="eyebrow">{KIND_META[node.kind].label.toUpperCase()} EDITOR</span><h3 id="node-inspector-title">{node.name}</h3></div><div className="inspector-head-actions">{node.kind !== "action" && !readOnly && !hideDelete && <button className="icon-button danger" title="删除节点" aria-label={`删除 ${node.name}`} onClick={onRemove}>删除</button>}<button className="icon-button close-button" title="关闭编辑器" aria-label="关闭编辑器" onClick={onClose}>×</button></div></div>
       {node.kind === "route" && <RouteInspector node={node} draft={draft} onUpdate={onUpdate} onUpdateMiddleware={onUpdateMiddleware} />}{node.kind === "middleware" && <MiddlewareInspector node={node} draft={draft} onUpdate={onUpdate} onRename={onRename} />}{node.kind === "service" && <ServiceInspector node={node} draft={draft} onUpdate={onUpdate} />}{node.kind === "limen" && <LimenInspector node={node} draft={draft} readOnly={readOnly} onUpdate={onUpdate} />}{node.kind === "action" && <ActionInspector node={node} draft={draft} />}
       {onConfirm && <div className="inspector-modal-footer"><button type="button" className="ghost" onClick={onCancel || onClose}>取消</button><button type="button" className="primary" onClick={onConfirm}>确认</button></div>}
     </div>

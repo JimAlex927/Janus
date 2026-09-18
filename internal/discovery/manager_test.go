@@ -17,6 +17,7 @@ type fakeClient struct {
 	watchErr                 error
 	notify                   func()
 	noCancel                 bool
+	healthy                  bool
 	watches, cancels, closes int
 }
 
@@ -35,7 +36,8 @@ func (c *fakeClient) Snapshot(config.NacosService) (Snapshot, error) {
 	defer c.mu.Unlock()
 	return c.value, c.err
 }
-func (c *fakeClient) Close() { c.mu.Lock(); defer c.mu.Unlock(); c.closes++ }
+func (c *fakeClient) ServerHealthy() bool { c.mu.Lock(); defer c.mu.Unlock(); return c.healthy }
+func (c *fakeClient) Close()              { c.mu.Lock(); defer c.mu.Unlock(); c.closes++ }
 func (c *fakeClient) set(value Snapshot, err error) {
 	c.mu.Lock()
 	c.value = value
@@ -48,6 +50,23 @@ func (c *fakeClient) set(value Snapshot, err error) {
 }
 func sample(version uint64, ip string) Snapshot {
 	return Snapshot{Version: version, Instances: []Instance{{IP: ip, Port: 8080, Weight: 1, Healthy: true, Enabled: true}}}
+}
+
+func TestManagerCheckRegistryUsesServerHealth(t *testing.T) {
+	client := &fakeClient{healthy: true}
+	m := NewManager(func(config.NacosRegistry) (Client, error) { return client, nil })
+	if err := m.CheckRegistry(config.NacosRegistry{}); err != nil {
+		t.Fatal(err)
+	}
+	if client.closes != 1 {
+		t.Fatalf("closed clients = %d, want 1", client.closes)
+	}
+
+	client = &fakeClient{}
+	m = NewManager(func(config.NacosRegistry) (Client, error) { return client, nil })
+	if err := m.CheckRegistry(config.NacosRegistry{}); err == nil {
+		t.Fatal("unhealthy registry was accepted")
+	}
 }
 
 func TestManagerSharesWithinNamespaceAndReleasesLastLease(t *testing.T) {

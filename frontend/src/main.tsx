@@ -92,7 +92,7 @@ function Stat({ label, value, accent }: { label: string; value: string; accent?:
 function ResourcePage({ kind, draft, onChange }: { kind: "service" | "middleware"; draft: Config | null; onChange: (next: Config) => void }) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [creatingId, setCreatingId] = useState<string | null>(null);
-  const [beforeCreate, setBeforeCreate] = useState<Config | null>(null);
+  const [beforeEdit, setBeforeEdit] = useState<Config | null>(null);
   if (!draft) return <section className="content"><div className="empty">正在加载配置…</div></section>;
   const config = draft;
   const entries = kind === "service" ? Object.entries(config.services || {}) : Object.entries(config.middlewares || {});
@@ -106,7 +106,7 @@ function ResourcePage({ kind, draft, onChange }: { kind: "service" | "middleware
   const description = kind === "service" ? "先在这里创建和维护上游 Service，Route 只负责引用。" : "先在这里创建可复用策略，Route 再编排已有 Middleware。";
   function create() {
     const result = addConfigNode(config, kind as NodeKind);
-    setBeforeCreate(config);
+    setBeforeEdit(config);
     setCreatingId(result.id);
     onChange(result.config);
     setEditingId(result.id);
@@ -127,25 +127,29 @@ function ResourcePage({ kind, draft, onChange }: { kind: "service" | "middleware
     if (!editing) return;
     onChange(removeNode(config, editing));
     setCreatingId(null);
-    setBeforeCreate(null);
+    setBeforeEdit(null);
     setEditingId(null);
   }
-  function confirmCreate() {
+  function openEditor(id: string) {
+    setBeforeEdit(config);
     setCreatingId(null);
-    setBeforeCreate(null);
+    setEditingId(id);
+  }
+  function confirmEdit() {
+    setCreatingId(null);
+    setBeforeEdit(null);
     setEditingId(null);
   }
-  function cancelCreate() {
-    if (creatingId && beforeCreate) onChange(beforeCreate);
+  function cancelEdit() {
+    if (beforeEdit) onChange(beforeEdit);
     setCreatingId(null);
-    setBeforeCreate(null);
+    setBeforeEdit(null);
     setEditingId(null);
   }
   function closeEditor() {
-    if (creatingId) cancelCreate();
-    else setEditingId(null);
+    cancelEdit();
   }
-  return <section className="content resource-page"><div className="section-head"><div><p>{description}</p></div><button className="primary" onClick={create}>＋ 新建 {kind === "service" ? "Service" : "Middleware"}</button></div><div className="list">{nodes.map(node => <button className="list-row resource-row" key={node.id} onClick={() => setEditingId(node.id)}><div className="list-icon" style={{ background: KIND_META[kind].color, color: "#fff" }}>{KIND_META[kind].icon}</div><div><strong>{node.name}</strong><small>{node.subtitle || "尚未配置"}</small></div><span className="chevron">›</span></button>)}{nodes.length === 0 && <div className="empty">暂无配置，点击右上角创建。</div>}</div>{editing && <InspectorModal node={editing} draft={draft} onUpdate={update} onRemove={remove} onClose={closeEditor} onRename={kind === "middleware" ? rename : undefined} onConfirm={creatingId === editingId ? confirmCreate : undefined} onCancel={creatingId === editingId ? cancelCreate : undefined} />}</section>;
+  return <section className="content resource-page"><div className="section-head"><div><p>{description}</p></div><button className="primary" onClick={create}>＋ 新建 {kind === "service" ? "Service" : "Middleware"}</button></div><div className="list">{nodes.map(node => <button className="list-row resource-row" key={node.id} onClick={() => openEditor(node.id)}><div className="list-icon" style={{ background: KIND_META[kind].color, color: "#fff" }}>{KIND_META[kind].icon}</div><div><strong>{node.name}</strong><small>{node.subtitle || "尚未配置"}</small></div><span className="chevron">›</span></button>)}{nodes.length === 0 && <div className="empty">暂无配置，点击右上角创建。</div>}</div>{editing && <InspectorModal node={editing} draft={draft} onUpdate={update} onRemove={remove} onClose={closeEditor} onRename={kind === "middleware" ? rename : undefined} onConfirm={confirmEdit} onCancel={cancelEdit} hideDelete={Boolean(creatingId)} />}</section>;
 }
 function Login({ onLogin }: { onLogin: () => void }) { const [username, setUsername] = useState(""); const [password, setPassword] = useState(""); const [error, setError] = useState(""); const submit = async (event: FormEvent) => { event.preventDefault(); try { await api("/api/v1/auth/login", { method: "POST", body: JSON.stringify({ username, password }) }); onLogin(); } catch { setError("账号或密码错误"); } }; return <div className="login-shell"><form className="login-card" onSubmit={submit}><div className="brand-mark">J</div><span className="eyebrow">JANUS CONSOLE</span><h2>欢迎回来</h2><p>登录后管理你的网关配置。</p><input autoFocus placeholder="管理员账号" value={username} onChange={event => setUsername(event.target.value)} /><input type="password" placeholder="密码" value={password} onChange={event => setPassword(event.target.value)} /><button className="primary" type="submit">登录</button>{error && <small className="login-error">{error}</small>}</form></div>; }
 

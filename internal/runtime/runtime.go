@@ -295,9 +295,17 @@ func (r *Runtime) DiscoverySnapshot() map[string]discovery.Status {
 }
 
 // RegistryHealth performs an explicit admin-only connectivity probe for one
-// configured registry. It is intentionally separate from service discovery
+// published registry. It is intentionally separate from service discovery
 // status because a registry may be healthy even when it has no subscriptions.
 func (r *Runtime) RegistryHealth(name string) discovery.RegistryHealth {
+	return r.RegistryHealthConfig(name, nil)
+}
+
+// RegistryHealthConfig probes either the published registry or an optional
+// admin-console draft. Draft probing lets operators validate a newly created
+// Registry before publishing it. A redacted draft inherits the active secret
+// for the same name; plaintext passwords are never logged or returned.
+func (r *Runtime) RegistryHealthConfig(name string, draft *config.NacosRegistry) discovery.RegistryHealth {
 	result := discovery.RegistryHealth{Registry: name, CheckedAt: time.Now()}
 	started := time.Now()
 	if r == nil || r.discoveryManager == nil {
@@ -306,18 +314,48 @@ func (r *Runtime) RegistryHealth(name string) discovery.RegistryHealth {
 	}
 	current := r.ConfigSnapshot()
 	registry, ok := current.Discovery.Nacos[name]
+	if draft != nil {
+		registry = *draft
+		if ok && registry.Password == "" && registry.PasswordEnv == "" {
+			registry.Password = current.Discovery.Nacos[name].Password
+			registry.PasswordEnv = current.Discovery.Nacos[name].PasswordEnv
+		}
+		ok = true
+	}
 	if !ok {
 		result.Error = "nacos registry is not configured"
+		r.logRegistryHealth(name, registry, result, started)
 		return result
 	}
 	if err := r.discoveryManager.CheckRegistry(registry); err != nil {
 		result.Error = err.Error()
 		result.LatencyMS = time.Since(started).Milliseconds()
+		r.logRegistryHealth(name, registry, result, started)
 		return result
 	}
 	result.Healthy = true
 	result.LatencyMS = time.Since(started).Milliseconds()
+	r.logRegistryHealth(name, registry, result, started)
 	return result
+}
+
+func (r *Runtime) logRegistryHealth(name string, registry config.NacosRegistry, result discovery.RegistryHealth, started time.Time) {
+	if r == nil || r.logger == nil {
+		return
+	}
+	fields := []zap.Field{
+		zap.String("registry", name),
+		zap.Int("servers", len(registry.Servers)),
+		zap.String("namespace", registry.NamespaceID),
+		zap.Bool("username_configured", registry.Username != ""),
+		zap.Bool("healthy", result.Healthy),
+		zap.Duration("duration", time.Since(started)),
+	}
+	if result.Error != "" {
+		r.logger.Warn("nacos registry health check failed", append(fields, zap.String("error", result.Error))...)
+		return
+	}
+	r.logger.Info("nacos registry health check passed", fields...)
 }
 
 // ServeHTTP delegates to the stable dispatcher.

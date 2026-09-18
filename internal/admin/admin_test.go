@@ -173,9 +173,11 @@ func TestRegistryHealthEndpointRequiresAuthAndReturnsProbe(t *testing.T) {
 		t.Fatal(err)
 	}
 	current := config.Config{Settings: config.Settings{Admin: config.AdminSettings{Username: "admin", PasswordHash: string(hash)}}}
+	var received *config.NacosRegistry
 	h := NewHandlerWithOptions(Options{
 		State: NewState(), Current: func() config.Config { return current },
-		RegistryHealth: func(name string) discovery.RegistryHealth {
+		RegistryHealth: func(name string, registry *config.NacosRegistry) discovery.RegistryHealth {
+			received = registry
 			return discovery.RegistryHealth{Registry: name, Healthy: true, LatencyMS: 4}
 		},
 	})
@@ -190,10 +192,10 @@ func TestRegistryHealthEndpointRequiresAuthAndReturnsProbe(t *testing.T) {
 		t.Fatalf("login status = %d", login.Code)
 	}
 	authorized := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/discovery/registries/health", bytes.NewBufferString(`{"name":"platform"}`))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/discovery/registries/health", bytes.NewBufferString(`{"name":"platform","registry":{"servers":[{"address":"192.168.20.69","port":8848}],"username":"nacos"}}`))
 	req.AddCookie(login.Result().Cookies()[0])
 	h.ServeHTTP(authorized, req)
-	if authorized.Code != http.StatusOK || !strings.Contains(authorized.Body.String(), `"healthy":true`) || !strings.Contains(authorized.Body.String(), `"registry":"platform"`) {
+	if authorized.Code != http.StatusOK || received == nil || received.Servers[0].Address != "192.168.20.69" || !strings.Contains(authorized.Body.String(), `"healthy":true`) || !strings.Contains(authorized.Body.String(), `"registry":"platform"`) {
 		t.Fatalf("health response = %d %q", authorized.Code, authorized.Body.String())
 	}
 }

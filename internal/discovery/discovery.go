@@ -32,6 +32,7 @@ type Snapshot struct {
 type Client interface {
 	Watch(config.NacosService, func()) (cancel func(), err error)
 	Snapshot(config.NacosService) (Snapshot, error)
+	ServerHealthy() bool
 	Close()
 }
 

@@ -38,7 +38,8 @@ func (s *registryStub) Snapshot(config.NacosService) (discovery.Snapshot, error)
 	defer s.mu.Unlock()
 	return s.value, nil
 }
-func (s *registryStub) Close() { s.closes.Add(1) }
+func (s *registryStub) ServerHealthy() bool { return true }
+func (s *registryStub) Close()              { s.closes.Add(1) }
 func (s *registryStub) update(version uint64, backend string) {
 	value := discovery.Snapshot{Version: version}
 	if backend != "" {

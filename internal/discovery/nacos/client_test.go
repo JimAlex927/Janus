@@ -18,6 +18,7 @@ type namingStub struct {
 	get     vo.GetServiceParam
 	service model.Service
 	err     error
+	healthy bool
 	cancels int
 }
 
@@ -27,6 +28,7 @@ func (s *namingStub) GetService(p vo.GetServiceParam) (model.Service, error) {
 	s.get = p
 	return s.service, s.err
 }
+func (s *namingStub) ServerHealthy() bool { return s.healthy }
 
 func TestAdapterKeepsSubscriptionIdentityForRollback(t *testing.T) {
 	s := &namingStub{err: errors.New("failed after callback registration")}
@@ -68,6 +70,17 @@ func TestAdapterPreservesRegistryVersionAndInstanceFlags(t *testing.T) {
 	empty, err := c.Snapshot(config.NacosService{})
 	if err != nil || len(empty.Instances) != 0 || empty.Version != 123 {
 		t.Fatal("empty success converted to failure")
+	}
+}
+
+func TestAdapterUsesSDKServerHealth(t *testing.T) {
+	c := &client{naming: &namingStub{healthy: true}}
+	if !c.ServerHealthy() {
+		t.Fatal("healthy SDK server reported unhealthy")
+	}
+	c.naming = &namingStub{}
+	if c.ServerHealthy() {
+		t.Fatal("unhealthy SDK server reported healthy")
 	}
 }
 

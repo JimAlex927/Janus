@@ -107,4 +107,10 @@ func (c *client) Snapshot(query config.NacosService) (discovery.Snapshot, error)
 	return result, nil
 }
 
+// ServerHealthy uses the SDK's operator health probe. This checks Nacos
+// itself and does not require any service to be registered in the namespace.
+func (c *client) ServerHealthy() bool {
+	return c != nil && c.naming != nil && c.naming.ServerHealthy()
+}
+
 func (c *client) Close() { c.naming.CloseClient() }

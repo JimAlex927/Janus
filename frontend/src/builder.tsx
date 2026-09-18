@@ -226,6 +226,8 @@ function RouteTopology({ draft, onChange }: { draft: Config; onChange: (next: Co
   const limens = Object.entries(draft.limens || {});
   const [selectedLimen, setSelectedLimen] = useState("all");
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [beforeEdit, setBeforeEdit] = useState<Config | null>(null);
+  const [creatingId, setCreatingId] = useState<string | null>(null);
   const routeNodes = buildGraph(draft).nodes.filter(node => node.kind === "route");
   const editing = routeNodes.find(node => node.id === editingId);
   const selectedName = selectedLimen === "all" ? "全部 Limen" : selectedLimen;
@@ -237,8 +239,15 @@ function RouteTopology({ draft, onChange }: { draft: Config; onChange: (next: Co
     const route = existingRoutes[existingRoutes.length - 1];
     if (!route) return;
     const nextRoute = selectedLimen !== "all" ? { ...route, limen: selectedLimen } : route;
+    setBeforeEdit(draft);
+    setCreatingId(result.id);
     onChange({ ...result.config, routes: [...existingRoutes.slice(0, -1), nextRoute] });
     setEditingId(result.id);
+  }
+  function openRoute(id: string) {
+    setBeforeEdit(draft);
+    setCreatingId(null);
+    setEditingId(id);
   }
   function updateSelected(patch: JsonObject) {
     if (editing) onChange(updateNode(draft, editing, patch));
@@ -249,6 +258,19 @@ function RouteTopology({ draft, onChange }: { draft: Config; onChange: (next: Co
   function removeSelected() {
     if (!editing) return;
     onChange(removeNode(draft, editing));
+    setBeforeEdit(null);
+    setCreatingId(null);
+    setEditingId(null);
+  }
+  function confirmEdit() {
+    setBeforeEdit(null);
+    setCreatingId(null);
+    setEditingId(null);
+  }
+  function cancelEdit() {
+    if (beforeEdit) onChange(beforeEdit);
+    setBeforeEdit(null);
+    setCreatingId(null);
     setEditingId(null);
   }
   return (
@@ -266,13 +288,13 @@ function RouteTopology({ draft, onChange }: { draft: Config; onChange: (next: Co
             const node = routeNodes.find(item => item.name === route.name);
             if (!node) return null;
             const action = route.action?.forward ? `→ ${route.action.forward.service || "未选择 Service"}` : route.action?.redirect ? `↗ ${route.action.redirect.location || "Redirect"}` : "响应";
-            return <button className="route-rule-card" key={route.name} onClick={() => setEditingId(node.id)}><span className="route-rule-icon">↗</span><span className="route-rule-main"><strong>{route.name}</strong><small>{route.match || `${route.host || "*"} · ${route.path_prefix || "/"}`}</small><small>{action}</small>{(route.middlewares || []).length > 0 && <span className="route-rule-badges">{route.middlewares.map(name => <em key={name}>{name}</em>)}</span>}</span><span className="chevron">›</span></button>;
+            return <button className="route-rule-card" key={route.name} onClick={() => openRoute(node.id)}><span className="route-rule-icon">↗</span><span className="route-rule-main"><strong>{route.name}</strong><small>{route.match || `${route.host || "*"} · ${route.path_prefix || "/"}`}</small><small>{action}</small>{(route.middlewares || []).length > 0 && <span className="route-rule-badges">{route.middlewares.map(name => <em key={name}>{name}</em>)}</span>}</span><span className="chevron">›</span></button>;
           })}
           {routes.length === 0 && <div className="empty route-empty">当前 Limen 暂无 Route，点击右上角创建。</div>}
         </div>
-        <SimulationPanel draft={draft} onSelectRoute={name => { const node = routeNodes.find(item => item.name === name); if (node) setEditingId(node.id); }} />
+        <SimulationPanel draft={draft} onSelectRoute={name => { const node = routeNodes.find(item => item.name === name); if (node) openRoute(node.id); }} />
       </section>
-      {editing && <InspectorModal node={editing} draft={draft} onUpdate={updateSelected} onUpdateMiddleware={updateMiddleware} onRemove={removeSelected} onClose={() => setEditingId(null)} />}
+      {editing && <InspectorModal node={editing} draft={draft} onUpdate={updateSelected} onUpdateMiddleware={updateMiddleware} onRemove={removeSelected} onClose={cancelEdit} onConfirm={confirmEdit} onCancel={cancelEdit} hideDelete={Boolean(creatingId)} />}
     </div>
   );
 }

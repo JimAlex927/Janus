@@ -50,7 +50,7 @@ type Options struct {
 	Current        func() config.Config
 	Revision       func() uint64
 	Discovery      func() map[string]discovery.Status
-	RegistryHealth func(string) discovery.RegistryHealth
+	RegistryHealth func(string, *config.NacosRegistry) discovery.RegistryHealth
 	Publish        func(config.Config) error
 	Subscribe      func() (<-chan janusruntime.Event, func())
 }
@@ -62,7 +62,7 @@ type Handler struct {
 	current        func() config.Config
 	revision       func() uint64
 	discovery      func() map[string]discovery.Status
-	registryHealth func(string) discovery.RegistryHealth
+	registryHealth func(string, *config.NacosRegistry) discovery.RegistryHealth
 	publish        func(config.Config) error
 	subscribe      func() (<-chan janusruntime.Event, func())
 	sessionsMu     sync.Mutex
@@ -252,7 +252,8 @@ func (h *Handler) registryHealthCheck(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var request struct {
-		Name string `json:"name"`
+		Name     string                `json:"name"`
+		Registry *config.NacosRegistry `json:"registry,omitempty"`
 	}
 	if !decodeJSON(w, r, &request) {
 		return
@@ -261,7 +262,7 @@ func (h *Handler) registryHealthCheck(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "registry name is required", http.StatusBadRequest)
 		return
 	}
-	writeJSON(w, http.StatusOK, h.registryHealth(request.Name))
+	writeJSON(w, http.StatusOK, h.registryHealth(request.Name, request.Registry))
 }
 
 func (h *Handler) metricsSummary(w http.ResponseWriter, r *http.Request) {

@@ -109,7 +109,7 @@ func run(ctx context.Context, path string, check, printEffective bool, reloadInt
 				State: adminState, Metrics: requestRuntime.Metrics(), Health: requestRuntime.HealthSnapshot,
 				Current: requestRuntime.ConfigSnapshot, Revision: requestRuntime.Revision,
 				Discovery:      requestRuntime.DiscoverySnapshot,
-				RegistryHealth: requestRuntime.RegistryHealth,
+				RegistryHealth: requestRuntime.RegistryHealthConfig,
 				Publish:        func(candidate config.Config) error { return publishConfig(path, requestRuntime, candidate) },
 				Subscribe:      requestRuntime.Subscribe,
 			}),
