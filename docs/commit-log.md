@@ -56,6 +56,10 @@ Scope:
 - Each new example passes `go run ./cmd/janus -check`; `-check` intentionally
   does not connect to Nacos.
 
+The Nacos registry also accepts a temporary plaintext `password` next to
+`username`; effective-config and Admin responses redact it, while
+`password_env` remains available for deployments that inject secrets.
+
 ## 2026-09-17
 
 ### Improve console editing workflow

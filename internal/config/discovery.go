@@ -19,6 +19,7 @@ type NacosRegistry struct {
 	Servers     []NacosServer `json:"servers"`
 	NamespaceID string        `json:"namespace_id,omitempty"`
 	Username    string        `json:"username,omitempty"`
+	Password    string        `json:"password,omitempty"`
 	PasswordEnv string        `json:"password_env,omitempty"`
 	Timeout     Duration      `json:"timeout,omitempty"`
 	StaleAfter  Duration      `json:"stale_after,omitempty"`
@@ -75,6 +76,17 @@ func (d DiscoveryConfig) WithDefaults() DiscoveryConfig {
 	return result
 }
 
+// Redacted returns a copy safe for effective-config and Admin responses.
+// Passwords are intentionally never returned to operators after parsing.
+func (d DiscoveryConfig) Redacted() DiscoveryConfig {
+	result := d.WithDefaults()
+	for name, registry := range result.Nacos {
+		registry.Password = ""
+		result.Nacos[name] = registry
+	}
+	return result
+}
+
 var environmentName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
 func (c Config) validateDiscovery() error {
@@ -95,8 +107,17 @@ func (c Config) validateDiscovery() error {
 		if r.StaleAfter.Duration() < 30*time.Second || r.StaleAfter.Duration() > 24*time.Hour {
 			return fmt.Errorf("nacos registry %q stale_after must be between 30s and 24h", name)
 		}
-		if (r.Username == "") != (r.PasswordEnv == "") || (r.PasswordEnv != "" && !environmentName.MatchString(r.PasswordEnv)) {
-			return fmt.Errorf("nacos registry %q requires username and a valid password_env together", name)
+		if r.Password != "" && r.PasswordEnv != "" {
+			return fmt.Errorf("nacos registry %q cannot set both password and password_env", name)
+		}
+		if r.Username == "" && (r.Password != "" || r.PasswordEnv != "") {
+			return fmt.Errorf("nacos registry %q requires username with password authentication", name)
+		}
+		if r.Username != "" && r.Password == "" && r.PasswordEnv == "" {
+			return fmt.Errorf("nacos registry %q requires password or password_env", name)
+		}
+		if r.PasswordEnv != "" && !environmentName.MatchString(r.PasswordEnv) {
+			return fmt.Errorf("nacos registry %q has an invalid password_env", name)
 		}
 	}
 	return nil

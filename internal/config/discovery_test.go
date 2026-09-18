@@ -39,6 +39,25 @@ func TestNacosConfigurationDefaultsAndRoundTrip(t *testing.T) {
 	}
 }
 
+func TestNacosPlaintextPasswordIsAcceptedButRedacted(t *testing.T) {
+	c := discoveryConfig()
+	registry := c.Discovery.Nacos["one"]
+	registry.Username = "nacos"
+	registry.Password = "nacos"
+	c.Discovery.Nacos["one"] = registry
+	if err := c.WithDefaults().Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if got := c.EffectiveView().Discovery.Nacos["one"].Password; got != "" {
+		t.Fatalf("effective config returned plaintext password %q", got)
+	}
+	registry.PasswordEnv = "JANUS_NACOS_PASSWORD"
+	c.Discovery.Nacos["one"] = registry
+	if err := c.WithDefaults().Validate(); err == nil {
+		t.Fatal("accepted password and password_env together")
+	}
+}
+
 func TestNacosConfigurationRejectsAmbiguousSources(t *testing.T) {
 	for name, mutate := range map[string]func(*Config){
 		"both": func(c *Config) {

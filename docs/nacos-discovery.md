@@ -62,6 +62,7 @@ Nacos 服务端按 2.x 的 Naming/gRPC 模型接入，固定 Go SDK `v2.3.5`。�
 - `namespace_id` 是实际 ID；空字符串和 `public` 归一化为 SDK 的公共 namespace。
 - `servers.address` 为主机/IP，不带协议、路径或端口；支持独立 `grpc_port`，默认 `port + 1000`。部署必须保证 SDK 的 HTTP 与 gRPC 端口均可访问。
 - `username` 与 `password_env` 成对配置。配置文件、effective view 和管理接口保存环境变量名称，不保存解析后的口令；环境变量变更需重启以重新创建客户端。
+- 也可以临时直接配置 `username` 和 `password`。明文密码只用于启动连接，effective config 和 Admin 配置接口会自动清空它；生产环境仍建议使用 `password_env`。`password` 与 `password_env` 不能同时出现。
 - `timeout` 默认 5s（1ms..30s）；它是 SDK 请求超时参数，不是整个建连/重试流程的总截止时间。
 - `stale_after` 默认 2m（30s..24h），表示最后一次观察到新的服务快照后，最多继续使用地址多久。应大于 Nacos 的正常刷新周期。
 - 本轮支持的 Nacos 连接使用 SDK 默认内网 HTTP/gRPC；Nacos TLS/mTLS、RAM 动态身份不在当前配置契约中。`scheme: https` 控制的是后端实例连接，不是 Nacos 连接。

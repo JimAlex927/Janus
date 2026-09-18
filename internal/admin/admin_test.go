@@ -161,3 +161,17 @@ func TestDiscoveryEndpointRequiresAuthAndReturnsLocalSnapshot(t *testing.T) {
 		t.Fatalf("discovery response = %d %q", authorized.Code, authorized.Body.String())
 	}
 }
+
+func TestConfigEndpointRedactsNacosPassword(t *testing.T) {
+	current := config.Config{
+		Discovery: config.DiscoveryConfig{Nacos: map[string]config.NacosRegistry{
+			"platform": {Servers: []config.NacosServer{{Address: "127.0.0.1", Port: 8848}}, Username: "nacos", Password: "secret"},
+		}},
+	}
+	h := NewHandlerWithOptions(Options{State: NewState(), Current: func() config.Config { return current }})
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/config", nil))
+	if w.Code != http.StatusOK || strings.Contains(w.Body.String(), "secret") || strings.Contains(w.Body.String(), `"password":"secret"`) {
+		t.Fatalf("config response leaked Nacos password: %d %q", w.Code, w.Body.String())
+	}
+}

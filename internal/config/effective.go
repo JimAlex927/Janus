@@ -82,7 +82,7 @@ func (c Config) EffectiveView() EffectiveConfig {
 		routes[index] = route
 	}
 	return EffectiveConfig{
-		Discovery:   c.Discovery,
+		Discovery:   c.Discovery.Redacted(),
 		Version:     CurrentConfigVersion,
 		Limens:      limens,
 		Settings:    settings,

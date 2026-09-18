@@ -260,6 +260,7 @@ func (h *Handler) configHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	c := h.current()
 	c.Settings.Admin.PasswordHash = ""
+	c.Discovery = c.Discovery.Redacted()
 	writeJSON(w, 200, map[string]any{"config": c, "revision": h.revisionValue()})
 }
 func (h *Handler) validate(w http.ResponseWriter, r *http.Request) {

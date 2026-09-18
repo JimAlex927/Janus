@@ -25,7 +25,7 @@ type client struct{ naming naming_client.INamingClient }
 
 func New(registry config.NacosRegistry) (discovery.Client, error) {
 	r := registry.WithDefaults()
-	var password string
+	password := r.Password
 	if r.PasswordEnv != "" {
 		password = os.Getenv(r.PasswordEnv)
 		if password == "" {

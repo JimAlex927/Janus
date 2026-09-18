@@ -14,7 +14,7 @@
         ],
         "namespace_id": "public",
         "username": "nacos",
-        "password_env": "JANUS_NACOS_PASSWORD",
+        "password": "nacos",
         "timeout": "5s",
         "stale_after": "2m"
       }
