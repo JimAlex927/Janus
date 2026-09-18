@@ -159,9 +159,9 @@ possible at the overall timeout maximum.
 
 ### Proposed named policy example
 
-This is a runnable versioned policy example. The current binary accepts the
-`body_limit` definition and service attachment shown below; the route-level
-`buffer` example remains in `configs/janus.json`.
+This is a runnable versioned policy example. The current binary accepts both
+the route and service attachments shown below; the comprehensive sample also
+demonstrates the remaining built-in policies.
 
 ```json
 {
@@ -200,11 +200,20 @@ Validate unused definitions too, and reject missing references, wrong scopes,
 duplicate references within one list, and incompatible policy combinations.
 Definitions in a JSON object have no execution order; attachment arrays do.
 
-The implemented configurable policies are route/service `body_limit`,
-route-level `buffer`, and service-only `in_flight`. Multiple applicable body
-limits compose by the minimum. The example therefore allows at most 1 MiB on
-`/api`. Global admission remains fixed infrastructure. Requests must pass both
-active caps.
+The implemented configurable policies are route/service `buffer`, `body_limit`,
+`headers`, and `add_prefix`; route-only `strip_prefix`; and service-only
+`in_flight`. Multiple applicable body limits compose by the minimum. The
+`headers` policy rejects hop-by-hop and framing header mutations and preserves
+stream flushing; its response rules intentionally do not rewrite a WebSocket
+101 handshake. Prefix policies preserve escaped-path semantics. Global
+admission remains fixed infrastructure, and requests must pass both active caps.
+
+`config.MiddlewareCapabilities` is the authoritative operator-facing catalog
+for type labels, scopes, defaults and field constraints. The authenticated
+Admin endpoint exposes it to the console. Scope checks consume the same catalog,
+while `gateway` retains the typed constructor switch so handler construction
+stays explicit and reviewable. Adding a type therefore requires config schema,
+validation, implementation, constructor and tests, but no frontend type switch.
 No route-level timeout override or arbitrary global policy list is needed initially.
 
 Initially use flat attachment arrays. A reusable named `chain` can be added when

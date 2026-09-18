@@ -526,6 +526,38 @@ func TestServiceBodyLimitAppliesToAllRoutes(t *testing.T) {
 	}
 }
 
+func TestServiceAddPrefixRewritesPathBeforeProxying(t *testing.T) {
+	seen := make(chan string, 1)
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen <- r.URL.EscapedPath()
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer backend.Close()
+	c := config.Config{
+		Listen: "127.0.0.1:8080",
+		Middlewares: map[string]config.Middleware{
+			"internal-base": {AddPrefix: &config.AddPrefixSettings{Prefix: "/internal"}},
+		},
+		Services: map[string]config.Service{
+			"s": {Upstreams: []string{backend.URL}, Middlewares: []string{"internal-base"}},
+		},
+		Routes: []config.Route{{Name: "api", PathPrefix: "/api", Service: "s"}},
+	}
+	g, err := New(c, zap.NewNop())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer g.Close()
+	w := httptest.NewRecorder()
+	g.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "http://gateway/api/a%2Fb", nil))
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, body = %q", w.Code, w.Body.String())
+	}
+	if got := <-seen; got != "/internal/api/a%2Fb" {
+		t.Fatalf("backend escaped path = %q", got)
+	}
+}
+
 func TestAllUnhealthyServiceReturns503WithoutForwarding(t *testing.T) {
 	var userCalls atomic.Int64
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

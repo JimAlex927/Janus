@@ -125,8 +125,11 @@ still require restart. Legacy configurations remain startup-only.
   deadline, which actively cancels backend work. An optional bounded
   `shutdown.load_balancer_removal_delay` runs after readiness is cleared and
   consumes the same total shutdown budget. Routes stream responses by
-  default; an optional route-level `buffer` middleware can hold finite responses
-  up to its configured maximum before committing them.
+  default; an optional route/service `buffer` middleware can hold finite responses
+  up to its configured maximum before committing them. Named `headers` and
+  `add_prefix` policies work at route or service scope, while `strip_prefix` is
+  route-only. The Admin console discovers these classes and their parameter
+  schemas from the running backend rather than carrying a hard-coded list.
 - The immediate peer determines forwarding identity by default. A versioned
   limen may explicitly configure `trusted_proxies` CIDRs; only then are valid
   bounded X-Forwarded-For hops and trusted HTTPS scheme/host headers retained. There is

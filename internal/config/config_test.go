@@ -248,6 +248,45 @@ func TestInFlightMiddlewareConfig(t *testing.T) {
 	}
 }
 
+func TestHeadersAndStripPrefixMiddlewareConfig(t *testing.T) {
+	valid := `{"listen":"127.0.0.1:8080","middlewares":{"headers":{"headers":{"request_set":{"X-Tenant":"one"},"response_remove":["Server"]}},"strip":{"scope":"route","strip_prefix":{"prefix":"/api"}}},"services":{"s":{"upstreams":["http://localhost:9000"],"middlewares":["headers"]}},"routes":[{"name":"r","path_prefix":"/api","service":"s","middlewares":["strip"]}]}`
+	if _, err := Load(strings.NewReader(valid)); err != nil {
+		t.Fatalf("valid headers/strip_prefix config failed: %v", err)
+	}
+	for _, replacement := range []string{
+		`"X-Tenant":"bad\nvalue"`,
+		`"Content-Length":"1"`,
+		`"prefix":"api"`,
+		`"scope":"service","strip_prefix"`,
+	} {
+		candidate := valid
+		switch replacement {
+		case `"X-Tenant":"bad\nvalue"`:
+			candidate = strings.Replace(candidate, `"X-Tenant":"one"`, replacement, 1)
+		case `"Content-Length":"1"`:
+			candidate = strings.Replace(candidate, `"X-Tenant":"one"`, replacement, 1)
+		case `"prefix":"api"`:
+			candidate = strings.Replace(candidate, `"prefix":"/api"`, replacement, 1)
+		default:
+			candidate = strings.Replace(candidate, `"scope":"route","strip_prefix"`, replacement, 1)
+		}
+		if _, err := Load(strings.NewReader(candidate)); err == nil {
+			t.Fatalf("expected invalid middleware config for replacement %s", replacement)
+		}
+	}
+}
+
+func TestAddPrefixMiddlewareConfigAndScopes(t *testing.T) {
+	valid := `{"listen":"127.0.0.1:8080","middlewares":{"base":{"add_prefix":{"prefix":"/internal"}}},"services":{"s":{"upstreams":["http://localhost:9000"],"middlewares":["base"]}},"routes":[{"name":"r","path_prefix":"/api","service":"s"}]}`
+	if _, err := Load(strings.NewReader(valid)); err != nil {
+		t.Fatalf("valid add_prefix config failed: %v", err)
+	}
+	invalid := strings.Replace(valid, `"prefix":"/internal"`, `"prefix":"internal/"`, 1)
+	if _, err := Load(strings.NewReader(invalid)); err == nil {
+		t.Fatal("expected invalid add_prefix path to be rejected")
+	}
+}
+
 func TestRouteProtocolMatchConfig(t *testing.T) {
 	base := "{\"listen\":\"127.0.0.1:8080\",\"services\":{\"s\":{\"upstreams\":[\"http://localhost:9000\"]}},\"routes\":[{\"name\":\"r\",\"match\":\"PathPrefix(`/stream`) && Protocol(`sse`)\",\"service\":\"s\"}]}"
 	if _, err := Load(strings.NewReader(base)); err != nil {

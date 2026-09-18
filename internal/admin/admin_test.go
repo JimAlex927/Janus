@@ -213,3 +213,22 @@ func TestConfigEndpointRedactsNacosPassword(t *testing.T) {
 		t.Fatalf("config response leaked Nacos password: %d %q", w.Code, w.Body.String())
 	}
 }
+
+func TestMiddlewareCapabilitiesEndpointUsesBackendCatalog(t *testing.T) {
+	h := NewHandlerWithOptions(Options{State: NewState(), Current: func() config.Config { return config.Config{} }})
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/capabilities/middlewares", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("capabilities status = %d, body = %q", w.Code, w.Body.String())
+	}
+	for _, expected := range []string{`"type":"buffer"`, `"type":"headers"`, `"type":"strip_prefix"`, `"type":"add_prefix"`, `"kind":"string_map"`} {
+		if !strings.Contains(w.Body.String(), expected) {
+			t.Fatalf("capabilities response missing %s: %s", expected, w.Body.String())
+		}
+	}
+	post := httptest.NewRecorder()
+	h.ServeHTTP(post, httptest.NewRequest(http.MethodPost, "/api/v1/capabilities/middlewares", nil))
+	if post.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("capabilities POST status = %d, want 405", post.Code)
+	}
+}

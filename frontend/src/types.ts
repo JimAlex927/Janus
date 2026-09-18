@@ -83,6 +83,35 @@ export interface Middleware {
   buffer?: { max_response_body_bytes?: number };
   body_limit?: { max_bytes?: number };
   in_flight?: { max_concurrent?: number };
+  headers?: {
+    request_set?: Record<string, string>;
+    request_remove?: string[];
+    response_set?: Record<string, string>;
+    response_remove?: string[];
+  };
+  strip_prefix?: { prefix?: string };
+  [policy: string]: unknown;
+}
+
+export type MiddlewareFieldKind = "integer" | "string" | "string_list" | "string_map" | "boolean";
+
+export interface MiddlewareFieldCapability {
+  name: string;
+  label: string;
+  description?: string;
+  kind: MiddlewareFieldKind;
+  required?: boolean;
+  default?: unknown;
+  min?: number;
+  max?: number;
+}
+
+export interface MiddlewareCapability {
+  type: string;
+  label: string;
+  description: string;
+  scopes: Array<"route" | "service">;
+  fields: MiddlewareFieldCapability[];
 }
 
 export interface NacosServer {

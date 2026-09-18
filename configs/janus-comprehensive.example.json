@@ -83,8 +83,33 @@
       }
     },
     "api-in-flight": {
+      "scope": "service",
       "in_flight": {
         "max_concurrent": 256
+      }
+    },
+    "api-headers": {
+      "scope": "service",
+      "headers": {
+        "request_set": {
+          "X-Janus-Gateway": "public"
+        },
+        "response_set": {
+          "X-Content-Type-Options": "nosniff"
+        },
+        "response_remove": ["Server"]
+      }
+    },
+    "api-base-path": {
+      "scope": "service",
+      "add_prefix": {
+        "prefix": "/internal"
+      }
+    },
+    "strip-api-prefix": {
+      "scope": "route",
+      "strip_prefix": {
+        "prefix": "/api"
       }
     }
   },
@@ -94,7 +119,7 @@
         "http://127.0.0.1:9000",
         "http://127.0.0.1:9001"
       ],
-      "middlewares": ["api-in-flight"],
+      "middlewares": ["api-in-flight", "api-headers", "api-base-path"],
       "health_check": {
         "path": "/healthz",
         "interval": "10s",
@@ -140,7 +165,7 @@
       "name": "public-api",
       "limen": "public-http",
       "match": "Host(`api.example.internal`) && PathPrefix(`/api`) && Protocol(`http`)",
-      "middlewares": ["api-buffer"],
+      "middlewares": ["strip-api-prefix", "api-buffer"],
       "action": { "forward": { "service": "api" } }
     },
     {
@@ -154,7 +179,7 @@
       "name": "secure-api",
       "limen": "secure-multiprotocol",
       "match": "Host(`api.example.internal`) && PathPrefix(`/api`) && Protocol(`http`)",
-      "middlewares": ["small-response-buffer"],
+      "middlewares": ["strip-api-prefix", "small-response-buffer"],
       "action": { "forward": { "service": "api" } }
     },
     {

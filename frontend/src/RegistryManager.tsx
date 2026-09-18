@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ApiError, testRegistry } from "./api";
 import { RegistryForm } from "./editors";
 import { Field } from "./ui";
@@ -8,8 +8,8 @@ type Health = { healthy: boolean; latency_ms?: number; error?: string };
 
 /**
  * 注册中心管理弹窗：左侧列表（测试/选用/删除），右侧选中后内联编辑参数。
- * 与中间件弹窗一致，修改即进入画布草稿（顶栏保存），密码留空表示沿用
- * 已保存凭据。
+ * 与中间件弹窗一致，确认后保留本次修改，取消则恢复打开前的草稿快照。
+ * 密码留空表示沿用已保存凭据。
  */
 export function RegistryManagerModal({
   title,
@@ -20,7 +20,8 @@ export function RegistryManagerModal({
   onRenameNew,
   onUpdate,
   onDelete,
-  onClose,
+  onConfirm,
+  onCancel,
   notify,
 }: {
   title: string;
@@ -31,9 +32,11 @@ export function RegistryManagerModal({
   onRenameNew: (oldName: string, newName: string) => string | undefined;
   onUpdate: (name: string, reg: NacosRegistry) => void;
   onDelete: (name: string) => void;
-  onClose: () => void;
+  onConfirm: () => void;
+  onCancel: () => void;
   notify: (msg: string) => void;
 }) {
+  const dialogRef = useRef<HTMLDivElement>(null);
   const names = Object.keys(registries);
   const [selected, setSelected] = useState<string | null>(names[0] || null);
   const [justCreated, setJustCreated] = useState<string | null>(null);
@@ -47,6 +50,17 @@ export function RegistryManagerModal({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [registries]);
+  useEffect(() => {
+    const handleKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      const dialogs = document.querySelectorAll<HTMLElement>('[role="dialog"]');
+      if (dialogs[dialogs.length - 1] !== dialogRef.current) return;
+      event.preventDefault();
+      onCancel();
+    };
+    window.addEventListener("keydown", handleKey);
+    return () => window.removeEventListener("keydown", handleKey);
+  }, [onCancel]);
 
   function create() {
     const name = onCreate();
@@ -88,8 +102,8 @@ export function RegistryManagerModal({
   const selectedDef = selected ? registries[selected] : undefined;
 
   return (
-    <div className="backdrop" onMouseDown={onClose}>
-      <div className="mw-modal" role="dialog" aria-modal="true" aria-label={title} onMouseDown={(e) => e.stopPropagation()}>
+    <div className="backdrop" onMouseDown={onCancel}>
+      <div ref={dialogRef} className="mw-modal" role="dialog" aria-modal="true" aria-label={title} onMouseDown={(e) => e.stopPropagation()}>
         <div className="drawer-head">
           <div>
             <div className="eyebrow">NACOS REGISTRY</div>
@@ -97,7 +111,7 @@ export function RegistryManagerModal({
           </div>
           <div className="drawer-head-actions">
             <button type="button" className="btn small primary" onClick={create}>＋ 新建</button>
-            <button type="button" className="btn ghost" onClick={onClose} aria-label="关闭">×</button>
+            <button type="button" className="icon-button" onClick={onCancel} aria-label="关闭并撤销">×</button>
           </div>
         </div>
         <div className="mw-modal-body">
@@ -142,7 +156,8 @@ export function RegistryManagerModal({
           </div>
         </div>
         <div className="drawer-foot">
-          <button type="button" className="btn primary" onClick={onClose}>完成</button>
+          <button type="button" className="btn ghost" onClick={onCancel}>取消</button>
+          <button type="button" className="btn primary" onClick={onConfirm}>确认修改</button>
         </div>
       </div>
     </div>

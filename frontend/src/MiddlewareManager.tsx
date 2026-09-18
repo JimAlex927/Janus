@@ -1,54 +1,34 @@
-import { useEffect, useState, type ReactNode } from "react";
-import { MiddlewareDefForm, middlewareTypeOf, type MwType } from "./editors";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { MiddlewareDefForm, middlewareTypeOf } from "./editors";
 import { Field } from "./ui";
-import type { Middleware } from "./types";
+import type { Middleware, MiddlewareCapability } from "./types";
 
 export type MiddlewareScopeFilter = "route" | "service";
 
-export interface MiddlewareClass {
-  type: MwType;
-  label: string;
-  desc: string;
-  scopes: MiddlewareScopeFilter[];
-  example: string;
-}
-
-export const MIDDLEWARE_CLASSES: MiddlewareClass[] = [
-  { type: "buffer", label: "Buffer", desc: "缓存完整响应后再转发，适合小而完整的 API 响应。", scopes: ["route", "service"], example: "max_response_body_bytes: 1048576" },
-  { type: "body_limit", label: "Body Limit", desc: "限制请求体大小，超限直接拒绝。", scopes: ["route", "service"], example: "max_bytes: 10485760" },
-  { type: "in_flight", label: "In Flight", desc: "限制并发请求数，超限返回 503，不排队。", scopes: ["service"], example: "max_concurrent: 100" },
-];
-
-const CLASS_DEFAULTS: Record<MwType, Middleware> = {
-  buffer: { buffer: { max_response_body_bytes: 1048576 } },
-  body_limit: { body_limit: { max_bytes: 10485760 } },
-  in_flight: { scope: "service", in_flight: { max_concurrent: 100 } },
-};
-
-export function classDefaults(type: MwType): Middleware {
-  return JSON.parse(JSON.stringify(CLASS_DEFAULTS[type])) as Middleware;
-}
-
 /** 实例是否可被某作用域的 flow 引用（与后端 AllowsScope + in_flight 约束一致）。 */
-export function isFlowCompatible(def: Middleware | undefined, scope: MiddlewareScopeFilter): boolean {
+export function isFlowCompatible(def: Middleware | undefined, scope: MiddlewareScopeFilter, catalog: MiddlewareCapability[]): boolean {
   if (!def) return false;
-  if (scope === "route") return (!def.scope || def.scope === "route") && !def.in_flight;
-  return !def.scope || def.scope === "service";
+  if (def.scope && def.scope !== scope) return false;
+  const capability = catalog.find((item) => item.type === middlewareTypeOf(def, catalog));
+  return Boolean(capability?.scopes.includes(scope));
 }
 
-export function instanceLabel(def: Middleware | undefined): string {
+export function instanceLabel(def: Middleware | undefined, catalog: MiddlewareCapability[]): string {
   if (!def) return "未定义";
-  const kind = def.buffer ? "buffer" : def.body_limit ? "body_limit" : def.in_flight ? "in_flight" : "未配置";
-  const scope = !def.scope ? "共享" : def.scope === "route" ? "仅 Route" : "仅 Service";
+  const kind = middlewareTypeOf(def, catalog) || "未配置";
+  const capability = catalog.find((item) => item.type === kind);
+  const scope = def.scope === "route" || (!def.scope && capability?.scopes.length === 1 && capability.scopes[0] === "route")
+    ? "仅 Route"
+    : def.scope === "service" || (!def.scope && capability?.scopes.length === 1 && capability.scopes[0] === "service")
+      ? "仅 Service"
+      : "共享";
   return `${kind} · ${scope}`;
 }
 
-function kindColor(def: Middleware | undefined): string {
+function kindColor(def: Middleware | undefined, catalog: MiddlewareCapability[]): string {
   if (!def) return "#b91c1c";
-  if (def.buffer) return "#536dfe";
-  if (def.body_limit) return "#c2410c";
-  if (def.in_flight) return "#7c3aed";
-  return "#9aa1b3";
+  const index = Math.max(0, catalog.findIndex((item) => item.type === middlewareTypeOf(def, catalog)));
+  return ["#536dfe", "#c2410c", "#7c3aed", "#0f766e", "#b45309", "#0369a1"][index % 6];
 }
 
 type Tab = "class" | "instance" | "flow";
@@ -57,6 +37,7 @@ type Tab = "class" | "instance" | "flow";
 function StackView({
   flow,
   instances,
+  catalog,
   scope,
   coreLabel,
   chainSel,
@@ -64,6 +45,7 @@ function StackView({
 }: {
   flow: string[];
   instances: Record<string, Middleware>;
+  catalog: MiddlewareCapability[];
   scope: MiddlewareScopeFilter;
   coreLabel: string;
   chainSel: string | null;
@@ -73,22 +55,22 @@ function StackView({
   for (let index = flow.length - 1; index >= 0; index--) {
     const name = flow[index];
     const def = instances[name];
-    const compatible = isFlowCompatible(def, scope);
+    const compatible = isFlowCompatible(def, scope, catalog);
     inner = (
       <div
         key={`${name}-${index}`}
         className={`mw-stack-layer ${chainSel === name ? "selected" : ""} ${compatible ? "" : "warn"}`}
-        style={{ borderColor: kindColor(def) }}
+        style={{ borderColor: kindColor(def, catalog) }}
       >
         <button
           type="button"
           className="mw-stack-head"
-          title={`${name} · ${instanceLabel(def)}${compatible ? "" : "（已不兼容，请移除）"}`}
+          title={`${name} · ${instanceLabel(def, catalog)}${compatible ? "" : "（已不兼容，请移除）"}`}
           onClick={() => onSelect(name)}
         >
-          <em className="mw-stack-badge" style={{ background: kindColor(def) }}>{index + 1}</em>
+          <em className="mw-stack-badge" style={{ background: kindColor(def, catalog) }}>{index + 1}</em>
           <strong>{name}</strong>
-          <small className={compatible ? "" : "error-text"}>{instanceLabel(def)}</small>
+          <small className={compatible ? "" : "error-text"}>{instanceLabel(def, catalog)}</small>
         </button>
         <div className="mw-stack-inner">{inner}</div>
       </div>
@@ -99,36 +81,41 @@ function StackView({
 
 /**
  * 中间件管理弹窗：class（后端内置静态类型）→ instance（具名实例，可改参）
- * → flow（当前节点按序选用）。实例是全局共享的，修改即进入画布草稿
- * （顶栏保存），不受外层抽屉取消影响。
+ * → flow（当前节点按序选用）。弹窗打开时由父组件建立草稿快照；确认保留
+ * 本次修改，取消、关闭、点击遮罩或按 Escape 都恢复快照。
  */
 export function MiddlewareManagerModal({
   title,
   scope,
   coreLabel,
   instances,
+  catalog,
   flow,
   onFlowChange,
   onInstantiate,
   onUpdateInstance,
   onDeleteInstance,
   onRenameInstance,
-  onClose,
+  onConfirm,
+  onCancel,
   notify,
 }: {
   title: string;
   scope: MiddlewareScopeFilter;
   coreLabel: string;
   instances: Record<string, Middleware>;
+  catalog: MiddlewareCapability[];
   flow: string[];
   onFlowChange: (flow: string[]) => void;
-  onInstantiate: (type: MwType) => string | undefined;
+  onInstantiate: (type: string) => string | undefined;
   onUpdateInstance: (name: string, def: Middleware) => void;
   onDeleteInstance: (name: string) => void;
   onRenameInstance: (oldName: string, newName: string) => string | undefined;
-  onClose: () => void;
+  onConfirm: () => void;
+  onCancel: () => void;
   notify: (msg: string) => void;
 }) {
+  const dialogRef = useRef<HTMLDivElement>(null);
   const [tab, setTab] = useState<Tab>("flow");
   const [selected, setSelected] = useState<string | null>(null);
   const [chainSel, setChainSel] = useState<string | null>(null);
@@ -146,8 +133,19 @@ export function MiddlewareManagerModal({
       setChainSel(null);
     }
   }, [flow, chainSel]);
+  useEffect(() => {
+    const handleKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      const dialogs = document.querySelectorAll<HTMLElement>('[role="dialog"]');
+      if (dialogs[dialogs.length - 1] !== dialogRef.current) return;
+      event.preventDefault();
+      onCancel();
+    };
+    window.addEventListener("keydown", handleKey);
+    return () => window.removeEventListener("keydown", handleKey);
+  }, [onCancel]);
 
-  function instantiate(type: MwType, klass: MiddlewareClass) {
+  function instantiate(type: string, klass: MiddlewareCapability) {
     if (!klass.scopes.includes(scope)) {
       notify(`${klass.label} 不能用于 ${scope === "route" ? "Route" : "Service"}。`);
       return;
@@ -156,7 +154,6 @@ export function MiddlewareManagerModal({
     if (!name) return;
     if (!flow.includes(name)) onFlowChange([...flow, name]);
     setTab("flow");
-    notify(`已实例化 ${name} 并加入执行顺序。`);
   }
 
   function move(index: number, offset: number) {
@@ -179,32 +176,31 @@ export function MiddlewareManagerModal({
     onFlowChange(flow.map((m) => (m === selected ? nameDraft.trim() : m)));
   }
 
-  const available = names.filter((name) => !flow.includes(name) && isFlowCompatible(instances[name], scope));
-  const blocked = names.filter((name) => !flow.includes(name) && !isFlowCompatible(instances[name], scope));
+  const available = names.filter((name) => !flow.includes(name) && isFlowCompatible(instances[name], scope, catalog));
   const selectedDef = selected ? instances[selected] : undefined;
 
   return (
-    <div className="backdrop" onMouseDown={onClose}>
-      <div className="mw-modal" role="dialog" aria-modal="true" aria-label={title} onMouseDown={(e) => e.stopPropagation()}>
+    <div className="backdrop" onMouseDown={onCancel}>
+      <div ref={dialogRef} className="mw-modal" role="dialog" aria-modal="true" aria-label={title} onMouseDown={(e) => e.stopPropagation()}>
         <div className="drawer-head">
           <div>
             <div className="eyebrow">MIDDLEWARE</div>
             <h3>{title}</h3>
           </div>
-          <button type="button" className="btn ghost" onClick={onClose} aria-label="关闭">×</button>
+          <button type="button" className="icon-button" onClick={onCancel} aria-label="关闭并撤销">×</button>
         </div>
         <div className="mw-modal-body">
           <nav className="mw-tabs">
             {([
               ["flow", `Flow（${flow.length}）`],
               ["instance", `Instance（${names.length}）`],
-              ["class", "Class（3）"],
+              ["class", `Class（${catalog.length}）`],
             ] as [Tab, string][]).map(([id, label]) => (
               <button key={id} type="button" className={tab === id ? "active" : ""} onClick={() => setTab(id)}>
                 {label}
               </button>
             ))}
-            <p className="muted">实例全局共享；改动即进入画布草稿，顶栏保存后生效。</p>
+            <p className="muted">实例全局共享；确认后写入当前配置草稿，取消会撤销本次全部修改。</p>
           </nav>
           <div className="mw-tab-panel">
             {tab === "flow" && (
@@ -217,6 +213,7 @@ export function MiddlewareManagerModal({
                     <StackView
                       flow={flow}
                       instances={instances}
+                      catalog={catalog}
                       scope={scope}
                       coreLabel={coreLabel}
                       chainSel={chainSel}
@@ -237,7 +234,7 @@ export function MiddlewareManagerModal({
                 {available.length === 0 && <small className="muted">没有可用的实例，去 Instance 新建或调整作用域。</small>}
                 {available.map((name) => (
                   <div className="mw-order-row" key={name}>
-                    <span><strong>{name}</strong><small>{instanceLabel(instances[name])}</small></span>
+                    <span><strong>{name}</strong><small>{instanceLabel(instances[name], catalog)}</small></span>
                     <span className="mw-order-actions">
                       <button type="button" className="btn small" onClick={() => onFlowChange([...flow, name])}>＋ 选用</button>
                     </span>
@@ -257,7 +254,7 @@ export function MiddlewareManagerModal({
                       onClick={() => { setSelected(name); setNameDraft(name); setRenameError(""); }}
                     >
                       <strong>{name}</strong>
-                      <small>{instanceLabel(instances[name])}</small>
+                      <small>{instanceLabel(instances[name], catalog)}</small>
                       {flow.includes(name) && <em className="badge">flow 中</em>}
                     </button>
                   ))}
@@ -273,7 +270,7 @@ export function MiddlewareManagerModal({
                           <button type="button" className="btn small" disabled={nameDraft.trim() === selected} onClick={commitRename}>改名</button>
                         </div>
                       </Field>
-                      <MiddlewareDefForm value={selectedDef} onChange={(def) => onUpdateInstance(selected, def)} />
+                      <MiddlewareDefForm value={selectedDef} catalog={catalog} onChange={(def) => onUpdateInstance(selected, def)} />
                       <button type="button" className="btn small danger" onClick={() => { onDeleteInstance(selected); }}>删除实例</button>
                     </>
                   )}
@@ -282,14 +279,14 @@ export function MiddlewareManagerModal({
             )}
             {tab === "class" && (
               <div className="mw-classes">
-                {MIDDLEWARE_CLASSES.map((klass) => {
+                {catalog.map((klass) => {
                   const usable = klass.scopes.includes(scope);
                   return (
                     <div className={`mw-class-card ${usable ? "" : "disabled"}`} key={klass.type}>
                       <div>
                         <strong>{klass.label}</strong>
-                        <p>{klass.desc}</p>
-                        <small className="mono">{klass.example}</small>
+                        <p>{klass.description}</p>
+                        <small className="mono">{klass.fields.map((field) => field.name).join(" · ") || "无参数"}</small>
                         <div className="mw-class-scopes">
                           {klass.scopes.map((s) => <em className="badge" key={s}>{s}</em>)}
                         </div>
@@ -300,13 +297,14 @@ export function MiddlewareManagerModal({
                     </div>
                   );
                 })}
-                {!MIDDLEWARE_CLASSES.some((k) => k.scopes.includes(scope)) && <p className="muted">当前作用域无可用类型。</p>}
+                {!catalog.some((k) => k.scopes.includes(scope)) && <p className="muted">当前作用域无可用类型。</p>}
               </div>
             )}
           </div>
         </div>
         <div className="drawer-foot">
-          <button type="button" className="btn primary" onClick={onClose}>完成</button>
+          <button type="button" className="btn ghost" onClick={onCancel}>取消</button>
+          <button type="button" className="btn primary" onClick={onConfirm}>确认修改</button>
         </div>
       </div>
     </div>

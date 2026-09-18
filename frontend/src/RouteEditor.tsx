@@ -1,24 +1,36 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { limenNames, serviceNames } from "./model";
 import { Drawer, Field } from "./ui";
 import type { JanusConfig, Route } from "./types";
 
 export type MatchRule = { type: "host" | "path" | "pathPrefix" | "method" | "protocol" | "header" | "query"; value: string; extra?: string };
 
-function parseMatchExpression(expr: string): MatchRule[] {
-  if (!expr) return [];
+function parseMatchExpression(expr: string): { rules: MatchRule[]; safe: boolean } {
+  if (!expr.trim()) return { rules: [], safe: true };
   const rules: MatchRule[] = [];
-  const hostMatch = expr.match(/Host\(`([^`]+)`\)/);
-  if (hostMatch) rules.push({ type: "host", value: hostMatch[1] });
-  const pathMatch = expr.match(/Path\(`([^`]+)`\)/);
-  if (pathMatch) rules.push({ type: "path", value: pathMatch[1] });
-  const prefixMatch = expr.match(/PathPrefix\(`([^`]+)`\)/);
-  if (prefixMatch) rules.push({ type: "pathPrefix", value: prefixMatch[1] });
-  const methodMatch = expr.match(/Method\(`([^`]+)`\)/);
-  if (methodMatch) rules.push({ type: "method", value: methodMatch[1] });
-  const protocolMatch = expr.match(/Protocol\(`([^`]+)`\)/);
-  if (protocolMatch) rules.push({ type: "protocol", value: protocolMatch[1] });
-  return rules;
+  const names: Record<string, MatchRule["type"]> = {
+    Host: "host", Path: "path", PathPrefix: "pathPrefix", Method: "method",
+    Protocol: "protocol", Header: "header", Query: "query",
+  };
+  const source = expr.trim();
+  const token = /\s*(Host|Path|PathPrefix|Method|Protocol|Header|Query)\(\s*`([^`]*)`(?:\s*,\s*`([^`]*)`)?\s*\)\s*/y;
+  let index = 0;
+  while (index < source.length) {
+    token.lastIndex = index;
+    const match = token.exec(source);
+    if (!match || match.index !== index) return { rules: [], safe: false };
+    const type = names[match[1]];
+    const needsExtra = type === "header" || type === "query";
+    if (needsExtra !== (match[3] !== undefined)) return { rules: [], safe: false };
+    rules.push({ type, value: match[2], ...(needsExtra ? { extra: match[3] } : {}) });
+    index = token.lastIndex;
+    if (index === source.length) break;
+    const separator = /^\s*&&\s*/.exec(source.slice(index));
+    if (!separator) return { rules: [], safe: false };
+    index += separator[0].length;
+    if (index === source.length) return { rules: [], safe: false };
+  }
+  return { rules, safe: true };
 }
 
 function buildMatchExpression(rules: MatchRule[]): string {
@@ -41,11 +53,15 @@ export function RouteEditor({ draft, value, isNew, onChange, onConfirm, onCancel
   onChange: (value: Route) => void; onConfirm: () => void; onCancel: () => void; onClose: () => void; onDelete?: () => void;
   onOpenMiddlewareManager?: () => void;
 }) {
-  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [showAdvanced, setShowAdvanced] = useState(() => !parseMatchExpression(value.match || "").safe);
   const actionType = value.action?.redirect ? "redirect" : value.action?.respond ? "respond" : "forward";
   const services = serviceNames(draft);
   const limens = limenNames(draft);
-  const matchRules = useMemo(() => parseMatchExpression(value.match || ""), [value.match]);
+  const parsedMatch = useMemo(() => parseMatchExpression(value.match || ""), [value.match]);
+  const matchRules = parsedMatch.rules;
+  useEffect(() => {
+    if (!parsedMatch.safe) setShowAdvanced(true);
+  }, [parsedMatch.safe]);
   const set = (patch: Partial<Route>) => onChange({ ...value, ...patch });
 
   function setActionType(type: string) {
@@ -81,12 +97,12 @@ export function RouteEditor({ draft, value, isNew, onChange, onConfirm, onCancel
     <div className="match-builder">
       <div className="match-builder-header">
         <div className="field-label">匹配规则</div>
-        <button type="button" className="btn small ghost" onClick={() => setShowAdvanced(!showAdvanced)}>
-          {showAdvanced ? "可视化编辑" : "高级编辑"}
+        <button type="button" className="btn small ghost" disabled={showAdvanced && !parsedMatch.safe} onClick={() => setShowAdvanced(!showAdvanced)}>
+          {showAdvanced ? (parsedMatch.safe ? "可视化编辑" : "当前表达式仅支持高级编辑") : "高级编辑"}
         </button>
       </div>
       {showAdvanced ? (
-        <Field label="Match 表达式" hint="支持 Host, Path, PathPrefix, Method, Protocol, Header, Query">
+        <Field label="Match 表达式" hint="支持完整 DSL；含 OR、NOT、括号或其他复杂组合时保留在高级模式，避免无损转换失败">
           <textarea rows={3} value={value.match || ""}
             onChange={(e) => set({ match: e.target.value || undefined })}
             placeholder='PathPrefix(`/api`) && Protocol(`http`)' className="mono" />

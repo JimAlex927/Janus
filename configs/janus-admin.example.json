@@ -48,10 +48,22 @@
     }
   },
   "middlewares": {
-    "77777": {
-      "scope": "service",
+    "body_limit-1": {
+      "scope": "route",
       "body_limit": {
         "max_bytes": 10485760
+      }
+    },
+    "buffer-1": {
+      "scope": "route",
+      "buffer": {
+        "max_response_body_bytes": 1048576
+      }
+    },
+    "in_flight-1": {
+      "scope": "service",
+      "in_flight": {
+        "max_concurrent": 100
       }
     }
   },
@@ -60,7 +72,9 @@
       "upstreams": [
         "http://127.0.0.1:9000"
       ],
-      "middlewares": []
+      "middlewares": [
+        "in_flight-1"
+      ]
     },
     "service-2": {
       "nacos": {
@@ -76,10 +90,15 @@
     {
       "name": "route-1",
       "limen": "private",
-      "match": "PathPrefix(`/new1`)\u0026\u0026Host(`123`)",
+      "match": "PathPrefix(`/test`)",
+      "middlewares": [
+        "buffer-1",
+        "body_limit-1"
+      ],
       "action": {
-        "forward": {
-          "service": "service-1"
+        "respond": {
+          "status": 200,
+          "body": "okok\n"
         }
       }
     },

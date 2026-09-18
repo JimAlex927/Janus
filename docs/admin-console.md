@@ -74,6 +74,10 @@ not build a duplicate generation.
   不交叉。入口监听配置是启动级的：发布时路由部分即时生效，入口差异会
   明确提示需重启；入口抽屉里的“写入文件”可把已保存草稿的入口合并进
   生效文件（运行不受影响，重启后生效）。
+- Route / Service 的 Middleware 管理器和 Nacos Registry 管理器使用嵌套事务：
+  `确认修改`保留本次资源与编排变更；`取消`、遮罩、右上角关闭和 Escape
+  都恢复打开弹窗前的配置快照。Middleware 类型、适用作用域、默认值和
+  参数控件来自后端能力目录，不在前端维护另一份类型清单。
 - `全局设置`编辑生效配置文件的 settings 段。保存只做校验并写文件，
   不触碰运行中的 generation，保存后必须重启 Janus。
 
@@ -86,12 +90,21 @@ record immediately replaces the running generation.
 cd frontend
 npm install
 npm run dev
-npm run test:model
+npm run build
 ```
 
-The Vite development server proxies `/api`, `/metrics`, and `/readyz` to the
-local Admin listener. A release build is copied to `internal/admin/ui/` before
+The Vite development server proxies `/api`, `/livez`, `/readyz`, and `/metrics`
+to the local Admin listener at `127.0.0.1:9090`. A release build is copied to `internal/admin/ui/` before
 `go build` so the Go `embed` package has the same UI that was reviewed in the
 frontend build. The typed API client, config model helpers, request simulator,
 node canvas editor, and per-resource drawer editors are kept in separate
 modules.
+
+## Middleware capability API
+
+登录后的 `GET /api/v1/capabilities/middlewares` 返回当前二进制实际提供的
+Middleware 类型目录。每一项包含稳定类型名、显示名、说明、允许的
+`route` / `service` 作用域，以及字段类型、默认值和数值上下限。控制台
+用该目录生成 Class 列表和参数表单，因此后端新增内置 Middleware 后，
+前端无需再增加类型分支。配置的最终有效性仍由后端 `config.Validate`
+判定，能力目录不是配置校验的替代品。

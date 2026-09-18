@@ -3,6 +3,7 @@ import { login, logout } from "./api";
 import { ConfigEditorPage } from "./ConfigEditor";
 import { ConfigsPage } from "./Configs";
 import { Overview } from "./Overview";
+import { PelicanRide } from "./PelicanRide";
 import { SettingsPage } from "./Settings";
 import { useConfig } from "./useConfig";
 
@@ -147,19 +148,31 @@ function Login({ onDone }: { onDone: () => void }) {
   }
 
   return (
-    <div className="login-shell">
-      <form className="login-card" onSubmit={submit}>
-        <div className="brand-mark">J</div>
-        <div className="eyebrow">JANUS CONSOLE</div>
-        <h2>欢迎回来</h2>
-        <p>登录后管理网关配置。</p>
-        <input autoFocus placeholder="管理员账号" value={username} onChange={(e) => setUsername(e.target.value)} />
-        <input type="password" placeholder="密码" value={password} onChange={(e) => setPassword(e.target.value)} />
-        <button type="submit" className="btn primary" disabled={busy}>
-          {busy ? "登录中…" : "登录"}
-        </button>
-        {error && <small className="error-text">{error}</small>}
-      </form>
+    <div className="login-split">
+      <div className="login-scene-pane">
+        <div className="login-brand">
+          <div className="brand-mark">J</div>
+          <div>
+            <strong>Janus</strong>
+            <small>GATEWAY CONSOLE</small>
+          </div>
+        </div>
+        <PelicanRide />
+      </div>
+      <div className="login-form-pane">
+        <form className="login-card" onSubmit={submit}>
+          <div className="brand-mark">J</div>
+          <div className="eyebrow">JANUS CONSOLE</div>
+          <h2>欢迎回来</h2>
+          <p>登录后管理网关配置。</p>
+          <input autoFocus placeholder="管理员账号" value={username} onChange={(e) => setUsername(e.target.value)} />
+          <input type="password" placeholder="密码" value={password} onChange={(e) => setPassword(e.target.value)} />
+          <button type="submit" className="btn primary" disabled={busy}>
+            {busy ? "登录中…" : "登录"}
+          </button>
+          {error && <small className="error-text">{error}</small>}
+        </form>
+      </div>
     </div>
   );
 }

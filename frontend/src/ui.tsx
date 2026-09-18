@@ -1,6 +1,6 @@
-import type { ReactNode } from "react";
+import { useEffect, useId, useRef, type ReactNode } from "react";
 
-/** 通用抽屉弹窗：所有编辑器共用，保证交互一致、一次修好所有页面。 */
+/** 通用编辑对话框：所有资源编辑器共用一致的确认、取消和关闭语义。 */
 export function Drawer({
   title,
   subtitle,
@@ -22,19 +22,33 @@ export function Drawer({
   onDelete?: () => void;
   children: ReactNode;
 }) {
+  const titleId = useId();
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const handleKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      const dialogs = document.querySelectorAll<HTMLElement>('[role="dialog"]');
+      if (dialogs[dialogs.length - 1] !== dialogRef.current) return;
+      event.preventDefault();
+      onCancel();
+    };
+    window.addEventListener("keydown", handleKey);
+    return () => window.removeEventListener("keydown", handleKey);
+  }, [onCancel]);
   return (
-    <div className="backdrop" onMouseDown={onClose}>
+    <div className="backdrop" onMouseDown={onCancel}>
       <div
+        ref={dialogRef}
         className="drawer"
         role="dialog"
         aria-modal="true"
-        aria-label={title}
+        aria-labelledby={titleId}
         onMouseDown={(event) => event.stopPropagation()}
       >
         <div className="drawer-head">
           <div>
             <div className="eyebrow">JANUS CONFIG</div>
-            <h3>{title}</h3>
+            <h3 id={titleId}>{title}</h3>
             {subtitle && <p>{subtitle}</p>}
           </div>
           <div className="drawer-head-actions">
@@ -43,7 +57,7 @@ export function Drawer({
                 删除
               </button>
             )}
-            <button type="button" className="btn ghost" onClick={onClose} aria-label="关闭">
+            <button type="button" className="icon-button" onClick={onClose} aria-label="关闭">
               ×
             </button>
           </div>

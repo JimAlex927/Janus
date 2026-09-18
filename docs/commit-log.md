@@ -1815,3 +1815,37 @@ Verification:
 - Janus forwarding smoke: 200 scheduled requests at the same target.
 - Both runs completed with zero ordinary transport errors; one direct-backend
   request was classified as an end-of-window cancellation.
+
+## 2026-09-18
+
+### Drive Middleware editors from backend capabilities
+
+Commit message: `feat(middleware): add dynamic capabilities and policies`
+
+Scope:
+
+- Added an authenticated Middleware capability endpoint and a shared backend
+  catalog describing supported scopes, parameter schemas, defaults, and help
+  text so the console no longer hard-codes built-in Middleware types.
+- Added `headers`, `add_prefix`, and `strip_prefix` policies with scope-aware
+  validation, runtime construction, regression tests, examples, and
+  documentation. Header mutation rejects unsafe hop-by-hop and framing fields.
+- Reworked Middleware, Service, Registry, Route, and Limen editing around
+  transactional dialogs with explicit confirmation, cancellation, Escape-key
+  handling, and consistent layouts.
+- Fixed provisional Route and Service creation, rename/cancel behavior, stale
+  editor callbacks, and preservation of complex Route match expressions.
+- Updated the console UI structure and styles, development proxy behavior,
+  sample configurations, and generated assets embedded by the Go server.
+- Stabilized the SSE resource-release regression test under loaded test hosts
+  without changing production timeout behavior.
+
+Verification:
+
+- `go test ./...`
+- `go vet ./...`
+- `cd frontend; npm run build`
+- Browser checks for dynamic Middleware forms, dialog rollback, create/rename
+  flows, and Registry layout
+- JSON syntax validation for `configs/janus-comprehensive.example.json`
+- `git diff --check`

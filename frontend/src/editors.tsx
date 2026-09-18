@@ -1,13 +1,20 @@
+import { useEffect, useRef, useState } from "react";
 import { registryNames, splitLines } from "./model";
 import { Drawer, Field } from "./ui";
-import type { JanusConfig, Limen, Middleware, NacosRegistry, Service } from "./types";
+import type { JanusConfig, Limen, Middleware, MiddlewareCapability, MiddlewareFieldCapability, NacosRegistry, Service } from "./types";
 
-export type MwType = "buffer" | "body_limit" | "in_flight";
+export function middlewareTypeOf(def: Middleware, catalog: MiddlewareCapability[]): string {
+  return catalog.find((item) => def[item.type] != null)?.type || Object.keys(def).find((key) => key !== "scope") || catalog[0]?.type || "";
+}
 
-export function middlewareTypeOf(def: Middleware): MwType {
-  if (def.body_limit) return "body_limit";
-  if (def.in_flight) return "in_flight";
-  return "buffer";
+export function createMiddlewareDefinition(capability: MiddlewareCapability, requestedScope?: string): Middleware {
+  const policy: Record<string, unknown> = {};
+  for (const field of capability.fields) {
+    if (field.default !== undefined) policy[field.name] = structuredClone(field.default);
+  }
+  let scope = requestedScope;
+  if (!scope && capability.scopes.length === 1) scope = capability.scopes[0];
+  return { ...(scope ? { scope } : {}), [capability.type]: policy };
 }
 
 export function ServiceEditor({
@@ -77,11 +84,7 @@ export function ServiceEditor({
       {source === "static" ? (
         <>
           <Field label="Upstreams" hint="每行一个 http(s) origin，例如 http://127.0.0.1:9000">
-            <textarea
-              rows={3}
-              value={(value.upstreams || []).join("\n")}
-              onChange={(e) => set({ upstreams: splitLines(e.target.value) })}
-            />
+            <DraftTextarea rows={3} value={(value.upstreams || []).join("\n")} parse={splitLines} onChange={(next) => set({ upstreams: next as string[] })} placeholder="http://127.0.0.1:9000" />
           </Field>
           {value.health_check ? (
             <>
@@ -143,11 +146,7 @@ export function ServiceEditor({
             </Field>
           </div>
           <Field label="Clusters" hint="每行一个，可留空">
-            <textarea
-              rows={2}
-              value={(value.nacos?.clusters || []).join("\n")}
-              onChange={(e) => set({ nacos: { ...value.nacos!, clusters: splitLines(e.target.value) } })}
-            />
+            <DraftTextarea rows={2} value={(value.nacos?.clusters || []).join("\n")} parse={splitLines} onChange={(next) => set({ nacos: { ...value.nacos!, clusters: next as string[] } })} placeholder="DEFAULT" />
           </Field>
         </>
       )}
@@ -172,76 +171,115 @@ export function ServiceEditor({
   );
 }
 
-/** 中间件定义表单（作用域/类型/参数），抽屉与实例弹窗共用。 */
-export function MiddlewareDefForm({ value, onChange }: { value: Middleware; onChange: (value: Middleware) => void }) {
-  const type = middlewareTypeOf(value);
+function mapToLines(value: unknown): string {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return "";
+  return Object.entries(value as Record<string, unknown>).map(([key, item]) => `${key}: ${String(item)}`).join("\n");
+}
+
+function linesToMap(value: string): Record<string, string> {
+  const result: Record<string, string> = {};
+  for (const line of value.split(/\r?\n/)) {
+    const index = line.indexOf(":");
+    if (index <= 0) continue;
+    const key = line.slice(0, index).trim();
+    if (key) result[key] = line.slice(index + 1).trim();
+  }
+  return result;
+}
+
+function DraftTextarea({ value, rows, placeholder, parse, onChange }: {
+  value: string;
+  rows: number;
+  placeholder: string;
+  parse: (value: string) => unknown;
+  onChange: (value: unknown) => void;
+}) {
+  const [draft, setDraft] = useState(value);
+  const focused = useRef(false);
+  useEffect(() => {
+    if (!focused.current) setDraft(value);
+  }, [value]);
+  return (
+    <textarea
+      rows={rows}
+      value={draft}
+      placeholder={placeholder}
+      onFocus={() => { focused.current = true; }}
+      onBlur={() => { focused.current = false; onChange(parse(draft)); }}
+      onChange={(event) => {
+        setDraft(event.target.value);
+        onChange(parse(event.target.value));
+      }}
+    />
+  );
+}
+
+function CapabilityField({ field, value, onChange }: { field: MiddlewareFieldCapability; value: unknown; onChange: (value: unknown) => void }) {
+  if (field.kind === "integer") {
+    return <input type="number" min={field.min} max={field.max} value={typeof value === "number" ? value : Number(field.default ?? 0)} onChange={(e) => onChange(Number(e.target.value) || 0)} />;
+  }
+  if (field.kind === "boolean") {
+    return <select value={value === true ? "true" : "false"} onChange={(e) => onChange(e.target.value === "true")}><option value="true">true</option><option value="false">false</option></select>;
+  }
+  if (field.kind === "string_list") {
+    return <DraftTextarea rows={3} value={Array.isArray(value) ? value.join("\n") : ""} parse={splitLines} onChange={onChange} placeholder="每行一项" />;
+  }
+  if (field.kind === "string_map") {
+    return <DraftTextarea rows={4} value={mapToLines(value)} parse={linesToMap} onChange={onChange} placeholder="Header-Name: value" />;
+  }
+  return <input value={typeof value === "string" ? value : String(field.default ?? "")} onChange={(e) => onChange(e.target.value)} />;
+}
+
+/** 中间件定义表单完全由后端能力目录驱动。 */
+export function MiddlewareDefForm({ value, catalog, onChange }: { value: Middleware; catalog: MiddlewareCapability[]; onChange: (value: Middleware) => void }) {
+  const type = middlewareTypeOf(value, catalog);
+  const capability = catalog.find((item) => item.type === type);
+  const policy = (type && value[type] && typeof value[type] === "object" ? value[type] : {}) as Record<string, unknown>;
+
+  function changeScope(scope: string) {
+    const compatible = (candidate: MiddlewareCapability) => scope === "" ? candidate.scopes.includes("route") && candidate.scopes.includes("service") : candidate.scopes.includes(scope as "route" | "service");
+    if (capability && compatible(capability)) {
+      onChange({ ...value, scope: scope || undefined });
+      return;
+    }
+    const replacement = catalog.find(compatible);
+    if (replacement) onChange(createMiddlewareDefinition(replacement, scope || undefined));
+  }
+
+  function changeType(nextType: string) {
+    const next = catalog.find((item) => item.type === nextType);
+    if (!next) return;
+    const requested = value.scope;
+    const scope = requested && next.scopes.includes(requested as "route" | "service")
+      ? requested
+      : next.scopes.length === 1 ? next.scopes[0] : undefined;
+    onChange(createMiddlewareDefinition(next, scope));
+  }
+
   return (
     <>
       <Field label="作用域 Scope">
-        <select
-          value={value.scope || ""}
-          onChange={(e) => {
-            const scope = e.target.value;
-            let next = { ...value };
-            if (scope === "route" && next.in_flight) next = { body_limit: { max_bytes: 10485760 } };
-            onChange({ ...next, scope: scope || undefined });
-          }}
-        >
+        <select value={value.scope || ""} onChange={(e) => changeScope(e.target.value)}>
           <option value="">Route + Service（共享）</option>
           <option value="route">Route</option>
           <option value="service">Service</option>
         </select>
       </Field>
       <Field label="类型">
-        <select
-          value={type}
-          onChange={(e) => {
-            const next = e.target.value as MwType;
-            if (next === "buffer") onChange({ ...value, buffer: { max_response_body_bytes: 1048576 }, body_limit: undefined, in_flight: undefined });
-            if (next === "body_limit") onChange({ ...value, body_limit: { max_bytes: 10485760 }, buffer: undefined, in_flight: undefined });
-            if (next === "in_flight") onChange({ ...value, in_flight: { max_concurrent: 100 }, buffer: undefined, body_limit: undefined, scope: "service" });
-          }}
-        >
-          <option value="buffer">buffer（缓存响应）</option>
-          <option value="body_limit">body_limit（限制请求体）</option>
-          <option value="in_flight" disabled={value.scope === "route"}>
-            in_flight（限制并发，仅 Service）
-          </option>
+        <select value={type} onChange={(e) => changeType(e.target.value)}>
+          {catalog.map((item) => <option key={item.type} value={item.type}>{item.type}（{item.label}）</option>)}
         </select>
       </Field>
-      {type === "buffer" && (
-        <Field label="max_response_body_bytes">
-          <input
-            type="number"
-            min={1}
-            max={67108864}
-            value={value.buffer?.max_response_body_bytes ?? 1048576}
-            onChange={(e) => onChange({ ...value, buffer: { max_response_body_bytes: Number(e.target.value) || 0 } })}
+      {capability?.description && <p className="form-note">{capability.description}</p>}
+      {capability?.fields.map((field) => (
+        <Field key={field.name} label={field.label} hint={field.description}>
+          <CapabilityField
+            field={field}
+            value={policy[field.name]}
+            onChange={(nextValue) => onChange({ ...value, [type]: { ...policy, [field.name]: nextValue } })}
           />
         </Field>
-      )}
-      {type === "body_limit" && (
-        <Field label="max_bytes">
-          <input
-            type="number"
-            min={1}
-            max={67108864}
-            value={value.body_limit?.max_bytes ?? 10485760}
-            onChange={(e) => onChange({ ...value, body_limit: { max_bytes: Number(e.target.value) || 0 } })}
-          />
-        </Field>
-      )}
-      {type === "in_flight" && (
-        <Field label="max_concurrent">
-          <input
-            type="number"
-            min={1}
-            max={10000}
-            value={value.in_flight?.max_concurrent ?? 100}
-            onChange={(e) => onChange({ ...value, in_flight: { max_concurrent: Number(e.target.value) || 0 } })}
-          />
-        </Field>
-      )}
+      ))}
     </>
   );
 }
@@ -249,6 +287,7 @@ export function MiddlewareDefForm({ value, onChange }: { value: Middleware; onCh
 export function MiddlewareEditor({
   name,
   value,
+  catalog,
   isNew,
   onName,
   onChange,
@@ -259,6 +298,7 @@ export function MiddlewareEditor({
 }: {
   name: string;
   value: Middleware;
+  catalog: MiddlewareCapability[];
   isNew: boolean;
   onName: (name: string) => void;
   onChange: (value: Middleware) => void;
@@ -279,7 +319,7 @@ export function MiddlewareEditor({
       <Field label="名称">
         <input value={name} onChange={(e) => onName(e.target.value)} />
       </Field>
-      <MiddlewareDefForm value={value} onChange={onChange} />
+      <MiddlewareDefForm value={value} catalog={catalog} onChange={onChange} />
     </Drawer>
   );
 }
@@ -442,7 +482,7 @@ export function LimenEditor({
         {noTcpFallback && <small className="error-text">HTTP/3 需要同时保留 HTTP/1.1 或 HTTP/2 作为 TCP 回退，否则确认时会被拒绝。</small>}
       </div>
       <Field label="Trusted proxies" hint="每行一个 CIDR，可留空">
-        <textarea rows={2} value={(value.trusted_proxies || []).join("\n")} onChange={(e) => onChange({ ...value, trusted_proxies: splitLines(e.target.value) })} placeholder="10.0.0.0/8" />
+        <DraftTextarea rows={2} value={(value.trusted_proxies || []).join("\n")} parse={splitLines} onChange={(next) => onChange({ ...value, trusted_proxies: next as string[] })} placeholder="10.0.0.0/8" />
       </Field>
       <label className="check-row">
         <input

@@ -17,6 +17,8 @@ import (
 	"time"
 
 	"janus/internal/rules"
+
+	"golang.org/x/net/http/httpguts"
 )
 
 const (
@@ -93,10 +95,13 @@ func (s HTTP3Settings) Validate() error {
 // definition may be attached to either a route or a service. New definitions
 // should declare route or service explicitly.
 type Middleware struct {
-	Scope     string             `json:"scope,omitempty"`
-	Buffer    *BufferSettings    `json:"buffer,omitempty"`
-	BodyLimit *BodyLimitSettings `json:"body_limit,omitempty"`
-	InFlight  *InFlightSettings  `json:"in_flight,omitempty"`
+	Scope       string               `json:"scope,omitempty"`
+	Buffer      *BufferSettings      `json:"buffer,omitempty"`
+	BodyLimit   *BodyLimitSettings   `json:"body_limit,omitempty"`
+	InFlight    *InFlightSettings    `json:"in_flight,omitempty"`
+	Headers     *HeadersSettings     `json:"headers,omitempty"`
+	StripPrefix *StripPrefixSettings `json:"strip_prefix,omitempty"`
+	AddPrefix   *AddPrefixSettings   `json:"add_prefix,omitempty"`
 }
 
 const (
@@ -105,7 +110,22 @@ const (
 )
 
 func (m Middleware) AllowsScope(scope string) bool {
-	return m.Scope == "" || m.Scope == scope
+	if m.Scope != "" && m.Scope != scope {
+		return false
+	}
+	kind := MiddlewareType(m)
+	for _, capability := range MiddlewareCapabilities() {
+		if capability.Type != kind {
+			continue
+		}
+		for _, allowed := range capability.Scopes {
+			if allowed == scope {
+				return true
+			}
+		}
+		return false
+	}
+	return false
 }
 
 type BufferSettings struct {
@@ -118,6 +138,26 @@ type BodyLimitSettings struct {
 
 type InFlightSettings struct {
 	MaxConcurrent int `json:"max_concurrent"`
+}
+
+// HeadersSettings mutates end-to-end headers around the selected handler.
+// Hop-by-hop and framing headers are rejected during configuration validation.
+type HeadersSettings struct {
+	RequestSet     map[string]string `json:"request_set,omitempty"`
+	RequestRemove  []string          `json:"request_remove,omitempty"`
+	ResponseSet    map[string]string `json:"response_set,omitempty"`
+	ResponseRemove []string          `json:"response_remove,omitempty"`
+}
+
+// StripPrefixSettings removes Prefix from a matching request path before it
+// reaches the service. The original value is exposed as X-Forwarded-Prefix.
+type StripPrefixSettings struct {
+	Prefix string `json:"prefix"`
+}
+
+// AddPrefixSettings prepends Prefix to the request path before proxying.
+type AddPrefixSettings struct {
+	Prefix string `json:"prefix"`
 }
 
 type Service struct {
@@ -468,7 +508,7 @@ func (c Config) Validate() error {
 			}
 			definition := c.Middlewares[middlewareName]
 			if !definition.AllowsScope(MiddlewareScopeService) {
-				return fmt.Errorf("service %q cannot use %s-scoped middleware %q", name, definition.Scope, middlewareName)
+				return fmt.Errorf("service %q cannot use middleware %q in service scope", name, middlewareName)
 			}
 			if definition.InFlight != nil {
 				inFlightPolicies++
@@ -514,10 +554,7 @@ func (c Config) Validate() error {
 			}
 			definition := c.Middlewares[middlewareName]
 			if !definition.AllowsScope(MiddlewareScopeRoute) {
-				return fmt.Errorf("route %q cannot use %s-scoped middleware %q", r.Name, definition.Scope, middlewareName)
-			}
-			if definition.InFlight != nil {
-				return fmt.Errorf("route %q cannot use service-only in_flight middleware %q", r.Name, middlewareName)
+				return fmt.Errorf("route %q cannot use middleware %q in route scope", r.Name, middlewareName)
 			}
 		}
 		if r.Match != "" {
@@ -568,11 +605,20 @@ func (c Config) Validate() error {
 		if definition.InFlight != nil {
 			defined++
 		}
+		if definition.Headers != nil {
+			defined++
+		}
+		if definition.StripPrefix != nil {
+			defined++
+		}
+		if definition.AddPrefix != nil {
+			defined++
+		}
 		if defined != 1 {
 			return fmt.Errorf("middleware %q must define exactly one policy", name)
 		}
-		if definition.Scope == MiddlewareScopeRoute && definition.InFlight != nil {
-			return fmt.Errorf("middleware %q: in_flight is service-scoped", name)
+		if definition.Scope != "" && !definition.AllowsScope(definition.Scope) {
+			return fmt.Errorf("middleware %q type %q cannot use scope %q", name, MiddlewareType(definition), definition.Scope)
 		}
 		if definition.Buffer != nil && (definition.Buffer.MaxResponseBodyBytes < 1 || definition.Buffer.MaxResponseBodyBytes > MaxBufferedResponseBytes) {
 			return fmt.Errorf("middleware %q buffer.max_response_body_bytes must be between 1 and %d bytes", name, MaxBufferedResponseBytes)
@@ -582,6 +628,72 @@ func (c Config) Validate() error {
 		}
 		if definition.InFlight != nil && (definition.InFlight.MaxConcurrent < 1 || definition.InFlight.MaxConcurrent > MaxBackendConnections) {
 			return fmt.Errorf("middleware %q in_flight.max_concurrent must be between 1 and %d", name, MaxBackendConnections)
+		}
+		if definition.Headers != nil {
+			if err := validateHeaderSettings(*definition.Headers); err != nil {
+				return fmt.Errorf("middleware %q headers: %w", name, err)
+			}
+		}
+		if definition.StripPrefix != nil {
+			if err := validateMiddlewarePathPrefix(name, "strip_prefix", definition.StripPrefix.Prefix); err != nil {
+				return err
+			}
+		}
+		if definition.AddPrefix != nil {
+			if err := validateMiddlewarePathPrefix(name, "add_prefix", definition.AddPrefix.Prefix); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func validateMiddlewarePathPrefix(name, kind, prefix string) error {
+	if prefix == "" || prefix == "/" || !strings.HasPrefix(prefix, "/") || strings.HasSuffix(prefix, "/") || strings.ContainsAny(prefix, "?#\\ \t\r\n") {
+		return fmt.Errorf("middleware %q %s.prefix must be a non-root absolute path prefix without a trailing slash", name, kind)
+	}
+	return nil
+}
+
+var forbiddenMiddlewareHeaders = map[string]struct{}{
+	"Connection": {}, "Content-Length": {}, "Host": {}, "Keep-Alive": {},
+	"Proxy-Authenticate": {}, "Proxy-Authorization": {}, "Proxy-Connection": {},
+	"Te": {}, "Trailer": {}, "Transfer-Encoding": {}, "Upgrade": {},
+}
+
+func validateHeaderSettings(settings HeadersSettings) error {
+	validateName := func(name string) error {
+		trimmed := strings.TrimSpace(name)
+		canonical := http.CanonicalHeaderKey(trimmed)
+		if canonical == "" || trimmed != name || !httpguts.ValidHeaderFieldName(trimmed) {
+			return fmt.Errorf("invalid header name %q", name)
+		}
+		if _, forbidden := forbiddenMiddlewareHeaders[canonical]; forbidden {
+			return fmt.Errorf("header %q is hop-by-hop, framing, or managed separately", canonical)
+		}
+		return nil
+	}
+	for _, set := range []map[string]string{settings.RequestSet, settings.ResponseSet} {
+		for name, value := range set {
+			if err := validateName(name); err != nil {
+				return err
+			}
+			if !httpguts.ValidHeaderFieldValue(value) {
+				return fmt.Errorf("header %q value contains a newline", name)
+			}
+		}
+	}
+	for _, remove := range [][]string{settings.RequestRemove, settings.ResponseRemove} {
+		seen := make(map[string]struct{}, len(remove))
+		for _, name := range remove {
+			if err := validateName(name); err != nil {
+				return err
+			}
+			canonical := http.CanonicalHeaderKey(name)
+			if _, duplicate := seen[canonical]; duplicate {
+				return fmt.Errorf("header %q is listed more than once", canonical)
+			}
+			seen[canonical] = struct{}{}
 		}
 	}
 	return nil

@@ -98,7 +98,7 @@ func TestSSEPassesEventsBeforeBackendCompletes(t *testing.T) {
 func TestWebSocketUpgradeIsProxied(t *testing.T) {
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		key := r.Header.Get("Sec-WebSocket-Key")
-		if key == "" || !strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
+		if key == "" || !strings.EqualFold(r.Header.Get("Upgrade"), "websocket") || r.Header.Get("X-Janus-Test") != "middleware" {
 			http.Error(w, "not websocket", http.StatusBadRequest)
 			return
 		}
@@ -123,8 +123,11 @@ func TestWebSocketUpgradeIsProxied(t *testing.T) {
 	}))
 	defer backend.Close()
 	address, cleanup := startStreamingGateway(t, config.Config{
-		Listen:   "127.0.0.1:8080",
-		Services: map[string]config.Service{"socket": {Upstreams: []string{backend.URL}}},
+		Listen: "127.0.0.1:8080",
+		Middlewares: map[string]config.Middleware{
+			"ws-headers": {Headers: &config.HeadersSettings{RequestSet: map[string]string{"X-Janus-Test": "middleware"}}},
+		},
+		Services: map[string]config.Service{"socket": {Upstreams: []string{backend.URL}, Middlewares: []string{"ws-headers"}}},
 		Routes:   []config.Route{{Name: "socket", Match: "PathPrefix(`/socket`) && Protocol(`websocket`)", Service: "socket"}},
 	})
 	defer cleanup()

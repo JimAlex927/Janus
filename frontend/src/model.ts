@@ -49,10 +49,7 @@ export function routeMatchLabel(route: Route): string {
 
 export function middlewareKind(def: Middleware | undefined): string {
   if (!def) return "未定义";
-  if (def.buffer) return "buffer";
-  if (def.body_limit) return "body_limit";
-  if (def.in_flight) return "in_flight";
-  return "未配置";
+  return Object.keys(def).find((key) => key !== "scope") || "未配置";
 }
 
 export function serviceSubtitle(service: Service | undefined): string {

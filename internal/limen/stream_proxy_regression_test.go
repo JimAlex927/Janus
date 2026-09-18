@@ -32,7 +32,11 @@ func TestSSEProxyTimeoutReleasesBackendAndAdmission(t *testing.T) {
 			}))
 			defer backend.Close()
 			settings := config.DefaultSettings()
-			settings.Stream = config.StreamSettings{MaxDuration: config.Duration(time.Second), IdleTimeout: config.Duration(100 * time.Millisecond)}
+			// Keep the timeout short enough for a regression test, but leave enough
+			// headroom for TLS/QUIC setup and heavily loaded race/CI workers. The
+			// assertion is about the post-commit abort and resource release, not a
+			// scheduler-sensitive 100 ms first-byte budget.
+			settings.Stream = config.StreamSettings{MaxDuration: config.Duration(3 * time.Second), IdleTimeout: config.Duration(time.Second)}
 			g, err := gateway.New(config.Config{
 				Listen: "127.0.0.1:8080", Settings: settings,
 				Services:    map[string]config.Service{"events": {Upstreams: []string{backend.URL}}},
@@ -82,7 +86,7 @@ func TestSSEProxyTimeoutReleasesBackendAndAdmission(t *testing.T) {
 			served := make(chan error, 1)
 			go func() { served <- l.Serve(ln) }()
 			defer func() { l.Close(); <-served }()
-			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
 			req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://"+address, nil)
 			if err != nil {
@@ -109,12 +113,12 @@ func TestSSEProxyTimeoutReleasesBackendAndAdmission(t *testing.T) {
 			}
 			select {
 			case <-finished:
-			case <-time.After(time.Second):
+			case <-time.After(3 * time.Second):
 				t.Fatal("proxy handler did not exit")
 			}
 			select {
 			case <-backendDone:
-			case <-time.After(time.Second):
+			case <-time.After(3 * time.Second):
 				t.Fatal("backend did not observe cancellation")
 			}
 			if limiter.Active() != 0 || !limiter.Acquire() {

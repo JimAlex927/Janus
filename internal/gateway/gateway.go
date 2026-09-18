@@ -276,6 +276,13 @@ func buildMiddlewares(c config.Config, names []string, serviceLimiter *middlewar
 				return nil, fmt.Errorf("middleware %q requires a service limiter", name)
 			}
 			result = append(result, middleware.Admission(serviceLimiter))
+		case definition.Headers != nil:
+			rules := definition.Headers
+			result = append(result, middleware.Headers(rules.RequestSet, rules.RequestRemove, rules.ResponseSet, rules.ResponseRemove))
+		case definition.StripPrefix != nil:
+			result = append(result, middleware.StripPrefix(definition.StripPrefix.Prefix))
+		case definition.AddPrefix != nil:
+			result = append(result, middleware.AddPrefix(definition.AddPrefix.Prefix))
 		default:
 			return nil, fmt.Errorf("middleware %q has no supported policy", name)
 		}

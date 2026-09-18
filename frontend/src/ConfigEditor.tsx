@@ -18,6 +18,7 @@ import {
 import "@xyflow/react/dist/style.css";
 import {
   ApiError,
+  getMiddlewareCapabilities,
   getStoredConfig,
   publishStoredConfig,
   saveStoredConfig,
@@ -25,15 +26,15 @@ import {
   validateConfig,
   type StoredConfig,
 } from "./api";
-import { LimenEditor, ServiceEditor, type MwType } from "./editors";
+import { createMiddlewareDefinition, LimenEditor, ServiceEditor } from "./editors";
 import { cloneConfig, limenNames, routeActionLabel, routeMatchLabel, serviceSubtitle, uniqueName } from "./model";
-import { MiddlewareManagerModal, classDefaults, type MiddlewareScopeFilter } from "./MiddlewareManager";
+import { MiddlewareManagerModal, type MiddlewareScopeFilter } from "./MiddlewareManager";
 import { RegistryManagerModal } from "./RegistryManager";
 import { RouteEditor } from "./RouteEditor";
 import { Badge, Drawer, Empty } from "./ui";
 import type { ConfigStore } from "./useConfig";
 import { validateLocal } from "./validate";
-import type { JanusConfig, Limen, Middleware, NacosRegistry, Route, Service } from "./types";
+import type { JanusConfig, Limen, Middleware, MiddlewareCapability, NacosRegistry, Route, Service } from "./types";
 
 type NodeKind = "limen" | "route" | "service";
 type NodeData = {
@@ -217,9 +218,11 @@ function JanusNode({ data, selected }: { data: NodeData; selected?: boolean }) {
 const nodeTypes = { janus: JanusNode };
 
 type EditorState =
-  | { kind: "route"; name: string; value: Route; isNew: boolean }
-  | { kind: "service"; name: string; value: Service; isNew: boolean }
-  | { kind: "limen"; name: string; value: Limen; isNew: boolean };
+  | { kind: "route"; name: string; originalName: string; value: Route; isNew: boolean }
+  | { kind: "service"; name: string; originalName: string; value: Service; isNew: boolean }
+  | { kind: "limen"; name: string; originalName: string; value: Limen; isNew: boolean };
+
+type ManagerSnapshot = { draft: JanusConfig; editing: EditorState | null };
 
 export function ConfigEditorPage({ store, id, onBack, onStatusChange }: { store: ConfigStore; id: number; onBack: () => void; onStatusChange: () => void }) {
   return (
@@ -237,8 +240,9 @@ function ConfigEditor({ store, id, onBack, onStatusChange }: { store: ConfigStor
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState<EditorState | null>(null);
-  const [mwManager, setMwManager] = useState<{ scope: MiddlewareScopeFilter } | null>(null);
-  const [regManager, setRegManager] = useState<{ allowSelect: boolean } | null>(null);
+  const [mwManager, setMwManager] = useState<{ scope: MiddlewareScopeFilter; snapshot: ManagerSnapshot } | null>(null);
+  const [middlewareCatalog, setMiddlewareCatalog] = useState<MiddlewareCapability[]>([]);
+  const [regManager, setRegManager] = useState<{ allowSelect: boolean; snapshot: ManagerSnapshot } | null>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [nodes, setNodes, onNodesChangeDefault] = useNodesState<FlowNode>([]);
   const [edges, setEdges, onEdgesChangeDefault] = useEdgesState<Edge>([]);
@@ -258,9 +262,13 @@ function ConfigEditor({ store, id, onBack, onStatusChange }: { store: ConfigStor
     (async () => {
       setLoading(true);
       try {
-        const record: StoredConfig = await getStoredConfig(id);
+        const [record, capabilities]: [StoredConfig, { middlewares: MiddlewareCapability[] }] = await Promise.all([
+          getStoredConfig(id),
+          getMiddlewareCapabilities(),
+        ]);
         if (!alive) return;
         setMeta({ name: record.name, status: record.status });
+        setMiddlewareCatalog(capabilities.middlewares);
         setDraft(record.content);
         setSaved(JSON.stringify(record.content));
         setSavedLayout(JSON.stringify(record.layout?.nodes || {}));
@@ -335,6 +343,30 @@ function ConfigEditor({ store, id, onBack, onStatusChange }: { store: ConfigStor
     draftRef.current = next;
     setDraft(next);
     refreshFlow(next);
+  }
+
+  function managerSnapshot(editor: EditorState | null = editing): ManagerSnapshot | null {
+    const current = draftRef.current;
+    if (!current) return null;
+    return { draft: cloneConfig(current), editing: editor ? cloneConfig(editor) : null };
+  }
+
+  function openMiddlewareManager(scope: MiddlewareScopeFilter, editor: EditorState | null = editing) {
+    const snapshot = managerSnapshot(editor);
+    if (snapshot) setMwManager({ scope, snapshot });
+  }
+
+  function openRegistryManager(allowSelect: boolean) {
+    const snapshot = managerSnapshot();
+    if (snapshot) setRegManager({ allowSelect, snapshot });
+  }
+
+  function restoreManager(snapshot: ManagerSnapshot) {
+    const restored = cloneConfig(snapshot.draft);
+    draftRef.current = restored;
+    setDraft(restored);
+    refreshFlow(restored);
+    setEditing(snapshot.editing ? cloneConfig(snapshot.editing) : null);
   }
 
   const onConnect = useCallback(
@@ -452,19 +484,20 @@ function ConfigEditor({ store, id, onBack, onStatusChange }: { store: ConfigStor
     if (kind === "route") {
       const name = uniqueName("route", (draft.routes || []).map((r) => r.name));
       const limens = limenNames(draft);
-      const value: Route = { name, limen: limens[0] || "", match: "PathPrefix(`/api`)", action: { forward: { service: "" } }, middlewares: [] };
+      const services = Object.keys(draft.services || {});
+      const value: Route = { name, limen: limens[0] || "", match: "PathPrefix(`/api`)", action: { forward: { service: services[0] || "" } }, middlewares: [] };
       mutate((prev) => ({ ...prev, routes: [...(prev.routes || []), value] }));
       const nid = nodeId("route", name);
       const desc = describe({ ...draft, routes: [...(draft.routes || []), value] }, "route", name);
       setNodes((old) => [...old, { id: nid, type: "janus", position: position || autoPosition("route", old.length), data: { kind, name, ...desc, onOpen: () => openEditor(nid), onOpenMiddleware: () => openRouteMiddleware(name) } }]);
-      setEditing({ kind: "route", name, value, isNew: true });
+      setEditing({ kind: "route", name, originalName: name, value, isNew: true });
     } else if (kind === "service") {
       const name = uniqueName("service", Object.keys(draft.services || {}));
       const value: Service = { upstreams: ["http://127.0.0.1:9000"], middlewares: [] };
       mutate((prev) => ({ ...prev, services: { ...(prev.services || {}), [name]: value } }));
       const nid = nodeId("service", name);
       setNodes((old) => [...old, { id: nid, type: "janus", position: position || autoPosition("service", old.length), data: { kind, name, subtitle: "1 upstream", detail: "0 middleware" } }]);
-      setEditing({ kind: "service", name, value, isNew: true });
+      setEditing({ kind: "service", name, originalName: name, value, isNew: true });
     }
   }
 
@@ -477,7 +510,7 @@ function ConfigEditor({ store, id, onBack, onStatusChange }: { store: ConfigStor
     const nid = nodeId("limen", name);
     const desc = describe({ ...draft, limens: { ...(draft.limens || {}), [name]: value } }, "limen", name);
     setNodes((old) => [...old, { id: nid, type: "janus", position: position || autoPosition("limen", old.length), data: { kind: "limen", name, ...desc, onOpen: () => openEditor(nid) } }]);
-    setEditing({ kind: "limen", name, value, isNew: true });
+    setEditing({ kind: "limen", name, originalName: name, value, isNew: true });
   }
 
   function onDrop(event: DragEvent) {
@@ -488,8 +521,12 @@ function ConfigEditor({ store, id, onBack, onStatusChange }: { store: ConfigStor
   }
 
   function openRouteMiddleware(routeName: string) {
-    openEditor(nodeId("route", routeName));
-    setMwManager({ scope: "route" });
+    const current = draftRef.current;
+    const route = current?.routes?.find((item) => item.name === routeName);
+    if (!route) return;
+    const editor: EditorState = { kind: "route", name: routeName, originalName: routeName, value: cloneConfig(route), isNew: false };
+    setEditing(editor);
+    openMiddlewareManager("route", editor);
   }
 
   function openEditor(nid: string) {
@@ -498,13 +535,13 @@ function ConfigEditor({ store, id, onBack, onStatusChange }: { store: ConfigStor
     if (!parsed || !draft) return;
     if (parsed.kind === "route") {
       const route = draft.routes?.find((r) => r.name === parsed.name);
-      if (route) setEditing({ kind: "route", name: parsed.name, value: cloneConfig(route), isNew: false });
+      if (route) setEditing({ kind: "route", name: parsed.name, originalName: parsed.name, value: cloneConfig(route), isNew: false });
     } else if (parsed.kind === "service") {
       const service = draft.services?.[parsed.name];
-      if (service) setEditing({ kind: "service", name: parsed.name, value: cloneConfig(service), isNew: false });
+      if (service) setEditing({ kind: "service", name: parsed.name, originalName: parsed.name, value: cloneConfig(service), isNew: false });
     } else {
       const limen = draft.limens?.[parsed.name];
-      if (limen) setEditing({ kind: "limen", name: parsed.name, value: cloneConfig(limen), isNew: false });
+      if (limen) setEditing({ kind: "limen", name: parsed.name, originalName: parsed.name, value: cloneConfig(limen), isNew: false });
     }
   }
 
@@ -513,11 +550,12 @@ function ConfigEditor({ store, id, onBack, onStatusChange }: { store: ConfigStor
     if (!editing || !draft) return;
     if (editing.kind === "limen") {
       const name = editing.name.trim();
+      const originalName = editing.originalName;
       if (!name) {
         store.setMessage("入口名称不能为空。");
         return;
       }
-      if (name !== editing.name && draft.limens?.[name]) {
+      if (name !== originalName && draft.limens?.[name]) {
         store.setMessage(`入口已存在：${name}`);
         return;
       }
@@ -543,24 +581,25 @@ function ConfigEditor({ store, id, onBack, onStatusChange }: { store: ConfigStor
         store.setMessage("HTTP/3 需要同时保留 HTTP/1.1 或 HTTP/2 作为 TCP 回退。");
         return;
       }
-      const createdName = editing.name;
       mutate((prev) => {
         const next = { ...(prev.limens || {}) };
-        if (name !== createdName) {
-          delete next[createdName];
+        if (name !== originalName) {
+          delete next[originalName];
           if (!editing.isNew) {
-            const rename = (limen: string) => (limen === createdName ? name : limen);
+            const rename = (limen: string) => (limen === originalName ? name : limen);
             return {
               ...prev,
               limens: { ...next, [name]: editing.value },
-              routes: (prev.routes || []).map((r) => (r.limen === createdName ? { ...r, limen: rename(r.limen || "") } : r)),
+              routes: (prev.routes || []).map((r) => (r.limen === originalName ? { ...r, limen: rename(r.limen || "") } : r)),
             };
           }
         }
         return { ...prev, limens: { ...next, [name]: editing.value } };
       });
-      if (name !== createdName) {
-        setNodes((old) => old.map((n) => (n.id === nodeId("limen", createdName) ? { ...n, id: nodeId("limen", name), data: { ...n.data, name } } : n)));
+      if (name !== originalName) {
+        const newID = nodeId("limen", name);
+        const description = describe(draftRef.current || draft, "limen", name);
+        setNodes((old) => old.map((n) => (n.id === nodeId("limen", originalName) ? { ...n, id: newID, data: { ...n.data, name, ...description, onOpen: () => openEditor(newID) } } : n)));
       }
       setEditing(null);
       return;
@@ -571,39 +610,58 @@ function ConfigEditor({ store, id, onBack, onStatusChange }: { store: ConfigStor
         store.setMessage("Route 名称不能为空。");
         return;
       }
-      if (editing.isNew && (draft.routes || []).some((r) => r.name === value.name)) {
+      // 新建节点会先以 editing.name 作为临时资源写入 draft，供画布和
+      // 嵌套编辑器即时预览。判重时必须排除这个临时资源。
+      if (editing.isNew && value.name !== editing.originalName && (draft.routes || []).some((r) => r.name === value.name)) {
         store.setMessage(`Route 已存在：${value.name}`);
         return;
       }
       mutate((prev) => {
         const list = [...(prev.routes || [])];
-        if (editing.isNew) list.push(value);
-        else {
-          const index = list.findIndex((r) => r.name === value.name);
-          if (index >= 0) list[index] = value;
-        }
+        const lookupName = editing.isNew ? editing.originalName : value.name;
+        const index = list.findIndex((r) => r.name === lookupName);
+        if (index >= 0) list[index] = value;
+        else list.push(value);
         return { ...prev, routes: list };
       });
       if (editing.isNew) {
-        const oldId = nodeId("route", editing.name);
+        const oldId = nodeId("route", editing.originalName);
         const newId = nodeId("route", value.name);
         if (oldId !== newId) {
-          setNodes((old) => old.map((n) => (n.id === oldId ? { ...n, id: newId, data: { ...n.data, name: value.name } } : n)));
+          const description = describe(draftRef.current || draft, "route", value.name);
+          setNodes((old) => old.map((n) => (n.id === oldId ? {
+            ...n,
+            id: newId,
+            data: {
+              ...n.data,
+              name: value.name,
+              ...description,
+              onOpen: () => openEditor(newId),
+              onOpenMiddleware: () => openRouteMiddleware(value.name),
+            },
+          } : n)));
         }
       }
     } else if (editing.kind === "service") {
       const name = editing.name.trim();
+      const originalName = editing.originalName;
       if (!name) {
         store.setMessage("Service 名称不能为空。");
         return;
       }
-      if (editing.isNew && draft.services?.[name]) {
+      if (editing.isNew && name !== originalName && draft.services?.[name]) {
         store.setMessage(`Service 已存在：${name}`);
         return;
       }
-      mutate((prev) => ({ ...prev, services: { ...(prev.services || {}), [name]: editing.value } }));
-      if (editing.isNew && name !== editing.name) {
-        setNodes((old) => old.map((n) => (n.id === nodeId("service", editing.name) ? { ...n, id: nodeId("service", name), data: { ...n.data, name } } : n)));
+      mutate((prev) => {
+        const services = { ...(prev.services || {}) };
+        if (editing.isNew && name !== originalName) delete services[originalName];
+        services[name] = editing.value;
+        return { ...prev, services };
+      });
+      if (editing.isNew && name !== originalName) {
+        const description = describe(draftRef.current || draft, "service", name);
+        setNodes((old) => old.map((n) => (n.id === nodeId("service", originalName) ? { ...n, id: nodeId("service", name), data: { ...n.data, name, ...description } } : n)));
       }
     }
     setEditing(null);
@@ -611,7 +669,7 @@ function ConfigEditor({ store, id, onBack, onStatusChange }: { store: ConfigStor
 
   function deleteEditing() {
     if (!editing || editing.kind === "limen") return;
-    const nid = nodeId(editing.kind, editing.name);
+    const nid = nodeId(editing.kind, editing.originalName);
     if (editing.isNew) {
       // 新建未确认：直接移除刚创建的节点与数据
       removeFlowNode(nid);
@@ -626,9 +684,14 @@ function ConfigEditor({ store, id, onBack, onStatusChange }: { store: ConfigStor
   // ---- 中间件管理弹窗的回调：class 实例化，instance 改参/改名/删除 ----
 
   /** 从 class 实例化一个具名定义，返回实例名（调用方决定是否加入 flow）。 */
-  function instantiateMiddleware(type: MwType): string | undefined {
+  function instantiateMiddleware(type: string): string | undefined {
     const draft = draftRef.current;
     if (!draft) return undefined;
+    const capability = middlewareCatalog.find((item) => item.type === type);
+    if (!capability) {
+      store.setMessage(`后端未提供 Middleware 类型：${type}`);
+      return undefined;
+    }
     const taken = Object.keys(draft.middlewares || {});
     let index = 1;
     let name = `${type}-${index}`;
@@ -636,7 +699,7 @@ function ConfigEditor({ store, id, onBack, onStatusChange }: { store: ConfigStor
       index += 1;
       name = `${type}-${index}`;
     }
-    mutate((prev) => ({ ...prev, middlewares: { ...(prev.middlewares || {}), [name]: classDefaults(type) } }));
+    mutate((prev) => ({ ...prev, middlewares: { ...(prev.middlewares || {}), [name]: createMiddlewareDefinition(capability) } }));
     return name;
   }
 
@@ -814,7 +877,7 @@ function routeCoreLabel(route: Route): string {
   async function save() {
     const draft = draftRef.current;
     if (!draft) return;
-    const problems = validateLocal(draft);
+    const problems = validateLocal(draft, middlewareCatalog);
     if (problems.length > 0) {
       store.setMessage(`本地检查未通过：${problems[0]}`);
       return false;
@@ -862,7 +925,7 @@ function routeCoreLabel(route: Route): string {
   async function validate() {
     const draft = draftRef.current;
     if (!draft) return;
-    const problems = validateLocal(draft);
+    const problems = validateLocal(draft, middlewareCatalog);
     if (problems.length > 0) {
       store.setMessage(`本地检查未通过：${problems[0]}`);
       return;
@@ -960,7 +1023,7 @@ function translateWarning(warning: string): string {
             <small>中间件在 Route / Service 的编辑器中新建、改参、排序。</small>
             <small>入口监听配置是启动级的，新增/修改后需重启；选中节点按 Backspace/Delete 删除，双击编辑。</small>
           </div>
-          <button type="button" className="btn ghost" onClick={() => setRegManager({ allowSelect: false })}>注册中心管理</button>
+          <button type="button" className="btn ghost" onClick={() => openRegistryManager(false)}>注册中心管理</button>
         </aside>
         <div className="flow-wrap" onDrop={onDrop} onDragOver={(e) => e.preventDefault()}>
           <ReactFlow
@@ -991,10 +1054,10 @@ function translateWarning(warning: string): string {
           isNew={editing.isNew}
           onChange={(value) => setEditing({ ...editing, value })}
           onConfirm={confirmEditing}
-          onCancel={() => { if (editing.isNew) removeFlowNode(nodeId("route", editing.name)); setEditing(null); }}
-          onClose={() => { if (editing.isNew) removeFlowNode(nodeId("route", editing.name)); setEditing(null); }}
+          onCancel={() => { if (editing.isNew) removeFlowNode(nodeId("route", editing.originalName)); setEditing(null); }}
+          onClose={() => { if (editing.isNew) removeFlowNode(nodeId("route", editing.originalName)); setEditing(null); }}
           onDelete={editing.isNew ? undefined : deleteEditing}
-          onOpenMiddlewareManager={() => setMwManager({ scope: "route" })}
+          onOpenMiddlewareManager={() => openMiddlewareManager("route")}
         />
       )}
       {editing?.kind === "service" && (
@@ -1006,11 +1069,11 @@ function translateWarning(warning: string): string {
           onName={editing.isNew ? (name) => setEditing({ ...editing, name }) : undefined}
           onChange={(value) => setEditing({ ...editing, value })}
           onConfirm={confirmEditing}
-          onCancel={() => { if (editing.isNew) removeFlowNode(nodeId("service", editing.name)); setEditing(null); }}
-          onClose={() => { if (editing.isNew) removeFlowNode(nodeId("service", editing.name)); setEditing(null); }}
+          onCancel={() => { if (editing.isNew) removeFlowNode(nodeId("service", editing.originalName)); setEditing(null); }}
+          onClose={() => { if (editing.isNew) removeFlowNode(nodeId("service", editing.originalName)); setEditing(null); }}
           onDelete={editing.isNew ? undefined : deleteEditing}
-          onOpenMiddlewareManager={() => setMwManager({ scope: "service" })}
-          onOpenRegistryManager={() => setRegManager({ allowSelect: true })}
+          onOpenMiddlewareManager={() => openMiddlewareManager("service")}
+          onOpenRegistryManager={() => openRegistryManager(true)}
         />
       )}
       {editing?.kind === "limen" && (
@@ -1022,8 +1085,8 @@ function translateWarning(warning: string): string {
           onName={(name) => setEditing({ ...editing, name })}
           onChange={(value) => setEditing({ ...editing, value })}
           onConfirm={confirmEditing}
-          onCancel={() => { if (editing.isNew) removeFlowNode(nodeId("limen", editing.name)); setEditing(null); }}
-          onClose={() => { if (editing.isNew) removeFlowNode(nodeId("limen", editing.name)); setEditing(null); }}
+          onCancel={() => { if (editing.isNew) removeFlowNode(nodeId("limen", editing.originalName)); setEditing(null); }}
+          onClose={() => { if (editing.isNew) removeFlowNode(nodeId("limen", editing.originalName)); setEditing(null); }}
           onDelete={editing.isNew ? undefined : deleteEditing}
           onStageLimens={stageSavedLimens}
         />
@@ -1034,6 +1097,7 @@ function translateWarning(warning: string): string {
           scope={mwManager.scope}
           coreLabel={editing.kind === "route" ? routeCoreLabel(editing.value) : `Service ${editing.name} → 上游`}
           instances={draft.middlewares || {}}
+          catalog={middlewareCatalog}
           flow={editing.value.middlewares || []}
           onFlowChange={(flow) => {
             if (editing.kind === "route") setEditing({ ...editing, value: { ...editing.value, middlewares: flow } });
@@ -1043,7 +1107,15 @@ function translateWarning(warning: string): string {
           onUpdateInstance={updateMiddlewareInstance}
           onDeleteInstance={removeMiddlewareDef}
           onRenameInstance={renameMiddlewareInstance}
-          onClose={() => setMwManager(null)}
+          onConfirm={() => {
+            setMwManager(null);
+            store.setMessage("中间件修改已保留；请继续确认当前节点。");
+          }}
+          onCancel={() => {
+            restoreManager(mwManager.snapshot);
+            setMwManager(null);
+            store.setMessage("已撤销本次中间件修改。");
+          }}
           notify={store.setMessage}
         />
       )}
@@ -1057,7 +1129,15 @@ function translateWarning(warning: string): string {
           onRenameNew={renameNewRegistry}
           onUpdate={updateRegistry}
           onDelete={deleteRegistry}
-          onClose={() => setRegManager(null)}
+          onConfirm={() => {
+            setRegManager(null);
+            store.setMessage("Registry 修改已写入当前配置草稿。");
+          }}
+          onCancel={() => {
+            restoreManager(regManager.snapshot);
+            setRegManager(null);
+            store.setMessage("已撤销本次 Registry 修改。");
+          }}
           notify={store.setMessage}
         />
       )}

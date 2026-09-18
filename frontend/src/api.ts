@@ -1,4 +1,4 @@
-import { ApiError, type ConfigSnapshot, type JanusConfig, type MetricsSummary, type NacosRegistry } from "./types";
+import { ApiError, type ConfigSnapshot, type JanusConfig, type MetricsSummary, type MiddlewareCapability, type NacosRegistry } from "./types";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
@@ -66,6 +66,10 @@ export function getMetrics(): Promise<MetricsSummary> {
 
 export function getDiscovery(): Promise<{ revision: number; services: Record<string, unknown> }> {
   return request("/api/v1/discovery");
+}
+
+export function getMiddlewareCapabilities(): Promise<{ middlewares: MiddlewareCapability[] }> {
+  return request("/api/v1/capabilities/middlewares");
 }
 
 export function testRegistry(

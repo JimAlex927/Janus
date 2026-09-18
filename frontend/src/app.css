@@ -71,15 +71,21 @@ input:focus, select:focus, textarea:focus { outline: 2px solid #c7d0ff; border-c
 .col-action { white-space: nowrap; width: 130px; }
 .empty { background: #fff; border: 1px dashed #d4d9e3; border-radius: 12px; padding: 30px; text-align: center; }
 
-/* drawer */
-.backdrop { position: fixed; inset: 0; background: rgba(17, 24, 39, 0.45); display: flex; justify-content: flex-end; z-index: 50; }
-.drawer { width: min(560px, 100%); background: #fff; height: 100%; display: flex; flex-direction: column; animation: slide-in 0.15s ease-out; }
-@keyframes slide-in { from { transform: translateX(24px); opacity: 0.6; } to { transform: none; opacity: 1; } }
-.drawer-head { display: flex; justify-content: space-between; gap: 12px; padding: 18px 20px 12px; border-bottom: 1px solid #eef0f5; }
-.drawer-head h3 { margin: 4px 0 0; font-size: 17px; }
+/* shared editor dialog */
+.backdrop { position: fixed; inset: 0; background: rgba(17, 24, 39, 0.48); display: flex; align-items: center; justify-content: center; padding: 20px; z-index: 50; backdrop-filter: blur(2px); }
+.drawer { width: min(680px, 100%); max-height: calc(100vh - 40px); background: #fff; border: 1px solid #e5e9f2; border-radius: 16px; box-shadow: 0 24px 70px rgba(15, 23, 42, 0.22); display: flex; flex-direction: column; overflow: hidden; animation: dialog-in 0.16s ease-out; }
+@keyframes dialog-in { from { transform: translateY(10px) scale(.985); opacity: 0.55; } to { transform: none; opacity: 1; } }
+.drawer-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; padding: 20px 22px 16px; border-bottom: 1px solid #eef0f5; background: #fff; }
+.drawer-head > div:first-child { min-width: 0; }
+.drawer-head h3 { margin: 4px 0 0; font-size: 18px; line-height: 1.3; }
+.drawer-head p { margin: 7px 0 0; max-width: 560px; color: #7c8496; font-size: 12px; line-height: 1.5; }
 .drawer-head-actions { display: flex; gap: 8px; align-items: flex-start; }
-.drawer-body { padding: 16px 20px; overflow: auto; display: grid; gap: 12px; flex: 1; }
-.drawer-foot { display: flex; justify-content: flex-end; gap: 8px; padding: 14px 20px; border-top: 1px solid #eef0f5; }
+.icon-button { width: 34px; height: 34px; flex: 0 0 auto; display: grid; place-items: center; border: 1px solid transparent; border-radius: 9px; background: #f5f7fb; color: #6b7280; font-size: 20px; line-height: 1; cursor: pointer; }
+.icon-button:hover { color: #111827; border-color: #dce1eb; background: #fff; }
+.drawer-body { padding: 20px 22px 24px; overflow: auto; display: grid; grid-template-columns: minmax(0, 1fr); gap: 15px; flex: 1; align-content: start; }
+.drawer-foot { display: flex; justify-content: flex-end; gap: 9px; padding: 14px 22px; border-top: 1px solid #eef0f5; background: #fafbfe; }
+.drawer-foot .btn { min-width: 84px; justify-content: center; }
+.form-note { margin: 0; padding: 10px 12px; border-radius: 9px; background: #f5f7ff; color: #5f6880; font-size: 12px; line-height: 1.55; }
 .field { display: grid; gap: 6px; font-size: 13px; }
 .field-label { font-weight: 600; font-size: 13px; display: grid; gap: 2px; }
 .field-label small, .field small { color: #9aa1b3; font-weight: 400; }
@@ -116,6 +122,46 @@ input:focus, select:focus, textarea:focus { outline: 2px solid #c7d0ff; border-c
 .login-shell { min-height: 100vh; display: grid; place-items: center; background: #f5f7fb; }
 .login-card { background: #fff; border: 1px solid #e9ecf3; border-radius: 14px; padding: 30px; width: min(380px, 92vw); display: grid; gap: 10px; }
 .login-card h2 { margin-top: 8px; }
+
+/* split login: coastal pelican scene left, form right */
+.login-split { min-height: 100vh; display: flex; background: #fbf8ef; color: #233f43; }
+.login-scene-pane { flex: 1; min-width: 0; position: relative; display: flex; flex-direction: column; padding: 28px 0 0; overflow: hidden; }
+.login-brand { display: flex; align-items: center; gap: 10px; padding: 0 4vw; }
+.login-brand strong { display: block; font-size: 17px; letter-spacing: 2px; }
+.login-brand small { color: #637777; font-size: 10px; letter-spacing: 2px; }
+.login-form-pane { width: 430px; flex-shrink: 0; display: grid; place-items: center; padding: 32px; background: #fbf8ef; border-left: 1px solid #233f4320; }
+.login-form-pane .login-card { width: 100%; border-color: #c9d1c8; box-shadow: 0 18px 50px rgba(35, 63, 67, 0.10); }
+.login-form-pane .btn.primary { background: #233f43; border-color: #233f43; border-radius: 30px; padding: 11px 15px; }
+
+/* pelican scene */
+.pelican-pane { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 0 2vw; }
+.pelican-scene { flex: 1; min-height: 0; width: 100%; }
+.pelican-scene * { transform-box: view-box; }
+.pelican-cloud-a { animation: pelican-float 9s ease-in-out infinite alternate; }
+.pelican-cloud-b { animation: pelican-float 12s ease-in-out infinite alternate-reverse; }
+.pelican-bird { animation: pelican-bird 3s ease-in-out infinite; }
+.pelican-bird-second { animation-delay: -1.5s; }
+.pelican-scarf-tip { transform-origin: 514px 236px; animation: pelican-scarf 0.8s ease-in-out infinite alternate; }
+.pelican-breeze { animation: pelican-breeze 2.4s ease-in-out infinite; }
+.pelican-breeze-two { animation-delay: -1.2s; }
+@keyframes pelican-float { to { transform: translate(18px, -6px); } }
+@keyframes pelican-bird { 50% { transform: translateY(-7px); } }
+@keyframes pelican-scarf { to { transform: rotate(5deg); } }
+@keyframes pelican-breeze { 0%, 100% { opacity: 0.2; } 50% { opacity: 0.85; } }
+.pelican-controls { display: flex; align-items: center; justify-content: flex-end; gap: 10px; padding: 12px 2vw 18px; }
+.pelican-controls button { border: 1px solid #cbd3ca; background: transparent; color: #233f43; font-size: 11px; border-radius: 30px; padding: 9px 15px; cursor: pointer; }
+.pelican-controls button:hover { background: #e8eddf; }
+.pelican-controls button.primary { background: #233f43; border-color: #233f43; color: #fbf8ef; min-width: 105px; justify-content: center; }
+.pelican-status { display: flex; align-items: center; gap: 7px; margin-right: 8px; font-size: 10px; letter-spacing: 1px; color: #7e8d83; }
+.pelican-status i { height: 5px; width: 5px; background: #87a47a; border-radius: 50%; }
+@media (max-width: 900px) {
+  .login-split { flex-direction: column; }
+  .login-form-pane { width: auto; border-left: 0; border-top: 1px solid #233f4320; }
+  .pelican-pane { min-height: 52vh; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pelican-cloud-a, .pelican-cloud-b, .pelican-bird, .pelican-scarf-tip, .pelican-breeze { animation: none; }
+}
 
 @media (max-width: 900px) {
   .side { display: none; }
@@ -197,10 +243,12 @@ input:focus, select:focus, textarea:focus { outline: 2px solid #c7d0ff; border-c
 .reg-instance-select { all: unset; display: grid; gap: 2px; cursor: pointer; flex: 1; min-width: 0; text-align: left; }
 .reg-instance-select strong { font-size: 13px; }
 .reg-instance-select small { color: #9aa1b3; font-size: 11px; }
+.reg-instance-item .mw-order-actions { flex: 0 0 auto; }
+.reg-instance-item .mw-order-actions button { width: auto; min-width: 44px; padding: 0 8px; white-space: nowrap; }
+.reg-instance-item .mw-order-actions button.danger { min-width: 28px; width: 28px; padding: 0; }
 
 /* middleware manager modal */
-.mw-modal { width: min(880px, 94vw); max-height: 88vh; background: #fff; border-radius: 14px; display: flex; flex-direction: column; margin: auto; }
-.backdrop { align-items: center; }
+.mw-modal { width: min(960px, 100%); max-height: calc(100vh - 40px); background: #fff; border: 1px solid #e5e9f2; border-radius: 16px; box-shadow: 0 24px 70px rgba(15, 23, 42, 0.22); display: flex; flex-direction: column; overflow: hidden; margin: auto; animation: dialog-in 0.16s ease-out; }
 .mw-modal-body { display: flex; min-height: 0; flex: 1; }
 .mw-tabs { width: 190px; flex-shrink: 0; border-right: 1px solid #eef0f5; padding: 14px 10px; display: flex; flex-direction: column; gap: 6px; }
 .mw-tabs button { border: 0; background: none; text-align: left; padding: 10px 12px; border-radius: 9px; color: #6b7280; font-size: 13px; cursor: pointer; }
@@ -255,3 +303,12 @@ input:focus, select:focus, textarea:focus { outline: 2px solid #c7d0ff; border-c
 .mw-stack-head small { color: #9aa1b3; }
 .mw-stack-inner { display: grid; }
 .mw-stack-core { border: 2px dashed #c7ccda; border-radius: 10px; padding: 14px; text-align: center; color: #6b7280; font-size: 12px; }
+
+@media (max-width: 900px) {
+  .backdrop { padding: 0; align-items: flex-end; }
+  .drawer, .mw-modal { width: 100%; max-height: 96vh; border-radius: 16px 16px 0 0; }
+  .mw-modal-body { flex-direction: column; }
+  .mw-tabs { width: auto; border-right: 0; border-bottom: 1px solid #eef0f5; flex-direction: row; overflow-x: auto; }
+  .mw-tabs p { display: none; }
+  .mw-instance { grid-template-columns: 1fr; }
+}

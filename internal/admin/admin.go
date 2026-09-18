@@ -104,6 +104,7 @@ func NewHandlerWithOptions(options Options) http.Handler {
 	mux.HandleFunc("/api/v1/discovery", h.discoveryStatus)
 	mux.HandleFunc("/api/v1/discovery/registries/health", h.registryHealthCheck)
 	mux.HandleFunc("/api/v1/metrics", h.metricsSummary)
+	mux.HandleFunc("/api/v1/capabilities/middlewares", h.middlewareCapabilities)
 	mux.HandleFunc("/api/v1/config", h.configHandler)
 	mux.HandleFunc("/api/v1/config/validate", h.validate)
 	mux.HandleFunc("/api/v1/config/publish", h.publishConfig)
@@ -291,6 +292,19 @@ func (h *Handler) metricsSummary(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, h.metrics.Summary())
+}
+
+func (h *Handler) middlewareCapabilities(w http.ResponseWriter, r *http.Request) {
+	if !allowMethod(w, r, http.MethodGet) {
+		return
+	}
+	if !h.guard(r) {
+		http.Error(w, "authentication required", http.StatusUnauthorized)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"middlewares": config.MiddlewareCapabilities(),
+	})
 }
 func (h *Handler) configHandler(w http.ResponseWriter, r *http.Request) {
 	if !allowMethod(w, r, http.MethodGet) || h.current == nil {

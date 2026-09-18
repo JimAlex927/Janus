@@ -1,13 +1,17 @@
-import type { JanusConfig } from "./types";
+import type { JanusConfig, Middleware, MiddlewareCapability } from "./types";
 import { routeService } from "./model";
 
 /** 前端本地快速检查：只拦截明显会 422 的问题，细则以后端校验为准。 */
-export function validateLocal(config: JanusConfig): string[] {
+export function validateLocal(config: JanusConfig, catalog: MiddlewareCapability[] = []): string[] {
   const errors: string[] = [];
   const routes = config.routes || [];
   const services = config.services || {};
   const middlewares = config.middlewares || {};
   const limens = config.limens || {};
+  const capabilityOf = (def: Middleware) => {
+    const type = Object.keys(def).find((key) => key !== "scope");
+    return catalog.find((item) => item.type === type);
+  };
 
   if (routes.length === 0) errors.push("至少需要 1 条 Route");
   const seen = new Set<string>();
@@ -32,7 +36,9 @@ export function validateLocal(config: JanusConfig): string[] {
       const def = middlewares[name];
       if (!def) { errors.push(`Route ${route.name} 引用的 Middleware 不存在：${name}`); continue; }
       if (def.scope === "service") errors.push(`Route ${route.name} 不能引用 service 专用 Middleware：${name}`);
-      if (def.in_flight) errors.push(`Route ${route.name} 不能引用 in_flight Middleware：${name}`);
+      const capability = capabilityOf(def);
+      if (catalog.length > 0 && !capability) errors.push(`Middleware ${name} 的类型不受当前后端支持`);
+      else if (capability && !capability.scopes.includes("route")) errors.push(`Route ${route.name} 不能引用 ${capability.type} Middleware：${name}`);
     }
   }
   for (const [name, service] of Object.entries(services)) {
@@ -42,7 +48,12 @@ export function validateLocal(config: JanusConfig): string[] {
     if (svc.nacos && !svc.nacos.service_name) errors.push(`Service ${name} 的 nacos 缺少 service_name`);
     if (svc.nacos && svc.health_check) errors.push(`Service ${name} 使用 Nacos 时暂不支持 health_check`);
     for (const mw of svc.middlewares || []) {
-      if (!middlewares[mw]) errors.push(`Service ${name} 引用的 Middleware 不存在：${mw}`);
+      const def = middlewares[mw];
+      if (!def) { errors.push(`Service ${name} 引用的 Middleware 不存在：${mw}`); continue; }
+      if (def.scope === "route") errors.push(`Service ${name} 不能引用 route 专用 Middleware：${mw}`);
+      const capability = capabilityOf(def);
+      if (catalog.length > 0 && !capability) errors.push(`Middleware ${mw} 的类型不受当前后端支持`);
+      else if (capability && !capability.scopes.includes("service")) errors.push(`Service ${name} 不能引用 ${capability.type} Middleware：${mw}`);
     }
   }
   return errors.slice(0, 12);
