@@ -2052,6 +2052,29 @@ Verification:
 
 ## 2026-09-18
 
+### Specify the JWT middleware boundary
+
+Commit message: `docs: define jwt middleware design boundary`
+
+Scope:
+
+- Recorded why JWT fits Route and Service middleware while keeping token
+  verification out of the current production catalog until its security and
+  lifecycle contract is implemented.
+- Defined the proposed key sources, algorithm allowlist, bounded parsing,
+  issuer/audience/time checks, generic 401 behavior, CORS preflight ordering,
+  streaming-protocol behavior and deferred claim-to-header forwarding.
+- Added staged implementation and production acceptance criteria, and linked
+  the design from the architecture and delivery plan.
+
+Verification:
+
+- Reviewed the design against the current middleware factory, runtime
+  generation ownership and dynamic capability endpoint
+- `git diff --check`
+
+## 2026-09-18
+
 ### Restore editable Limen configuration in the console
 
 Commit message: `fix(console): make limen settings editable`

@@ -297,6 +297,16 @@ early-error integration coverage, configuration examples and the full repository
 test/vet/build gates. This does not certify the overall
 gateway for production; Phase 6 qualification remains required.
 
+### Next policy candidate: JWT authentication
+
+JWT is a viable Route/Service middleware candidate, but it is intentionally not
+shipped yet. Authentication needs a reviewed key-source and algorithm contract,
+bounded parsing, issuer/audience and time-claim checks, generic 401 behavior,
+key rotation ownership, and tests across ordinary HTTP, SSE and WebSocket
+upgrades. The design and acceptance boundary are recorded in
+[jwt-middleware.md](jwt-middleware.md). The backend capability catalog must not
+list `jwt` until its verifier is implemented and those lifecycle tests pass.
+
 ## Phase 3: admission and lifecycle — complete
 
 1. Fixed global admission and a service-scoped `in_flight` policy are implemented.
