@@ -86,6 +86,10 @@ not build a duplicate generation.
 - `全局设置`编辑生效配置文件的 settings 段。保存只做校验并写文件，
   不触碰运行中的 generation，保存后必须重启 Janus。
 
+在宽度小于 900px 的窄屏设备上，桌面侧栏会替换为标题下方的横向主导航，
+因此 `概览`、`Config` 与 `全局设置` 仍可直接访问；画布和编辑器保持单列、
+可纵向滚动的布局。
+
 Visual edits stay in a browser draft until saved to the library; publishing a
 record immediately replaces the running generation.
 

@@ -23,6 +23,11 @@ export function App() {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [configsTick, setConfigsTick] = useState(0);
 
+  function navigate(next: Page) {
+    setPage(next);
+    if (next !== "configs") setEditingId(null);
+  }
+
   if (store.status === "loading" || store.status === "error") {
     return (
       <div className="login-shell">
@@ -54,22 +59,7 @@ export function App() {
             <small>GATEWAY CONSOLE</small>
           </div>
         </div>
-        <nav>
-          {NAV.map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              className={page === item.id ? "active" : ""}
-              onClick={() => {
-                setPage(item.id);
-                if (item.id !== "configs") setEditingId(null);
-              }}
-            >
-              <span className="nav-dot" />
-              {item.label}
-            </button>
-          ))}
-        </nav>
+        <nav><Navigation page={page} onNavigate={navigate} /></nav>
         <div className="side-foot">
           <span className="status-dot" />
           运行中
@@ -98,6 +88,9 @@ export function App() {
             </button>
           </div>
         </header>
+        <nav className="mobile-nav" aria-label="主要导航">
+          <Navigation page={page} onNavigate={navigate} />
+        </nav>
         {store.message && (
           <div className="toast">
             {store.message}
@@ -124,6 +117,19 @@ export function App() {
         {page === "settings" && <SettingsPage store={store} />}
       </main>
     </div>
+  );
+}
+
+function Navigation({ page, onNavigate }: { page: Page; onNavigate: (page: Page) => void }) {
+  return (
+    <>
+      {NAV.map((item) => (
+        <button key={item.id} type="button" className={page === item.id ? "active" : ""} onClick={() => onNavigate(item.id)}>
+          <span className="nav-dot" />
+          {item.label}
+        </button>
+      ))}
+    </>
   );
 }
 

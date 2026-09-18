@@ -1883,3 +1883,30 @@ Verification:
 - `cd frontend; npm run build`
 - Compared the frontend bundle and embedded bundle SHA-256 hashes
 - `git diff --check`
+
+## 2026-09-18
+
+### Restore mobile console navigation
+
+Commit message: `fix(console): restore mobile navigation access`
+
+Scope:
+
+- Added a compact horizontal navigation bar below the header for viewports below
+  900px, where the desktop sidebar is intentionally hidden.
+- Centralized page navigation state so the desktop sidebar and mobile bar use
+  the same page transition behavior and always clear an open canvas editor in
+  the same way.
+- Refreshed the embedded JS and CSS assets and documented the responsive
+  console behavior.
+
+Verification:
+
+- `go test ./...`
+- `go vet ./...`
+- `cd frontend; npm run build`
+- Compared frontend and embedded JS/CSS SHA-256 hashes
+- Browser smoke at narrow width: navigated Overview → Config → canvas;
+  opened the Route Middleware manager; verified backend-provided Class entries,
+  Route Scope type filtering, Header/Query matcher controls, and cancel rollback
+- `git diff --check`
