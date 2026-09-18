@@ -3,7 +3,9 @@
 This document records the purpose, scope, and verification for each Janus
 repository commit. Add a new dated section before every future commit.
 
-## 2026-09-18 — Nacos discovery core (working tree)
+## 2026-09-18 — Nacos discovery core
+
+Commit: `6fa8045` (`feat(discovery): add Nacos-backed dynamic services`).
 
 Baseline committed before implementation: `705234e`
 (`feat(admin): add embedded visual configuration console`).
@@ -28,13 +30,31 @@ runtime failed to initialize with a ThreadSanitizer allocation error (87);
 race checks must be rerun on Linux. Real Nacos cluster integration remains
 a separate deployment acceptance step.
 
-The next working-tree change adds the authenticated `GET /api/v1/discovery`
-endpoint and its Admin regression test, exposing only the Runtime's local
-discovery snapshot for the console.
+## 2026-09-18 — Admin discovery status
 
-The configuration examples were then expanded with single-namespace,
-multi-namespace, and mixed static/Nacos files. Each new Nacos example passes
-`go run ./cmd/janus -check`; `-check` intentionally does not connect to Nacos.
+Commit: `e7ace51` (`feat(admin): expose discovery runtime status`).
+
+Scope:
+
+- Added authenticated `GET /api/v1/discovery`, exposing only the Runtime's
+  local discovery snapshot and active configuration revision.
+- Added Admin and discovery-manager regression tests for authentication,
+  invalid factory results, nil cancellation functions, and idempotent release.
+
+Verification: targeted Admin, discovery, Runtime, and command tests plus vet
+passed; the subsequent full `go test ./...` and `go vet ./...` also passed.
+
+## 2026-09-18 — Nacos configuration examples
+
+Commit: `8b4f58d` (`docs(config): add Nacos configuration examples`).
+
+Scope:
+
+- Added single-namespace, multi-namespace, and mixed static/Nacos examples.
+- Updated README and Nacos documentation with the example matrix and startup
+  credential/port notes.
+- Each new example passes `go run ./cmd/janus -check`; `-check` intentionally
+  does not connect to Nacos.
 
 ## 2026-09-17
 
