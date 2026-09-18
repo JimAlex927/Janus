@@ -1910,3 +1910,36 @@ Verification:
   opened the Route Middleware manager; verified backend-provided Class entries,
   Route Scope type filtering, Header/Query matcher controls, and cancel rollback
 - `git diff --check`
+
+## 2026-09-18
+
+### Make console publication atomic and revision-safe
+
+Commit message: `fix(publish): make console publication atomic`
+
+Scope:
+
+- Reworked Runtime publication so a console candidate is built and persisted
+  before it becomes the active generation. A persistence failure now closes
+  only the candidate; it cannot expose the candidate to traffic or roll back a
+  newer publish.
+- Added a Runtime revision precondition at the serialized replacement boundary
+  and propagated it through both direct JSON publication and named
+  configuration-library publication.
+- Updated Config and canvas editor clients to send the current revision, reload
+  after a successful library publish, and explain a revision conflict without
+  discarding the saved draft.
+- Added regression coverage for stale revisions, publish races reported by the
+  atomic Runtime, persistence failure resource release, and the invariant that
+  a candidate cannot receive traffic before its configuration is durable.
+- Refreshed the embedded console release bundle and documented the revised
+  publication lifecycle.
+
+Verification:
+
+- `go test ./...`
+- `go vet ./...`
+- `go test -race ./internal/runtime ./internal/admin ./cmd/janus`
+- `cd frontend; npm run build`
+- Compared every frontend release asset and `index.html` with its embedded copy
+- `git diff --check`

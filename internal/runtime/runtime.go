@@ -26,6 +26,7 @@ var (
 	ErrClosed               = errors.New("runtime is closed")
 	ErrRetiredLimit         = errors.New("runtime retired generation limit reached")
 	ErrStartupConfigChanged = errors.New("runtime startup settings cannot change during replacement")
+	ErrRevisionConflict     = errors.New("runtime configuration revision conflict")
 )
 
 const maxRetiredGenerations = 8
@@ -374,8 +375,31 @@ func (r *Runtime) StopAccepting() {
 
 // Replace validates and publishes a new in-memory route/service generation.
 // Listener, server, request, backend-transport, and global timeout settings
-// are startup-owned in 2B and cannot change through this method.
+// are startup-owned and cannot change through this method.
 func (r *Runtime) Replace(c config.Config) error {
+	return r.replace(c, nil, nil)
+}
+
+// ReplaceAndPersist builds a candidate generation, persists its configuration,
+// and only then makes that generation active. expectedRevision provides an
+// optimistic-concurrency boundary for control-plane callers: the candidate is
+// not built or persisted if another publish has already advanced Runtime.
+//
+// persist runs while replacement is serialized with reload and shutdown. It
+// must persist the supplied configuration atomically and must not call Runtime.
+// If it returns an error, the active generation and Runtime configuration are
+// left unchanged and the candidate is closed.
+func (r *Runtime) ReplaceAndPersist(c config.Config, expectedRevision uint64, persist func(config.Config) error) error {
+	if persist == nil {
+		return errors.New("runtime persistence callback is nil")
+	}
+	return r.replace(c, &expectedRevision, persist)
+}
+
+// replace implements both ordinary reloads and control-plane publication.
+// Holding updateMu from validation through persistence prevents a failed file
+// write from racing a later replacement and rolling back a newer generation.
+func (r *Runtime) replace(c config.Config, expectedRevision *uint64, persist func(config.Config) error) error {
 	r.updateMu.Lock()
 	defer r.updateMu.Unlock()
 
@@ -392,6 +416,10 @@ func (r *Runtime) Replace(c config.Config) error {
 		r.mu.Unlock()
 		return ErrClosed
 	}
+	if expectedRevision != nil && r.revision.Load() != *expectedRevision {
+		r.mu.Unlock()
+		return ErrRevisionConflict
+	}
 	//如果旧的generation 并且没有关闭的已经达到了8个 就拒绝重载
 	if len(r.retired) >= maxRetiredGenerations {
 		r.mu.Unlock()
@@ -404,26 +432,30 @@ func (r *Runtime) Replace(c config.Config) error {
 		return err
 	}
 
-	r.mu.Lock()
-	if r.closed {
-		r.mu.Unlock()
-		candidate.generation.Close()
-		return ErrClosed
+	// Persist before publishing the candidate. updateMu prevents Close or a
+	// second replacement from interleaving between this file write and the swap.
+	if persist != nil {
+		if err := persist(c); err != nil {
+			candidate.generation.Close()
+			return err
+		}
 	}
+
+	r.mu.Lock()
 	//提交 主要是为了限速器 limiter提交
 	candidate.commit()
 	//然后替换active
 	old := r.active
 	r.active = candidate
 	shouldCloseOld := r.retireLocked(old)
+	// Active handler, its configuration snapshot, and revision change as one
+	// critical section. Readers never observe a new generation with old config.
+	r.config = c
+	newRevision := r.revision.Add(1)
 	r.mu.Unlock()
 	if shouldCloseOld {
 		old.generation.Close()
 	}
-	r.mu.Lock()
-	r.config = c
-	newRevision := r.revision.Add(1)
-	r.mu.Unlock()
 	r.publish(Event{Type: "generation_changed", Revision: newRevision, At: time.Now().UTC()})
 	return nil
 }

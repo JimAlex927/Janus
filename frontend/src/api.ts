@@ -129,8 +129,11 @@ export function deleteStoredConfig(id: number): Promise<{ ok: boolean }> {
   return request(`/api/v1/configs/${id}`, { method: "DELETE" });
 }
 
-export function publishStoredConfig(id: number): Promise<{ ok: boolean; revision: number; warning?: string }> {
-  return request(`/api/v1/configs/${id}/publish`, { method: "POST" });
+export function publishStoredConfig(id: number, revision: number): Promise<{ ok: boolean; revision: number; warning?: string }> {
+  return request(`/api/v1/configs/${id}/publish`, {
+    method: "POST",
+    headers: { "X-Janus-Revision": String(revision) },
+  });
 }
 
 export function stageLimens(id: number): Promise<{ ok: boolean; restart_required: boolean; warning?: string }> {

@@ -148,7 +148,15 @@ export function ConfigsPage({ store, onEdit }: { store: ConfigStore; onEdit: (id
   async function publishConfig(id: number) {
     if (!window.confirm("发布此配置？当前生效配置将被替换。")) return;
     try {
-      const res = await fetch(`/api/v1/configs/${id}/publish`, { method: "POST" });
+      const res = await fetch(`/api/v1/configs/${id}/publish`, {
+        method: "POST",
+        headers: { "X-Janus-Revision": String(store.revision) },
+      });
+      if (res.status === 409) {
+        await store.load(true);
+        store.setMessage("版本冲突：远端已被他人更新。已刷新当前配置，请确认后再发布。");
+        return;
+      }
       if (!res.ok) {
         const text = await res.text();
         let msg = text;

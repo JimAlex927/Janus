@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"janus/internal/config"
+	janusruntime "janus/internal/runtime"
 	"janus/internal/store"
 )
 
@@ -337,6 +338,10 @@ func (h *Handler) publishStoredConfig(w http.ResponseWriter, r *http.Request, id
 		http.Error(w, "authentication required", http.StatusUnauthorized)
 		return
 	}
+	expectedRevision, ok := h.expectedRevision(w, r)
+	if !ok {
+		return
+	}
 	if !h.requireLibrary(w) {
 		return
 	}
@@ -360,7 +365,11 @@ func (h *Handler) publishStoredConfig(w http.ResponseWriter, r *http.Request, id
 		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"ok": false, "error": err.Error()})
 		return
 	}
-	if err := h.publish(candidate); err != nil {
+	if err := h.publish(candidate, expectedRevision); err != nil {
+		if errors.Is(err, janusruntime.ErrRevisionConflict) {
+			http.Error(w, "configuration revision conflict", http.StatusConflict)
+			return
+		}
 		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"ok": false, "error": err.Error()})
 		return
 	}
@@ -422,6 +431,7 @@ func (h *Handler) stageLimens(w http.ResponseWriter, r *http.Request, id int64) 
 	}
 	writeJSON(w, http.StatusOK, result)
 }
+
 // saveSettings validates and atomically rewrites the active file with new
 // process settings. The running generation is intentionally untouched:
 // listener and process-wide settings cannot be hot-reloaded, so the operator

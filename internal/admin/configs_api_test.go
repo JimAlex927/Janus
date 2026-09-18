@@ -6,11 +6,13 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
 	"golang.org/x/crypto/bcrypt"
 	"janus/internal/config"
+	janusruntime "janus/internal/runtime"
 	"janus/internal/store"
 )
 
@@ -43,9 +45,11 @@ func openTestLibrary(t *testing.T) *store.Store {
 }
 
 type libraryFixture struct {
-	handler   http.Handler
-	cookie    *http.Cookie
-	published *config.Config
+	handler    http.Handler
+	cookie     *http.Cookie
+	published  *config.Config
+	revision   uint64
+	publishErr error
 }
 
 func newLibraryFixture(t *testing.T) *libraryFixture {
@@ -56,14 +60,26 @@ func newLibraryFixture(t *testing.T) *libraryFixture {
 	}
 	current := testVersionedConfig()
 	current.Settings.Admin = config.AdminSettings{Username: "admin", PasswordHash: string(hash)}
-	fixture := &libraryFixture{published: &config.Config{}}
+	fixture := &libraryFixture{published: &config.Config{}, revision: 1}
 	library := openTestLibrary(t)
 	fixture.handler = NewHandlerWithOptions(Options{
-		State:   NewState(),
-		Current: func() config.Config { return current },
-		Publish: func(candidate config.Config) error {
+		State:    NewState(),
+		Current:  func() config.Config { return current },
+		Revision: func() uint64 { return fixture.revision },
+		Publish: func(candidate config.Config, expectedRevision uint64) error {
+			if expectedRevision != fixture.revision {
+				return janusruntime.ErrRevisionConflict
+			}
+			if fixture.publishErr != nil {
+				return fixture.publishErr
+			}
+			if err := candidate.Validate(); err != nil {
+				return err
+			}
 			*fixture.published = candidate
-			return candidate.Validate()
+			current = candidate
+			fixture.revision++
+			return nil
 		},
 		Library: library,
 		SaveActive: func(updated config.Config) error {
@@ -83,10 +99,17 @@ func newLibraryFixture(t *testing.T) *libraryFixture {
 }
 
 func (f *libraryFixture) do(t *testing.T, method, path string, body string) *httptest.ResponseRecorder {
+	return f.doWithRevision(t, method, path, body, strconv.FormatUint(f.revision, 10))
+}
+
+func (f *libraryFixture) doWithRevision(t *testing.T, method, path string, body, revision string) *httptest.ResponseRecorder {
 	t.Helper()
 	req := httptest.NewRequest(method, path, bytes.NewBufferString(body))
 	if body != "" {
 		req.Header.Set("Content-Type", "application/json")
+	}
+	if method == http.MethodPost && strings.HasSuffix(path, "/publish") {
+		req.Header.Set("X-Janus-Revision", revision)
 	}
 	req.AddCookie(f.cookie)
 	w := httptest.NewRecorder()
@@ -205,6 +228,37 @@ func TestConfigLibraryPublishAndDeleteGuard(t *testing.T) {
 	refused := f.do(t, http.MethodDelete, "/api/v1/configs/1", "")
 	if refused.Code != http.StatusConflict {
 		t.Fatalf("delete active status = %d, want 409", refused.Code)
+	}
+}
+
+func TestConfigLibraryPublishRejectsStaleRuntimeRevision(t *testing.T) {
+	f := newLibraryFixture(t)
+	created := f.do(t, http.MethodPost, "/api/v1/configs", `{"name":"candidate"}`)
+	if created.Code != http.StatusCreated {
+		t.Fatalf("create status = %d", created.Code)
+	}
+
+	stale := f.doWithRevision(t, http.MethodPost, "/api/v1/configs/1/publish", "", "0")
+	if stale.Code != http.StatusConflict {
+		t.Fatalf("stale publish = %d %s, want 409", stale.Code, stale.Body.String())
+	}
+	if f.revision != 1 || len(f.published.Routes) != 0 {
+		t.Fatalf("stale publish changed runtime: revision=%d published=%+v", f.revision, f.published.Routes)
+	}
+
+	// The header check is only a fast path. A concurrent publisher can advance
+	// Runtime after that check, and the atomic publisher must still map the
+	// resulting sentinel to the same HTTP conflict for a library publish.
+	f.publishErr = janusruntime.ErrRevisionConflict
+	raced := f.do(t, http.MethodPost, "/api/v1/configs/1/publish", "")
+	if raced.Code != http.StatusConflict {
+		t.Fatalf("raced publish = %d %s, want 409", raced.Code, raced.Body.String())
+	}
+	f.publishErr = nil
+
+	published := f.do(t, http.MethodPost, "/api/v1/configs/1/publish", "")
+	if published.Code != http.StatusOK || f.revision != 2 {
+		t.Fatalf("current publish = %d %s revision=%d", published.Code, published.Body.String(), f.revision)
 	}
 }
 

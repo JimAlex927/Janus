@@ -946,8 +946,9 @@ function routeCoreLabel(route: Route): string {
     if (!window.confirm(`发布配置「${meta?.name}」？当前生效配置将被替换。`)) return;
     setBusy(true);
     try {
-      const result = await publishStoredConfig(id);
+      const result = await publishStoredConfig(id, store.revision);
       setMeta((old) => (old ? { ...old, status: "active" } : old));
+      await store.load(true);
       store.setMessage(
         result.warning
           ? `已发布，网关 generation ${result.revision}。注意：${translateWarning(result.warning)}`
@@ -955,6 +956,11 @@ function routeCoreLabel(route: Route): string {
       );
       onStatusChange();
     } catch (error) {
+      if (error instanceof ApiError && error.status === 409) {
+        await store.load(true);
+        store.setMessage("版本冲突：远端已被他人更新。已刷新当前配置，请确认后再发布。");
+        return;
+      }
       const message = error instanceof Error ? error.message : String(error);
       store.setMessage(
         /limen/i.test(message)

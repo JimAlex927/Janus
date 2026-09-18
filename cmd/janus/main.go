@@ -113,10 +113,12 @@ func run(ctx context.Context, path string, check, printEffective bool, reloadInt
 				Current: requestRuntime.ConfigSnapshot, Revision: requestRuntime.Revision,
 				Discovery:      requestRuntime.DiscoverySnapshot,
 				RegistryHealth: requestRuntime.RegistryHealthConfig,
-				Publish:        func(candidate config.Config) error { return publishConfig(path, requestRuntime, candidate) },
-				Subscribe:      requestRuntime.Subscribe,
-				Library:        configLibrary,
-				SaveActive:     func(updated config.Config) error { return writeConfigAtomically(path, updated) },
+				Publish: func(candidate config.Config, revision uint64) error {
+					return publishConfig(path, requestRuntime, candidate, revision)
+				},
+				Subscribe:  requestRuntime.Subscribe,
+				Library:    configLibrary,
+				SaveActive: func(updated config.Config) error { return writeConfigAtomically(path, updated) },
 			}),
 			ReadHeaderTimeout: c.Settings.Server.ReadHeaderTimeout.Duration(),
 			WriteTimeout:      c.Settings.Server.WriteTimeout.Duration(),
@@ -338,22 +340,21 @@ func openConfigLibrary(dbPath string, startup config.Config, logger *zap.Logger)
 	return library
 }
 
-// publishConfig keeps the file and active Runtime aligned. Runtime validates
-// and builds the candidate before the file is replaced; an I/O failure rolls
-// the in-memory generation back to the previous snapshot.
-func publishConfig(path string, r *janusruntime.Runtime, candidate config.Config) error {
+// publishConfig keeps the active file and Runtime generation aligned. Runtime
+// validates and builds the candidate, writes the file, and only then activates
+// the generation while holding its replacement boundary. A write failure never
+// exposes the candidate to requests and cannot roll back a later publish.
+func publishConfig(path string, r *janusruntime.Runtime, candidate config.Config, expectedRevision uint64) error {
 	previous := r.ConfigSnapshot()
 	if candidate.Settings.Admin.PasswordHash == "" {
 		candidate.Settings.Admin.PasswordHash = previous.Settings.Admin.PasswordHash
 	}
-	if err := r.Replace(candidate); err != nil {
-		return err
-	}
-	if err := writeConfigAtomically(path, candidate); err != nil {
-		_ = r.Replace(previous)
-		return fmt.Errorf("persist configuration: %w", err)
-	}
-	return nil
+	return r.ReplaceAndPersist(candidate, expectedRevision, func(next config.Config) error {
+		if err := writeConfigAtomically(path, next); err != nil {
+			return fmt.Errorf("persist configuration: %w", err)
+		}
+		return nil
+	})
 }
 
 func writeConfigAtomically(path string, c config.Config) error {

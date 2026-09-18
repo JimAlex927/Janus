@@ -144,6 +144,97 @@ func TestRuntimeReplacementRollbackClosesCandidate(t *testing.T) {
 	}
 }
 
+func TestRuntimeReplaceAndPersistKeepsCurrentGenerationUntilFileWriteSucceeds(t *testing.T) {
+	built := 0
+	builder := func(c config.Config, _ http.RoundTripper, _ *zap.Logger, _ map[string]*middleware.Limiter) (Generation, error) {
+		built++
+		body := c.Routes[0].Name
+		return &testGeneration{
+			handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, body) }),
+			closed:  make(chan struct{}),
+		}, nil
+	}
+	r, err := NewWithBuilder(validRuntimeConfig("initial"), zap.NewNop(), builder)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+
+	persisted := false
+	if err := r.ReplaceAndPersist(validRuntimeConfig("replacement"), 1, func(next config.Config) error {
+		persisted = true
+		if next.Routes[0].Name != "replacement" {
+			t.Fatalf("persisted route = %q", next.Routes[0].Name)
+		}
+		before := httptest.NewRecorder()
+		r.ServeHTTP(before, httptest.NewRequest(http.MethodGet, "http://gateway/", nil))
+		if before.Body.String() != "initial" {
+			t.Fatalf("generation became active before persistence: %q", before.Body.String())
+		}
+		if got := r.ConfigSnapshot().Routes[0].Name; got != "initial" {
+			t.Fatalf("config changed before persistence: %q", got)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if !persisted || built != 2 {
+		t.Fatalf("persisted=%v built=%d, want true and 2", persisted, built)
+	}
+	after := httptest.NewRecorder()
+	r.ServeHTTP(after, httptest.NewRequest(http.MethodGet, "http://gateway/", nil))
+	if after.Body.String() != "replacement" || r.ConfigSnapshot().Routes[0].Name != "replacement" || r.Revision() != 2 {
+		t.Fatalf("published state = response %q config %q revision %d", after.Body.String(), r.ConfigSnapshot().Routes[0].Name, r.Revision())
+	}
+}
+
+func TestRuntimeReplaceAndPersistRejectsStaleOrFailedCandidateWithoutChangingActive(t *testing.T) {
+	candidateClosed := make(chan struct{})
+	built := 0
+	builder := func(c config.Config, _ http.RoundTripper, _ *zap.Logger, _ map[string]*middleware.Limiter) (Generation, error) {
+		built++
+		closed := make(chan struct{})
+		if c.Routes[0].Name == "candidate" {
+			closed = candidateClosed
+		}
+		return &testGeneration{
+			handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, c.Routes[0].Name) }),
+			closed:  closed,
+		}, nil
+	}
+	r, err := NewWithBuilder(validRuntimeConfig("initial"), zap.NewNop(), builder)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+
+	persistCalled := false
+	if err := r.ReplaceAndPersist(validRuntimeConfig("stale"), 0, func(config.Config) error {
+		persistCalled = true
+		return nil
+	}); !errors.Is(err, ErrRevisionConflict) {
+		t.Fatalf("stale replacement error = %v, want %v", err, ErrRevisionConflict)
+	}
+	if persistCalled || built != 1 {
+		t.Fatalf("stale publish persisted=%v built=%d, want false and 1", persistCalled, built)
+	}
+
+	persistErr := errors.New("disk full")
+	if err := r.ReplaceAndPersist(validRuntimeConfig("candidate"), 1, func(config.Config) error { return persistErr }); !errors.Is(err, persistErr) {
+		t.Fatalf("persistence error = %v, want %v", err, persistErr)
+	}
+	select {
+	case <-candidateClosed:
+	case <-time.After(time.Second):
+		t.Fatal("candidate was not closed after persistence failure")
+	}
+	current := httptest.NewRecorder()
+	r.ServeHTTP(current, httptest.NewRequest(http.MethodGet, "http://gateway/", nil))
+	if current.Body.String() != "initial" || r.ConfigSnapshot().Routes[0].Name != "initial" || r.Revision() != 1 {
+		t.Fatalf("failed publish changed state: response %q config %q revision %d", current.Body.String(), r.ConfigSnapshot().Routes[0].Name, r.Revision())
+	}
+}
+
 func TestRuntimeRetiresGenerationAfterRequestRelease(t *testing.T) {
 	started, release := make(chan struct{}), make(chan struct{})
 	oldClosed := make(chan struct{})

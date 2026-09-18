@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -57,10 +58,13 @@ type Options struct {
 	Revision       func() uint64
 	Discovery      func() map[string]discovery.Status
 	RegistryHealth func(string, *config.NacosRegistry) discovery.RegistryHealth
-	Publish        func(config.Config) error
-	Subscribe      func() (<-chan janusruntime.Event, func())
-	Library        *store.Store
-	SaveActive     func(config.Config) error
+	// Publish must atomically reject a stale expected revision. The console
+	// performs an early check for a clear response, while this callback closes
+	// the check-then-publish race at Runtime's serialization boundary.
+	Publish    func(config.Config, uint64) error
+	Subscribe  func() (<-chan janusruntime.Event, func())
+	Library    *store.Store
+	SaveActive func(config.Config) error
 }
 
 type Handler struct {
@@ -71,7 +75,7 @@ type Handler struct {
 	revision       func() uint64
 	discovery      func() map[string]discovery.Status
 	registryHealth func(string, *config.NacosRegistry) discovery.RegistryHealth
-	publish        func(config.Config) error
+	publish        func(config.Config, uint64) error
 	subscribe      func() (<-chan janusruntime.Event, func())
 	library        *store.Store
 	saveActive     func(config.Config) error
@@ -349,15 +353,19 @@ func (h *Handler) publishConfig(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "authentication required", 401)
 		return
 	}
-	if h.revision != nil && r.Header.Get("X-Janus-Revision") != fmt.Sprint(h.revision()) {
-		http.Error(w, "configuration revision conflict", 409)
+	expectedRevision, ok := h.expectedRevision(w, r)
+	if !ok {
 		return
 	}
 	c, ok := h.decodeConfig(w, r)
 	if !ok {
 		return
 	}
-	if err := h.publish(c); err != nil {
+	if err := h.publish(c, expectedRevision); err != nil {
+		if errors.Is(err, janusruntime.ErrRevisionConflict) {
+			http.Error(w, "configuration revision conflict", http.StatusConflict)
+			return
+		}
 		writeJSON(w, 422, map[string]any{"ok": false, "error": err.Error()})
 		return
 	}
@@ -430,6 +438,22 @@ func (h *Handler) revisionValue() uint64 {
 		return 0
 	}
 	return h.revision()
+}
+
+// expectedRevision checks the HTTP precondition used by every operation that
+// swaps the live generation. Runtime verifies the same value atomically when
+// it receives the publish callback, so this early check is only an ergonomic
+// fast path rather than the source of correctness.
+func (h *Handler) expectedRevision(w http.ResponseWriter, r *http.Request) (uint64, bool) {
+	if h.revision == nil {
+		return 0, true
+	}
+	expected := h.revision()
+	if r.Header.Get("X-Janus-Revision") != fmt.Sprint(expected) {
+		http.Error(w, "configuration revision conflict", http.StatusConflict)
+		return 0, false
+	}
+	return expected, true
 }
 func (h *Handler) decodeConfig(w http.ResponseWriter, r *http.Request) (config.Config, bool) {
 	body, err := io.ReadAll(io.LimitReader(r.Body, config.MaxConfigBytes+1))

@@ -43,12 +43,15 @@ The console manages a library of named configurations stored in SQLite next
 to the active file (`janus-configs.db`). Exactly one record is `active`;
 publishing another record archives the previous one. A publish request
 normalizes the draft to the active startup-owned sections (settings and
-limens), validates it, builds a new Runtime generation, and then persists
-the active file with an atomic rename. If persistence fails, the previous
-generation is restored. Settings that affect listeners or process-wide
-request infrastructure remain startup-owned; they are normalized away on
-publish and must be changed through `全局设置`, which rewrites the file and
-requires a restart.
+limens), validates and builds a new Runtime generation, persists the active
+file with an atomic rename, and only then activates that generation. If
+persistence fails, the candidate is released without ever receiving traffic.
+Both direct and library-based publishes carry the Runtime revision, so a stale
+console cannot overwrite a configuration that another operator has already
+published. Settings that affect listeners or process-wide request
+infrastructure remain startup-owned; they are normalized away on publish and
+must be changed through `全局设置`, which rewrites the file and requires a
+restart.
 
 The API also remains compatible with direct atomic edits of the JSON file. The
 file reloader recognizes a snapshot already published by the console and does

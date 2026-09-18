@@ -118,7 +118,10 @@ func TestAdminLoginProtectsConfigurationPublishing(t *testing.T) {
 	var publishedConfig config.Config
 	h := NewHandlerWithOptions(Options{
 		State: NewState(), Current: func() config.Config { return current }, Revision: func() uint64 { return 1 },
-		Publish: func(candidate config.Config) error {
+		Publish: func(candidate config.Config, revision uint64) error {
+			if revision != 1 {
+				t.Fatalf("publish revision = %d, want 1", revision)
+			}
 			published = true
 			publishedConfig = candidate
 			return candidate.Validate()
