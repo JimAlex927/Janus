@@ -2052,6 +2052,34 @@ Verification:
 
 ## 2026-09-18
 
+### Restore editable Limen configuration in the console
+
+Commit message: `fix(console): make limen settings editable`
+
+Scope:
+
+- Replaced the read-only Limen viewer with an editor for the listener address,
+  protocol selection, trusted proxy CIDRs, TLS certificate/key settings,
+  minimum TLS version and HTTP/3 stream budget.
+- Kept the runtime boundary explicit: confirming the drawer changes only the
+  configuration draft; publishing does not replace startup-owned listeners;
+  the staged Limen file operation writes the saved draft and requires a Janus
+  restart. Limen creation remains unavailable from the canvas palette.
+- Added protocol-aware form behavior for TLS versus h2c and automatic HTTP/3
+  defaults/cleanup, updated current console guidance, and refreshed embedded
+  assets.
+
+Verification:
+
+- `cd frontend; npm run build`
+- `go test ./...`
+- `go vet ./...`
+- Compared SHA-256 hashes for `index.html`, JS and CSS release assets with the
+  embedded copies
+- `git diff --check`
+
+## 2026-09-18
+
 ### Align dynamic middleware required-field validation
 
 Commit message: `fix(console): validate required middleware collections`

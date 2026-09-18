@@ -26,7 +26,7 @@ import {
   validateConfig,
   type StoredConfig,
 } from "./api";
-import { createMiddlewareDefinition, LimenViewer, ServiceEditor } from "./editors";
+import { createMiddlewareDefinition, LimenEditor, ServiceEditor } from "./editors";
 import { cloneConfig, limenNames, routeActionLabel, routeMatchLabel, serviceSubtitle, uniqueName } from "./model";
 import { MiddlewareManagerModal, type MiddlewareScopeFilter } from "./MiddlewareManager";
 import { RegistryManagerModal } from "./RegistryManager";
@@ -478,7 +478,7 @@ function ConfigEditor({ store, id, onBack, onStatusChange }: { store: ConfigStor
     const draft = draftRef.current;
     if (!draft) return;
     if (kind === "limen") {
-      store.setMessage("Limen 是启动级入口，只读展示；请修改配置文件并重启 Janus。能力变化不会通过画布发布。");
+      store.setMessage("Limen 是启动级入口，不能热发布；双击已有 Limen 可编辑，确认后写入草稿，写入生效文件并重启后生效。");
       return;
     }
     if (kind === "route") {
@@ -889,6 +889,10 @@ function routeCoreLabel(route: Route): string {
 
   /** 将已保存草稿的入口写入生效文件（运行不受影响，重启后生效）。 */
   async function stageSavedLimens() {
+    if (editing?.kind === "limen") {
+      store.setMessage("请先点击入口编辑器的“确认”保存草稿，再写入生效文件。取消则不会保留本次修改。");
+      return;
+    }
     if (dirty) {
       store.setMessage("草稿有未保存的修改，请先确认抽屉并保存草稿，再写入文件。");
       return;
@@ -1012,11 +1016,11 @@ function translateWarning(warning: string): string {
           ))}
           <div className="palette-note">
             <strong>连线规则</strong>
-            <span>Limen 仅展示当前启动入口（只读）</span>
+            <span>Limen 展示并编辑当前启动入口</span>
             <span>Limen → Route 指定入口</span>
             <span>Route → Service 设置转发</span>
             <small>中间件在 Route / Service 的编辑器中新建、改参、排序。</small>
-            <small>入口地址、协议和 TLS 必须改配置文件并重启；Route / Service 节点可拖动、删除和双击编辑。</small>
+            <small>入口地址、协议和 TLS 可在入口编辑器修改；确认后写入文件并重启才生效。Route / Service 节点可拖动、删除和双击编辑。</small>
           </div>
           <button type="button" className="btn ghost" onClick={() => openRegistryManager(false)}>注册中心管理</button>
         </aside>
@@ -1072,10 +1076,16 @@ function translateWarning(warning: string): string {
         />
       )}
       {editing?.kind === "limen" && (
-        <LimenViewer
+        <LimenEditor
           name={editing.name}
           limen={editing.value}
+          isNew={editing.isNew}
+          onName={(name) => setEditing((old) => old && old.kind === "limen" ? { ...old, name } : old)}
+          onChange={(value) => setEditing((old) => old && old.kind === "limen" ? { ...old, value } : old)}
+          onConfirm={confirmEditing}
+          onCancel={() => setEditing(null)}
           onClose={() => setEditing(null)}
+          onDelete={editing.isNew ? deleteEditing : undefined}
           onStageLimens={stageSavedLimens}
         />
       )}
