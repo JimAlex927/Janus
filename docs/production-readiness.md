@@ -107,6 +107,13 @@ At commit `65375b8`, the full suite and full race suite were rerun after
 adding the process test, and
 `go test -count=50 -run '^TestRunLifecycle$' ./cmd/janus` passed to check
 for startup/reload/shutdown flakiness.
+
+At commit `35395db`, after atomic control-plane publication changes, the
+current Windows development host again passed `go test ./...`,
+`go test -race ./...`, and `go vet ./...`. This refreshes local regression
+evidence only; it does not close the target-Linux, deployment, capacity, soak,
+or canary gates listed above.
+
 The Linux-only H3 child-process test now also cross-compiles in
 `go test -c -o bin/janus-linux-tests ./cmd/janus` with
 `GOOS=linux GOARCH=amd64 CGO_ENABLED=0`. It has not been executed on Linux

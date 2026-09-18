@@ -125,6 +125,39 @@ func TestCompiledMatchAndActionPrecedence(t *testing.T) {
 	}
 }
 
+func TestCORSPreflightUsesRequestedMethodOnlyForMarkedRoutes(t *testing.T) {
+	handler := func(id string) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(id)) })
+	}
+	rt, err := New([]Route{
+		{Name: "api-fallback", Match: "PathPrefix(`/api`)", Handler: handler("fallback")},
+		{Name: "cors-post", Match: "PathPrefix(`/api/write`) && Method(`POST`)", CORSPreflight: true, Handler: handler("cors")},
+		{Name: "plain-get", Match: "PathPrefix(`/plain`) && Method(`GET`)", Handler: handler("plain")},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		name, path, requestedMethod string
+		wantStatus                  int
+		wantBody                    string
+	}{
+		{name: "marked route precedes ordinary options fallback", path: "/api/write", requestedMethod: http.MethodPost, wantStatus: http.StatusOK, wantBody: "cors"},
+		{name: "unmarked route", path: "/plain", requestedMethod: http.MethodGet, wantStatus: http.StatusNotFound, wantBody: "404 page not found\n"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			r := httptest.NewRequest(http.MethodOptions, "http://gateway"+test.path, nil)
+			r.Header.Set("Origin", "https://app.example.com")
+			r.Header.Set("Access-Control-Request-Method", test.requestedMethod)
+			w := httptest.NewRecorder()
+			rt.ServeHTTP(w, r)
+			if w.Code != test.wantStatus || w.Body.String() != test.wantBody {
+				t.Fatalf("got %d %q, want %d %q", w.Code, w.Body.String(), test.wantStatus, test.wantBody)
+			}
+		})
+	}
+}
+
 func TestComplexRuleFallsBackWithoutLosingMatch(t *testing.T) {
 	rt, err := New([]Route{{
 		Name:    "public",

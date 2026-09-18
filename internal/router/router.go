@@ -19,7 +19,12 @@ type Route struct {
 	Priority   int
 	Host       string
 	PathPrefix string
-	Handler    http.Handler
+	// CORSPreflight permits one safe fallback lookup for an OPTIONS CORS
+	// preflight. The lookup substitutes only its requested method, so a
+	// Method(`POST`) route can select its CORS handler before an upstream runs.
+	// Routes without this flag retain ordinary OPTIONS matching exactly.
+	CORSPreflight bool
+	Handler       http.Handler
 }
 
 type Router struct {
@@ -130,10 +135,12 @@ func legacyExpression(route Route) string {
 // Host and path indexes, then selects the highest-priority complete match.
 func (rt *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	facts := requestFacts(r)
-	var best *compiledRoute
-	for _, index := range rt.indexesFor(protocol.LimenID(r)) {
-		for _, candidate := range index.candidates(facts.Host, facts.Path) {
-			best = chooseCandidate(candidate, facts, best)
+	best := rt.match(protocol.LimenID(r), facts, false)
+	if isCORSPreflight(r) {
+		preflightFacts := *facts
+		preflightFacts.Method = r.Header.Get("Access-Control-Request-Method")
+		if preflight := rt.match(protocol.LimenID(r), &preflightFacts, true); preflight != nil && (best == nil || routePrecedes(preflight, best)) {
+			best = preflight
 		}
 	}
 	if best == nil {
@@ -144,7 +151,20 @@ func (rt *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	best.route.Handler.ServeHTTP(w, r)
 }
 
-func chooseCandidate(candidate *compiledRoute, facts *rules.Facts, best *compiledRoute) *compiledRoute {
+func (rt *Router) match(limen string, facts *rules.Facts, corsPreflightOnly bool) *compiledRoute {
+	var best *compiledRoute
+	for _, index := range rt.indexesFor(limen) {
+		for _, candidate := range index.candidates(facts.Host, facts.Path) {
+			best = chooseCandidate(candidate, facts, best, corsPreflightOnly)
+		}
+	}
+	return best
+}
+
+func chooseCandidate(candidate *compiledRoute, facts *rules.Facts, best *compiledRoute, corsPreflightOnly bool) *compiledRoute {
+	if corsPreflightOnly && !candidate.route.CORSPreflight {
+		return best
+	}
 	if !candidate.matcher.Match(facts) {
 		return best
 	}
@@ -152,6 +172,10 @@ func chooseCandidate(candidate *compiledRoute, facts *rules.Facts, best *compile
 		best = candidate
 	}
 	return best
+}
+
+func isCORSPreflight(r *http.Request) bool {
+	return r.Method == http.MethodOptions && r.Header.Get("Origin") != "" && r.Header.Get("Access-Control-Request-Method") != ""
 }
 
 func (rt *Router) indexesFor(limen string) []*routeIndex {

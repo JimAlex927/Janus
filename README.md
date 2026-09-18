@@ -127,8 +127,11 @@ still require restart. Legacy configurations remain startup-only.
   consumes the same total shutdown budget. Routes stream responses by
   default; an optional route/service `buffer` middleware can hold finite responses
   up to its configured maximum before committing them. Named `headers` and
-  `add_prefix` policies work at route or service scope, while `strip_prefix` is
-  route-only. When forwarding, `strip_prefix` regenerates a trusted,
+  `add_prefix` and `cors` policies work at route or service scope, while
+  `strip_prefix` is route-only. `cors` uses exact HTTP(S) Origins (or a lone
+  wildcard), short-circuits only allowed browser preflights, and intentionally
+  leaves WebSocket handshakes to their separate Origin policy. When forwarding,
+  `strip_prefix` regenerates a trusted,
   composable `X-Forwarded-Prefix` value after client-supplied forwarding
   headers have been cleared; `headers` never rewrites a WebSocket 101
   handshake. The Admin console discovers these classes and their parameter
@@ -167,17 +170,18 @@ feature set is useful only if the supported behavior is reliable under failure.
 
 ## Verification of this starter
 
-On 2026-09-17, with Go 1.25.13 on Windows/amd64: `go test ./...`, `go vet ./...`,
-the binary build, example configuration validation, and `govulncheck@v1.7.0`
-passed. The vulnerability scan reports no reachable vulnerabilities in the
-project's code with the patched Go toolchain; four module vulnerabilities remain
-reported as not reachable and still require dependency review. Tests exercise real
-HTTP connections, escaped paths, bodies/trailers, forwarding-header sanitation,
-HTTPS certificate trust, cancellation, route precedence, concurrent round-robin
-selection, body-limit rejection for known and chunked bodies, and completion of
-an accepted request during shutdown.
+On 2026-09-18, with Go 1.25.13 on Windows/amd64, the current tree passed
+`go test ./...`, `go test -race ./...`, and `go vet ./...`. The 2026-09-17
+binary build, example-configuration validation, and `govulncheck@v1.7.0`
+evidence remains recorded in the production-readiness document. That scan
+reported no reachable vulnerabilities in the project's code with the patched
+Go toolchain; four module vulnerabilities remain reported as not reachable and
+still require dependency review. Tests exercise real HTTP connections, escaped
+paths, bodies/trailers, forwarding-header sanitation, HTTPS certificate trust,
+cancellation, route precedence, concurrent round-robin selection, body-limit
+rejection for known and chunked bodies, and completion of an accepted request
+during shutdown.
 
-`go test -race ./...` could not build: the installed Go `runtime/cgo` tool exited
-with status 2, including a retry with an explicit GCC path. Race-detector validation
-remains outstanding. No load benchmark, production soak, or external security
-review has been performed.
+This is development-host evidence only. Target-Linux execution, load and
+24-hour soak evidence, a real security review, and canary/rollback validation
+remain required before a production claim.

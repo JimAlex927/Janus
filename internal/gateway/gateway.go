@@ -88,6 +88,7 @@ func NewWithDiscovery(c config.Config, logger *zap.Logger, transport http.RoundT
 		}
 	}()
 	services := make(map[string]http.Handler, len(c.Services))
+	serviceHasCORS := make(map[string]bool, len(c.Services))
 	forwardingPolicies := forwarding.NewPolicies()
 	for name, binding := range c.LimenBindings() {
 		policy, err := forwarding.NewPolicy(binding.TrustedProxies)
@@ -165,6 +166,7 @@ func NewWithDiscovery(c config.Config, logger *zap.Logger, transport http.RoundT
 		if err != nil {
 			return nil, err
 		}
+		serviceHasCORS[name] = containsCORSMiddleware(c, service.Middlewares)
 		services[name] = middleware.Chain(serviceHandler, serviceMiddlewares...)
 	}
 	routes := make([]router.Route, 0, len(c.Routes))
@@ -179,7 +181,16 @@ func NewWithDiscovery(c config.Config, logger *zap.Logger, transport http.RoundT
 		}
 		routeHandler := middleware.Chain(actionHandler, routeMiddlewares...)
 		routeHandler = middleware.RouteMetadata(r.Name, serviceName)(routeHandler)
-		routes = append(routes, router.Route{Name: r.Name, Limen: r.Limen, Match: r.Match, Priority: r.Priority, Host: r.Host, PathPrefix: r.PathPrefix, Handler: routeHandler})
+		routes = append(routes, router.Route{
+			Name:          r.Name,
+			Limen:         r.Limen,
+			Match:         r.Match,
+			Priority:      r.Priority,
+			Host:          r.Host,
+			PathPrefix:    r.PathPrefix,
+			CORSPreflight: containsCORSMiddleware(c, r.Middlewares) || serviceHasCORS[serviceName],
+			Handler:       routeHandler,
+		})
 	}
 	//http.Handler is an interface.
 	// Router itself is a loop of match. It contains
@@ -206,6 +217,15 @@ func NewWithDiscovery(c config.Config, logger *zap.Logger, transport http.RoundT
 		checkers:        checkers,
 		healthByService: healthByService,
 	}, nil
+}
+
+func containsCORSMiddleware(c config.Config, names []string) bool {
+	for _, name := range names {
+		if definition, ok := c.Middlewares[name]; ok && definition.CORS != nil {
+			return true
+		}
+	}
+	return false
 }
 
 func buildRouteAction(route config.Route, services map[string]http.Handler) (http.Handler, string, error) {
@@ -279,6 +299,16 @@ func buildMiddlewares(c config.Config, names []string, serviceLimiter *middlewar
 		case definition.Headers != nil:
 			rules := definition.Headers
 			result = append(result, middleware.Headers(rules.RequestSet, rules.RequestRemove, rules.ResponseSet, rules.ResponseRemove))
+		case definition.CORS != nil:
+			rules := definition.CORS
+			result = append(result, middleware.CORS(middleware.CORSOptions{
+				AllowOrigins:     rules.AllowOrigins,
+				AllowMethods:     rules.AllowMethods,
+				AllowHeaders:     rules.AllowHeaders,
+				ExposeHeaders:    rules.ExposeHeaders,
+				AllowCredentials: rules.AllowCredentials,
+				MaxAgeSeconds:    rules.MaxAgeSeconds,
+			}))
 		case definition.StripPrefix != nil:
 			result = append(result, middleware.StripPrefix(definition.StripPrefix.Prefix))
 		case definition.AddPrefix != nil:

@@ -276,6 +276,56 @@ func TestHeadersAndStripPrefixMiddlewareConfig(t *testing.T) {
 	}
 }
 
+func TestCORSMiddlewareConfig(t *testing.T) {
+	valid := `{"listen":"127.0.0.1:8080","middlewares":{"browser":{"cors":{"allow_origins":["https://app.example.com"],"allow_methods":["GET","POST","OPTIONS"],"allow_headers":["Content-Type"],"allow_credentials":true,"max_age_seconds":600}}},"services":{"s":{"upstreams":["http://localhost:9000"],"middlewares":["browser"]}},"routes":[{"name":"r","path_prefix":"/api","service":"s","middlewares":["browser"]}]}`
+	if _, err := Load(strings.NewReader(valid)); err != nil {
+		t.Fatalf("valid cors configuration failed: %v", err)
+	}
+	for _, replacement := range []string{
+		`"allow_origins":[]`,
+		`"allow_origins":["*"],"allow_credentials":true`,
+		`"allow_origins":["https://app.example.com/path"]`,
+		`"allow_methods":["get"]`,
+		`"allow_headers":["Content Type"]`,
+		`"max_age_seconds":86401`,
+	} {
+		candidate := valid
+		switch replacement {
+		case `"allow_origins":[]`:
+			candidate = strings.Replace(candidate, `"allow_origins":["https://app.example.com"]`, replacement, 1)
+		case `"allow_origins":["*"],"allow_credentials":true`:
+			candidate = strings.Replace(candidate, `"allow_origins":["https://app.example.com"],"allow_methods"`, replacement+`,"allow_methods"`, 1)
+		case `"allow_origins":["https://app.example.com/path"]`:
+			candidate = strings.Replace(candidate, `"allow_origins":["https://app.example.com"]`, replacement, 1)
+		case `"allow_methods":["get"]`:
+			candidate = strings.Replace(candidate, `"allow_methods":["GET","POST","OPTIONS"]`, replacement, 1)
+		case `"allow_headers":["Content Type"]`:
+			candidate = strings.Replace(candidate, `"allow_headers":["Content-Type"]`, replacement, 1)
+		case `"max_age_seconds":86401`:
+			candidate = strings.Replace(candidate, `"max_age_seconds":600`, replacement, 1)
+		}
+		if _, err := Load(strings.NewReader(candidate)); err == nil {
+			t.Fatalf("accepted invalid cors configuration %s", replacement)
+		}
+	}
+}
+
+func TestMiddlewareCapabilitiesIncludeCORS(t *testing.T) {
+	for _, capability := range MiddlewareCapabilities() {
+		if capability.Type != "cors" {
+			continue
+		}
+		if len(capability.Scopes) != 2 || capability.Scopes[0] != MiddlewareScopeRoute || capability.Scopes[1] != MiddlewareScopeService {
+			t.Fatalf("cors scopes = %#v, want route and service", capability.Scopes)
+		}
+		if len(capability.Fields) != 6 || capability.Fields[0].Name != "allow_origins" || capability.Fields[5].Name != "max_age_seconds" {
+			t.Fatalf("cors fields = %#v, want stable dynamic-form contract", capability.Fields)
+		}
+		return
+	}
+	t.Fatal("middleware capability catalog does not expose cors")
+}
+
 func TestAddPrefixMiddlewareConfigAndScopes(t *testing.T) {
 	valid := `{"listen":"127.0.0.1:8080","middlewares":{"base":{"add_prefix":{"prefix":"/internal"}}},"services":{"s":{"upstreams":["http://localhost:9000"],"middlewares":["base"]}},"routes":[{"name":"r","path_prefix":"/api","service":"s"}]}`
 	if _, err := Load(strings.NewReader(valid)); err != nil {

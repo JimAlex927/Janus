@@ -134,4 +134,8 @@ Runtime 回归验证配置失败时旧服务仍可转发，跨代订阅不重建
 
 测试使用可注入的发现客户端及 SDK 接口替身；真实 Nacos 集群的鉴权、断连重连、集群切换与持续运行验证仍是发布前的集成验收项。
 
-本轮 `go test ./...` 和 `go vet ./...` 通过。Windows 上执行核心包 `go test -race` 时，ThreadSanitizer 因内存分配失败（error code 87）未能启动；这不是 race 检查通过，需在目标 Linux 环境重跑。
+早期 Windows 本地检查曾因 ThreadSanitizer 启动失败而无法提供 race
+证据；在 2026-09-18 的当前开发主机上，完整 `go test -race ./...` 已通过。
+这只能证明当前 Windows 回归未发现数据竞争，真实 Nacos 集群的鉴权、断连
+重连、集群切换与长期运行，以及目标 Linux 环境的 race 与部署验证仍是发布前
+集成验收项。

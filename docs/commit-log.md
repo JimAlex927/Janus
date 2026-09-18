@@ -1943,3 +1943,41 @@ Verification:
 - `cd frontend; npm run build`
 - Compared every frontend release asset and `index.html` with its embedded copy
 - `git diff --check`
+
+## 2026-09-18
+
+### Add dynamic CORS middleware
+
+Commit message: `feat(middleware): add cors policy`
+
+Scope:
+
+- Added the `cors` named middleware at Route and Service scope. It validates
+  exact HTTP(S) Origins, credential/wildcard compatibility, methods, header
+  names and the bounded preflight cache duration.
+- Added the backend capability-catalog entry and API regression. The console's
+  existing generic editor therefore renders CORS controls from the running
+  binary without a frontend type-specific branch.
+- Implemented allowed preflight short-circuiting before the upstream, normal
+  response decoration (including implicit empty 200 responses), `Vary` merging,
+  and explicit WebSocket-handshake bypass.
+- Made CORS preflights work with `Method(...)` route rules without broadening
+  ordinary OPTIONS handling: the router considers the requested method only for
+  a CORS-capable candidate that precedes the normal OPTIONS match.
+- Added Route/Service integration, router precedence, configuration validation,
+  client-visible headers, empty-response, rejected-preflight and WebSocket
+  regressions. The comprehensive sample now demonstrates a credentialed,
+  exact-origin Route policy.
+- Corrected stale documentation that still described the Windows race detector
+  as broken. The current tree passes the full race suite locally; target Linux,
+  realistic load/soak, security, and canary evidence remain production gates.
+
+Verification:
+
+- `go test ./...`
+- `go vet ./...`
+- `go test -race ./...`
+- `cd frontend; npm run build`
+- Parsed `configs/janus-comprehensive.example.json` with PowerShell
+  `ConvertFrom-Json`
+- `git diff --check`

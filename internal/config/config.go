@@ -100,6 +100,7 @@ type Middleware struct {
 	BodyLimit   *BodyLimitSettings   `json:"body_limit,omitempty"`
 	InFlight    *InFlightSettings    `json:"in_flight,omitempty"`
 	Headers     *HeadersSettings     `json:"headers,omitempty"`
+	CORS        *CORSSettings        `json:"cors,omitempty"`
 	StripPrefix *StripPrefixSettings `json:"strip_prefix,omitempty"`
 	AddPrefix   *AddPrefixSettings   `json:"add_prefix,omitempty"`
 }
@@ -148,6 +149,20 @@ type HeadersSettings struct {
 	ResponseSet    map[string]string `json:"response_set,omitempty"`
 	ResponseRemove []string          `json:"response_remove,omitempty"`
 }
+
+// CORSSettings controls browser cross-origin access. Origins are exact HTTP(S)
+// origins or the single wildcard "*"; wildcard origins cannot be combined with
+// credentialed requests. The policy is valid at route and service scope.
+type CORSSettings struct {
+	AllowOrigins     []string `json:"allow_origins"`
+	AllowMethods     []string `json:"allow_methods"`
+	AllowHeaders     []string `json:"allow_headers,omitempty"`
+	ExposeHeaders    []string `json:"expose_headers,omitempty"`
+	AllowCredentials bool     `json:"allow_credentials,omitempty"`
+	MaxAgeSeconds    int      `json:"max_age_seconds,omitempty"`
+}
+
+const MaxCORSMaxAgeSeconds = 86400
 
 // StripPrefixSettings removes Prefix from a matching request path before it
 // reaches the service. Janus emits the accumulated stripped prefix as the
@@ -609,6 +624,9 @@ func (c Config) Validate() error {
 		if definition.Headers != nil {
 			defined++
 		}
+		if definition.CORS != nil {
+			defined++
+		}
 		if definition.StripPrefix != nil {
 			defined++
 		}
@@ -633,6 +651,11 @@ func (c Config) Validate() error {
 		if definition.Headers != nil {
 			if err := validateHeaderSettings(*definition.Headers); err != nil {
 				return fmt.Errorf("middleware %q headers: %w", name, err)
+			}
+		}
+		if definition.CORS != nil {
+			if err := validateCORSSettings(*definition.CORS); err != nil {
+				return fmt.Errorf("middleware %q cors: %w", name, err)
 			}
 		}
 		if definition.StripPrefix != nil {

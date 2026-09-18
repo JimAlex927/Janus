@@ -50,6 +50,31 @@ standard-library readers enforce the smallest effective cap. The policy limits
 bytes, not upload duration; use the server read deadline and the fixed/service
 admission policies for those separate concerns.
 
+## Browser CORS
+
+`cors` is a named route or service middleware. It keeps the origin boundary
+explicit: `allow_origins` accepts exact `http`/`https` Origins or a single `*`;
+the wildcard cannot be combined with `allow_credentials`. An allowed `OPTIONS`
+preflight containing `Access-Control-Request-Method` returns `204` directly,
+without selecting an upstream. A normal request with an allowed Origin continues
+to the wrapped action and receives the configured response headers. An unknown
+Origin is passed through without CORS headers, while a known Origin with a
+disallowed preflight method or header receives `403`.
+
+When a CORS-attached route has a `Method(...)` matcher, Janus retries lookup for
+that preflight with `Access-Control-Request-Method`; this makes a `POST` route
+reachable for a `POST` preflight when it precedes the ordinary `OPTIONS` route,
+without making unrelated `OPTIONS` requests match. Header and query predicates
+still apply to the actual preflight, so put
+CORS on a less-specific public route when those predicates are not available on
+browser preflights.
+
+Use a route attachment when the browser contract belongs to one public endpoint;
+use a service attachment when every route forwarding to that service should
+share it. Do not use this policy to authorize WebSocket origins: Janus leaves
+upgrade handshakes untouched and that decision remains with the backend or a
+dedicated WebSocket policy.
+
 The fixed global observer adds a fresh `X-Request-ID` to each request and response,
 overwriting client input. Its access record
 contains only the method, path without query, route/service names, status, duration,

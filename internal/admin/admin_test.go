@@ -236,7 +236,7 @@ func TestMiddlewareCapabilitiesEndpointUsesBackendCatalog(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("capabilities status = %d, body = %q", w.Code, w.Body.String())
 	}
-	for _, expected := range []string{`"type":"buffer"`, `"type":"headers"`, `"type":"strip_prefix"`, `"type":"add_prefix"`, `"kind":"string_map"`} {
+	for _, expected := range []string{`"type":"buffer"`, `"type":"headers"`, `"type":"cors"`, `"type":"strip_prefix"`, `"type":"add_prefix"`, `"kind":"string_map"`, `"name":"allow_origins"`} {
 		if !strings.Contains(w.Body.String(), expected) {
 			t.Fatalf("capabilities response missing %s: %s", expected, w.Body.String())
 		}

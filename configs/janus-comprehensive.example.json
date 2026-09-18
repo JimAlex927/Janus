@@ -100,6 +100,17 @@
         "response_remove": ["Server"]
       }
     },
+    "browser-api-cors": {
+      "scope": "route",
+      "cors": {
+        "allow_origins": ["https://console.example.internal"],
+        "allow_methods": ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+        "allow_headers": ["Content-Type", "Authorization", "X-Request-ID"],
+        "expose_headers": ["X-Request-ID"],
+        "allow_credentials": true,
+        "max_age_seconds": 600
+      }
+    },
     "api-base-path": {
       "scope": "service",
       "add_prefix": {
@@ -165,7 +176,7 @@
       "name": "public-api",
       "limen": "public-http",
       "match": "Host(`api.example.internal`) && PathPrefix(`/api`) && Protocol(`http`)",
-      "middlewares": ["strip-api-prefix", "api-buffer"],
+      "middlewares": ["browser-api-cors", "strip-api-prefix", "api-buffer"],
       "action": { "forward": { "service": "api" } }
     },
     {

@@ -65,6 +65,18 @@ func MiddlewareCapabilities() []MiddlewareCapability {
 			},
 		},
 		{
+			Type: "cors", Label: "CORS", Scopes: []string{MiddlewareScopeRoute, MiddlewareScopeService},
+			Description: "为浏览器跨域请求设置响应头，并在允许的 OPTIONS 预检时直接返回，不访问上游。Origin 仅支持精确 HTTP(S) Origin 或单独的 *。",
+			Fields: []MiddlewareFieldCapability{
+				{Name: "allow_origins", Label: "允许来源", Kind: "string_list", Required: true, Default: []string{"https://app.example.com"}, Description: "每行一个精确 Origin；使用 * 时不能启用凭据。"},
+				{Name: "allow_methods", Label: "允许方法", Kind: "string_list", Required: true, Default: []string{"GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"}, Description: "每行一个大写 HTTP 方法；用于预检响应。"},
+				{Name: "allow_headers", Label: "允许请求头", Kind: "string_list", Default: []string{"Content-Type", "Authorization", "X-Request-ID"}, Description: "预检中允许浏览器发送的非简单请求头，每行一个。"},
+				{Name: "expose_headers", Label: "暴露响应头", Kind: "string_list", Description: "允许浏览器脚本读取的响应头，每行一个。"},
+				{Name: "allow_credentials", Label: "允许凭据", Kind: "boolean", Default: false, Description: "允许 Cookie/认证信息；不能与 * 来源同时使用。"},
+				{Name: "max_age_seconds", Label: "预检缓存秒数", Kind: "integer", Default: 600, Min: int64Pointer(0), Max: int64Pointer(MaxCORSMaxAgeSeconds), Description: "浏览器缓存成功预检的时长；0 表示不发送 Max-Age。"},
+			},
+		},
+		{
 			Type: "strip_prefix", Label: "Strip Prefix", Scopes: []string{MiddlewareScopeRoute},
 			Description: "将匹配的路径前缀移除后再交给路由动作；转发到上游时会写入可信的 X-Forwarded-Prefix。",
 			Fields: []MiddlewareFieldCapability{{
@@ -95,6 +107,8 @@ func MiddlewareType(m Middleware) string {
 		return "in_flight"
 	case m.Headers != nil:
 		return "headers"
+	case m.CORS != nil:
+		return "cors"
 	case m.StripPrefix != nil:
 		return "strip_prefix"
 	case m.AddPrefix != nil:

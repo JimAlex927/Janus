@@ -63,6 +63,12 @@ generation; later requests on the same connection can acquire the new one.
 Global protections have a fixed order and cannot be bypassed by omitting a route
 reference. Named route middleware runs after matching and cannot cause rerouting.
 Named service middleware runs after route middleware and before target selection.
+For a route/service with `cors`, the router makes one CORS-preflight-only
+candidate lookup: its `OPTIONS` request is matched using the requested method so
+that `Method(\`POST\`)` can reach the CORS short-circuit when that candidate
+precedes the ordinary `OPTIONS` match. No route without CORS participates in
+this lookup, and all non-method predicates still see the actual preflight
+request.
 The admin listener is separate and does not pass through this data-path chain.
 
 Access observation wraps downstream guards and policies so it sees early exits.
@@ -201,14 +207,17 @@ duplicate references within one list, and incompatible policy combinations.
 Definitions in a JSON object have no execution order; attachment arrays do.
 
 The implemented configurable policies are route/service `buffer`, `body_limit`,
-`headers`, and `add_prefix`; route-only `strip_prefix`; and service-only
+`headers`, `add_prefix`, and `cors`; route-only `strip_prefix`; and service-only
 `in_flight`. Multiple applicable body limits compose by the minimum. The
 `headers` policy rejects hop-by-hop and framing header mutations and preserves
 stream flushing; its response rules intentionally do not rewrite a WebSocket
 101 handshake. Prefix policies preserve escaped-path semantics. `strip_prefix`
 records its result in trusted request metadata, and the proxy regenerates the
 composed `X-Forwarded-Prefix` only after discarding every client-supplied
-forwarding header. Global
+forwarding header. `cors` accepts exact HTTP(S) Origins or a single `*`; it
+rejects wildcard credentials, returns 204 for an allowed preflight before the
+upstream runs, and deliberately does not implement WebSocket Origin checking.
+Global
 admission remains fixed infrastructure, and requests must pass both active caps.
 
 `config.MiddlewareCapabilities` is the authoritative operator-facing catalog

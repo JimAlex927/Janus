@@ -414,6 +414,128 @@ func TestBufferedRouteReturns504BeforeCommitment(t *testing.T) {
 	}
 }
 
+func TestCORSMiddlewareWorksAtRouteAndServiceScope(t *testing.T) {
+	for _, scope := range []string{"route", "service"} {
+		t.Run(scope, func(t *testing.T) {
+			var backendCalls atomic.Int32
+			backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				backendCalls.Add(1)
+				w.WriteHeader(http.StatusAccepted)
+				_, _ = io.WriteString(w, "backend")
+			}))
+			defer backend.Close()
+			cors := config.Middleware{CORS: &config.CORSSettings{
+				AllowOrigins:     []string{"https://app.example.com"},
+				AllowMethods:     []string{"GET", "POST", "OPTIONS"},
+				AllowHeaders:     []string{"Content-Type"},
+				ExposeHeaders:    []string{"X-Request-ID"},
+				AllowCredentials: true,
+				MaxAgeSeconds:    600,
+			}}
+			service := config.Service{Upstreams: []string{backend.URL}}
+			route := config.Route{Name: "api", PathPrefix: "/api", Service: "s"}
+			if scope == "route" {
+				route.Middlewares = []string{"browser"}
+			} else {
+				service.Middlewares = []string{"browser"}
+			}
+			g := testGatewayWithConfig(t, config.Config{
+				Listen:      "127.0.0.1:8080",
+				Middlewares: map[string]config.Middleware{"browser": cors},
+				Services:    map[string]config.Service{"s": service},
+				Routes:      []config.Route{route},
+			})
+			front := serveTestGateway(t, g, config.DefaultSettings())
+
+			preflight, err := http.NewRequest(http.MethodOptions, front+"/api", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			preflight.Header.Set("Origin", "https://app.example.com")
+			preflight.Header.Set("Access-Control-Request-Method", "POST")
+			preflight.Header.Set("Access-Control-Request-Headers", "Content-Type")
+			response, err := http.DefaultClient.Do(preflight)
+			if err != nil {
+				t.Fatal(err)
+			}
+			response.Body.Close()
+			if response.StatusCode != http.StatusNoContent || backendCalls.Load() != 0 {
+				t.Fatalf("preflight status=%d backend calls=%d, want 204/0", response.StatusCode, backendCalls.Load())
+			}
+
+			request, err := http.NewRequest(http.MethodGet, front+"/api", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			request.Header.Set("Origin", "https://app.example.com")
+			response, err = http.DefaultClient.Do(request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			body, readErr := io.ReadAll(response.Body)
+			response.Body.Close()
+			if readErr != nil {
+				t.Fatal(readErr)
+			}
+			if response.StatusCode != http.StatusAccepted || string(body) != "backend" || backendCalls.Load() != 1 {
+				t.Fatalf("response status=%d body=%q backend calls=%d", response.StatusCode, body, backendCalls.Load())
+			}
+			if got := response.Header.Get("Access-Control-Allow-Origin"); got != "https://app.example.com" {
+				t.Fatalf("allow origin = %q", got)
+			}
+			if got := response.Header.Get("Access-Control-Expose-Headers"); got != "X-Request-ID" {
+				t.Fatalf("expose headers = %q", got)
+			}
+		})
+	}
+}
+
+func TestCORSPreflightMatchesRouteRequestedMethodAtEitherScope(t *testing.T) {
+	for _, scope := range []string{"route", "service"} {
+		t.Run(scope, func(t *testing.T) {
+			var backendCalls atomic.Int32
+			backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				backendCalls.Add(1)
+				w.WriteHeader(http.StatusAccepted)
+			}))
+			defer backend.Close()
+			service := config.Service{Upstreams: []string{backend.URL}}
+			route := config.Route{Name: "write-api", Match: "PathPrefix(`/api`) && Method(`POST`)", Service: "s"}
+			if scope == "route" {
+				route.Middlewares = []string{"browser"}
+			} else {
+				service.Middlewares = []string{"browser"}
+			}
+			g := testGatewayWithConfig(t, config.Config{
+				Listen: "127.0.0.1:8080",
+				Middlewares: map[string]config.Middleware{
+					"browser": {CORS: &config.CORSSettings{
+						AllowOrigins: []string{"https://app.example.com"},
+						AllowMethods: []string{http.MethodPost},
+					}},
+				},
+				Services: map[string]config.Service{"s": service},
+				Routes:   []config.Route{route},
+			})
+			front := serveTestGateway(t, g, config.DefaultSettings())
+			preflight, err := http.NewRequest(http.MethodOptions, front+"/api", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			preflight.Header.Set("Origin", "https://app.example.com")
+			preflight.Header.Set("Access-Control-Request-Method", http.MethodPost)
+			response, err := http.DefaultClient.Do(preflight)
+			if err != nil {
+				t.Fatal(err)
+			}
+			response.Body.Close()
+			if response.StatusCode != http.StatusNoContent || backendCalls.Load() != 0 {
+				t.Fatalf("preflight status=%d backend calls=%d, want 204/0", response.StatusCode, backendCalls.Load())
+			}
+		})
+	}
+}
+
 func TestBodyLimitRejectsKnownLengthBeforeBackend(t *testing.T) {
 	called := make(chan struct{}, 1)
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
