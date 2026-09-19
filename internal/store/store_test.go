@@ -129,6 +129,39 @@ func TestStorePublishedRecordsAreImmutable(t *testing.T) {
 	}
 }
 
+func TestStoreForkActivePreservesRollbackHistory(t *testing.T) {
+	s := openTestStore(t)
+	active, err := s.Create("production", testConfig("before"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Publish(active.ID); err != nil {
+		t.Fatal(err)
+	}
+	fork, err := s.ForkActive(active.ID, "production", testConfig("after"), `{"route":{"x":12}}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fork.Status != "draft" || fork.ID == active.ID {
+		t.Fatalf("fork = %#v, want a new draft", fork)
+	}
+	current, _ := s.Active()
+	if current == nil || current.ID != active.ID || current.Content.Routes[0].Name != "before" {
+		t.Fatalf("active changed during fork: %#v", current)
+	}
+	if err := s.Publish(fork.ID); err != nil {
+		t.Fatal(err)
+	}
+	current, _ = s.Active()
+	if current == nil || current.ID != fork.ID || current.Content.Routes[0].Name != "after" {
+		t.Fatalf("published fork = %#v", current)
+	}
+	history, _ := s.Get(active.ID)
+	if history == nil || history.Status != "archived" || history.Content.Routes[0].Name != "before" {
+		t.Fatalf("rollback history = %#v", history)
+	}
+}
+
 func TestStorePublishMakesSingleActive(t *testing.T) {
 	s := openTestStore(t)
 	first, _ := s.Create("first", testConfig("a"))

@@ -34,7 +34,7 @@ CREATE INDEX IF NOT EXISTS idx_configs_status ON configs(status);
 var ErrNotFound = errors.New("config not found")
 
 // ErrActiveImmutable prevents an already published record from being edited
-// in place. Published records are rollback history and must remain stable.
+// in place. Callers that need an editable version should use ForkActive.
 var ErrActiveImmutable = errors.New("active configuration is immutable; duplicate it before editing")
 
 type Store struct {
@@ -267,6 +267,50 @@ func (s *Store) Create(name string, content config.Config) (*ConfigRecord, error
 	}
 	id, _ := res.LastInsertId()
 	return s.getLocked(id)
+}
+
+// ForkActive creates an editable draft from the active record while keeping
+// the published record immutable. Publishing the returned draft will archive
+// the previous active record, preserving it as rollback history.
+func (s *Store) ForkActive(id int64, name string, content config.Config, layout string) (*ConfigRecord, error) {
+	if err := validateLayout(layout); err != nil {
+		return nil, err
+	}
+	raw, err := json.Marshal(content)
+	if err != nil {
+		return nil, err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	tx, err := s.db.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	var status string
+	if err := tx.QueryRow("SELECT status FROM configs WHERE id = ?", id).Scan(&status); err == sql.ErrNoRows {
+		return nil, ErrNotFound
+	} else if err != nil {
+		return nil, err
+	} else if status != "active" {
+		return nil, ErrActiveImmutable
+	}
+	now := time.Now().UTC()
+	stamp := now.Format(time.RFC3339)
+	result, err := tx.Exec("INSERT INTO configs(name, content, status, layout, created_at, updated_at) VALUES(?, ?, 'draft', ?, ?, ?)",
+		name, string(raw), layout, stamp, stamp)
+	if err != nil {
+		return nil, err
+	}
+	newID, err := result.LastInsertId()
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return &ConfigRecord{ID: newID, Name: name, Content: content, Status: "draft", CreatedAt: now, UpdatedAt: now}, nil
 }
 
 func (s *Store) Update(id int64, name string, content config.Config) error {

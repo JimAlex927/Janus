@@ -220,6 +220,33 @@ export function ConfigsPage({ store, onEdit }: { store: ConfigStore; onEdit: (id
   const drafts = configs.filter((c) => c.status === "draft");
   const archived = configs.filter((c) => c.status === "archived");
 
+  function renderConfigCard(cfg: ConfigRecord) {
+    return (
+      <div key={cfg.id} className={`config-card ${cfg.status}`}>
+        <div className="config-card-header">
+          <div className="config-name">
+            <strong>{cfg.name}</strong>
+            <Badge text={cfg.status} variant={cfg.status === "active" ? "success" : cfg.status === "draft" ? "warn" : "default"} />
+          </div>
+          <div className="config-time">更新于 {new Date(cfg.updated_at).toLocaleString()}</div>
+        </div>
+        <div className="config-card-actions">
+          <button type="button" className="btn small" onClick={() => onEdit(cfg.id)}>编辑</button>
+          {cfg.status !== "active" && (
+            <button type="button" className="btn small primary" onClick={() => publishConfig(cfg.id)}>
+              {cfg.status === "archived" ? "回滚" : "发布"}
+            </button>
+          )}
+          <button type="button" className="btn small" onClick={() => exportConfig(cfg.id, cfg.name)}>导出</button>
+          <button type="button" className="btn small" onClick={() => duplicateConfig(cfg.id, cfg.name)}>复制</button>
+          {cfg.status === "draft" && (
+            <button type="button" className="btn small danger" onClick={() => deleteConfig(cfg.id, cfg.name)}>删除</button>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   if (loading) return <Empty text="正在加载配置列表…" />;
   if (error) return <Empty text={`加载失败：${error}`} action={<button className="btn primary" onClick={loadConfigs}>重试</button>} />;
 
@@ -247,34 +274,17 @@ export function ConfigsPage({ store, onEdit }: { store: ConfigStore; onEdit: (id
       {configs.length === 0 ? (
         <Empty text="暂无配置，点击右上角创建" action={<button className="btn primary" onClick={createConfig}>创建第一个配置</button>} />
       ) : (
-        <div className="card-list">
-          {configs.map((cfg) => (
-            <div key={cfg.id} className={`config-card ${cfg.status}`}>
-              <div className="config-card-header">
-                <div className="config-name">
-                  <strong>{cfg.name}</strong>
-                  <Badge text={cfg.status} variant={cfg.status === "active" ? "success" : cfg.status === "draft" ? "warn" : "default"} />
-                </div>
-                <div className="config-time">
-                  更新于 {new Date(cfg.updated_at).toLocaleString()}
-                </div>
-              </div>
-              <div className="config-card-actions">
-                <button type="button" className="btn small" onClick={() => onEdit(cfg.id)}>编辑</button>
-                {cfg.status !== "active" && (
-                  <button type="button" className="btn small primary" onClick={() => publishConfig(cfg.id)}>发布</button>
-                )}
-                <button type="button" className="btn small" onClick={() => exportConfig(cfg.id, cfg.name)}>导出</button>
-                <button type="button" className="btn small" onClick={() => duplicateConfig(cfg.id, cfg.name)}>复制</button>
-                {cfg.status === "draft" && (
-                  <button type="button" className="btn small danger" onClick={() => deleteConfig(cfg.id, cfg.name)}>删除</button>
-                )}
-              </div>
-            </div>
-          ))}
+        <div className="config-groups">
+          {active && <ConfigGroup label="当前生效" detail="正在运行的版本"><div className="card-list">{renderConfigCard(active)}</div></ConfigGroup>}
+          {drafts.length > 0 && <ConfigGroup label="草稿" detail="保存后可继续编辑，发布后进入运行版本"><div className="card-list">{drafts.map(renderConfigCard)}</div></ConfigGroup>}
+          {archived.length > 0 && <ConfigGroup label="历史版本" detail="保留每次发布，可直接回滚"><div className="card-list">{archived.map(renderConfigCard)}</div></ConfigGroup>}
         </div>
       )}
       {dialogs.dialog}
     </section>
   );
+}
+
+function ConfigGroup({ label, detail, children }: { label: string; detail: string; children: React.ReactNode }) {
+  return <section className="config-group"><div className="config-group-head"><div><span>{label}</span><small>{detail}</small></div></div>{children}</section>;
 }

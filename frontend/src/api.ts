@@ -118,7 +118,7 @@ export function getStoredConfig(id: number): Promise<StoredConfig> {
 export function saveStoredConfig(
   id: number,
   payload: { name?: string; content?: JanusConfig; layout?: Record<string, unknown> },
-): Promise<{ ok: boolean }> {
+): Promise<{ ok: boolean; id: number; status?: string; forked_from?: number }> {
   return request(`/api/v1/configs/${id}`, {
     method: "PUT",
     body: JSON.stringify(payload),

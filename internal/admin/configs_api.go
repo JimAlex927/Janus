@@ -296,6 +296,25 @@ func (h *Handler) saveConfig(w http.ResponseWriter, r *http.Request, id int64) {
 		}
 		content = parsed
 	}
+	if record.Status == "active" {
+		layout := "{}"
+		if len(input.Layout) > 0 {
+			layout = string(input.Layout)
+		} else if layout, err = h.library.Layout(id); err != nil {
+			writeLibraryError(w, err)
+			return
+		}
+		forked, err := h.library.ForkActive(id, name, content, layout)
+		if err != nil {
+			writeLibraryError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"ok": true, "id": forked.ID, "status": forked.Status,
+			"forked_from": id, "updated_at": forked.UpdatedAt,
+		})
+		return
+	}
 	if len(input.Layout) > 0 {
 		if err := h.library.UpdateWithLayout(id, name, content, string(input.Layout)); err != nil {
 			writeLibraryError(w, err)
@@ -310,7 +329,7 @@ func (h *Handler) saveConfig(w http.ResponseWriter, r *http.Request, id int64) {
 		writeLibraryError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "id": updated.ID, "updated_at": updated.UpdatedAt})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "id": updated.ID, "status": updated.Status, "updated_at": updated.UpdatedAt})
 }
 
 func (h *Handler) deleteConfig(w http.ResponseWriter, r *http.Request, id int64) {

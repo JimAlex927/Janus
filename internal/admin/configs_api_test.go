@@ -239,8 +239,22 @@ func TestConfigLibraryPublishAndDeleteGuard(t *testing.T) {
 		t.Fatalf("delete active status = %d, want 409", refused.Code)
 	}
 	editActive := f.do(t, http.MethodPut, "/api/v1/configs/1", `{"name":"mutated","layout":{"nodes":[]}}`)
-	if editActive.Code != http.StatusConflict || !strings.Contains(editActive.Body.String(), "immutable") {
-		t.Fatalf("edit active status = %d %s, want immutable conflict", editActive.Code, editActive.Body.String())
+	if editActive.Code != http.StatusOK || !strings.Contains(editActive.Body.String(), `"forked_from":1`) {
+		t.Fatalf("edit active status = %d %s, want editable fork", editActive.Code, editActive.Body.String())
+	}
+	var forked struct {
+		ID int64 `json:"id"`
+	}
+	if err := json.Unmarshal(editActive.Body.Bytes(), &forked); err != nil || forked.ID == 1 {
+		t.Fatalf("edit active response = %s, fork id = %d", editActive.Body.String(), forked.ID)
+	}
+	forkedPublish := f.do(t, http.MethodPost, "/api/v1/configs/"+strconv.FormatInt(forked.ID, 10)+"/publish", "")
+	if forkedPublish.Code != http.StatusOK {
+		t.Fatalf("publish fork = %d %s", forkedPublish.Code, forkedPublish.Body.String())
+	}
+	history := f.do(t, http.MethodGet, "/api/v1/configs/1", "")
+	if history.Code != http.StatusOK || !strings.Contains(history.Body.String(), `"status":"archived"`) {
+		t.Fatalf("active history status = %d %s", history.Code, history.Body.String())
 	}
 }
 

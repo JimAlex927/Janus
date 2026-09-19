@@ -244,6 +244,7 @@ export function ConfigEditorPage({ store, id, onBack, onStatusChange }: { store:
 }
 
 function ConfigEditor({ store, id, onBack, onStatusChange }: { store: ConfigStore; id: number; onBack: () => void; onStatusChange: () => void }) {
+  const [workingId, setWorkingId] = useState(id);
   const [meta, setMeta] = useState<{ name: string; status: string } | null>(null);
   const [draft, setDraft] = useState<JanusConfig | null>(null);
   const [saved, setSaved] = useState("");
@@ -276,6 +277,7 @@ function ConfigEditor({ store, id, onBack, onStatusChange }: { store: ConfigStor
 
   useEffect(() => {
     let alive = true;
+    setWorkingId(id);
     (async () => {
       setLoading(true);
       try {
@@ -945,26 +947,31 @@ function routeCoreLabel(route: Route): string {
 
   async function save() {
     const draft = draftRef.current;
-    if (!draft) return;
+    if (!draft) return 0;
     const problems = validateLocal(draft, middlewareCatalog);
     if (problems.length > 0) {
       store.setMessage(`本地检查未通过：${problems[0]}`);
-      return false;
+      return 0;
     }
     setBusy(true);
     try {
       const layout = { nodes: currentLayout() };
-      await saveStoredConfig(id, { content: draft, layout });
+      const result = await saveStoredConfig(workingId, { content: draft, layout });
+      if (result.id !== workingId) {
+        setWorkingId(result.id);
+        setMeta((old) => (old ? { ...old, status: result.status || "draft" } : old));
+        onStatusChange();
+      }
       setSaved(JSON.stringify(draft));
       setSavedLayout(JSON.stringify(layout.nodes));
-      store.setMessage("草稿已保存。");
-      return true;
+      store.setMessage(result.forked_from ? "已从生效配置创建可编辑草稿。" : "草稿已保存。");
+      return result.id;
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) store.setStatus("unauthorized");
       else if (error instanceof ApiError && error.status === 409) {
-        store.setMessage("已发布配置不可原地修改，请返回后使用“复制”创建草稿。");
+        store.setMessage("配置版本发生冲突，请刷新后重试。");
       } else store.setMessage(error instanceof Error ? error.message : String(error));
-      return false;
+      return 0;
     } finally {
       setBusy(false);
     }
@@ -988,7 +995,7 @@ function routeCoreLabel(route: Route): string {
     }))) return;
     setBusy(true);
     try {
-      const result = await stageLimens(id);
+      const result = await stageLimens(workingId);
       store.setMessage(
         result.warning
           ? `入口已写入文件，重启后生效。注意：${result.warning}`
@@ -1022,7 +1029,8 @@ function routeCoreLabel(route: Route): string {
   }
 
   async function publish() {
-    if (dirty && !(await save())) return;
+    const targetId = dirty ? await save() : workingId;
+    if (!targetId) return;
     if (!(await dialogs.confirm({
       title: "发布配置",
       message: `当前生效配置将被「${meta?.name}」替换，路由变化会立即进入新的 generation。`,
@@ -1031,7 +1039,7 @@ function routeCoreLabel(route: Route): string {
     }))) return;
     setBusy(true);
     try {
-      const result = await publishStoredConfig(id, store.revision);
+      const result = await publishStoredConfig(targetId, store.revision);
       setMeta((old) => (old ? { ...old, status: "active" } : old));
       await store.load(true);
       store.setMessage(

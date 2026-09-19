@@ -64,9 +64,10 @@ covers a process crash between file publication and the SQLite status update;
 an unrecognized file is served normally but produces an explicit warning so an
 operator can decide whether to import or roll back it.
 
-Published records are immutable rollback history. The console may open an
-active record for inspection, but saving content or canvas layout in place is
-rejected; use `复制` to create a draft before editing.
+Published records remain immutable history. Opening the active record for
+editing is supported: the first save automatically forks an editable draft,
+so the running version is preserved. Publishing that draft archives the
+previous active record, which can later be selected with `回滚`.
 
 ## Console 页面
 
@@ -76,7 +77,7 @@ rejected; use `复制` to create a draft before editing.
   和 404 计数；404 不会与需要排查的服务端错误混在一起。配置库盘点和
   未绑定路由告警也在此展示。
 - `Config`是配置库：卡片列表展示每套配置的名称、状态
- （draft / active / archived）与更新时间，支持新建（空白模板、复制生效
+  （draft / active / archived）与更新时间，支持新建（空白模板、复制生效
   配置或复制某一套）、删除草稿、一键发布，以及整套配置的 JSON 导入
   （选文件后新建一条）与导出（下载完整配置 JSON；凭据为脱敏占位，
   异机恢复需重填密码，同机复制请用“复制”按钮，凭据由服务端直接拷贝）。
