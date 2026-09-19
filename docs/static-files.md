@@ -28,6 +28,11 @@ requested by a GET. This is suitable for React, Vue, and other history-mode
 single-page applications. Directory listing is disabled by default and should
 only be enabled for an intentionally public, controlled file tree.
 
+Janus resolves the configured root once at startup and resolves each existing
+requested file before serving it. A symlinked root is supported, but a symlink
+inside that tree may not resolve outside the root; such a request returns 404.
+Do not use a static route as a cross-directory mount mechanism.
+
 The action preserves the standard Go HTTP file-serving behavior, including
 content type detection, byte ranges, `Last-Modified`, and conditional
 requests. `cache_control` is applied to files that are actually served, not to

@@ -3,6 +3,24 @@
 This document records the purpose, scope, and verification for each Janus
 repository commit. Add a new dated section before every future commit.
 
+## 2026-09-19 — Confine static routes after symlink resolution
+
+Commit message: `fix(gateway): confine static symlink resolution`.
+
+Scope:
+
+- Resolved each existing static asset to its real path before serving it and
+  rejected any path that escapes the configured root through a symlink.
+- Replaced the directory-listing filesystem with the same confinement policy.
+- Kept a symlinked root valid and added regression coverage for allowed roots
+  plus rejected file and directory symlink escapes.
+- Raised the HTTP/3 reload test's handshake and old-stream wait budget from two
+  to five seconds after the unified gate exposed scheduler contention; the
+  regression now passed fifty consecutive focused runs.
+
+Verification: static route regression tests and the complete Linux release gate
+passed locally. Target-host deployment remains a separate qualification gate.
+
 ## 2026-09-19 — Unify the Linux release gate
 
 Commit message: `ci: unify reproducible Linux release gate`.

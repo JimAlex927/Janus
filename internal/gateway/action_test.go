@@ -144,3 +144,63 @@ func TestStaticAssetPathAllowsFilesystemRoot(t *testing.T) {
 		t.Fatalf("filesystem-root asset = %q, %v", asset, ok)
 	}
 }
+
+func TestStaticRouteActionRejectsEscapingSymlinks(t *testing.T) {
+	root, outside := t.TempDir(), t.TempDir()
+	if err := os.WriteFile(filepath.Join(outside, "secret.txt"), []byte("outside root"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(outside, "secret.txt"), filepath.Join(root, "secret.txt")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(root, "outside")); err != nil {
+		t.Fatal(err)
+	}
+	g, err := New(config.Config{
+		Listen: "127.0.0.1:8080",
+		Routes: []config.Route{{
+			Name: "frontend", PathPrefix: "/", Action: &config.RouteAction{Static: &config.StaticAction{
+				Root: root, DirectoryListing: true,
+			}},
+		}},
+	}, zap.NewNop())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer g.Close()
+
+	for _, target := range []string{"/secret.txt", "/outside/secret.txt"} {
+		response := httptest.NewRecorder()
+		g.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "http://gateway"+target, nil))
+		if response.Code != http.StatusNotFound || strings.Contains(response.Body.String(), "outside root") {
+			t.Fatalf("escaped symlink %s = %d %q", target, response.Code, response.Body.String())
+		}
+	}
+}
+
+func TestStaticRouteActionAllowsSymlinkedRoot(t *testing.T) {
+	realRoot := t.TempDir()
+	if err := os.WriteFile(filepath.Join(realRoot, "index.html"), []byte("inside root"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	root := filepath.Join(t.TempDir(), "site")
+	if err := os.Symlink(realRoot, root); err != nil {
+		t.Fatal(err)
+	}
+	g, err := New(config.Config{
+		Listen: "127.0.0.1:8080",
+		Routes: []config.Route{{
+			Name: "frontend", PathPrefix: "/", Action: &config.RouteAction{Static: &config.StaticAction{Root: root}},
+		}},
+	}, zap.NewNop())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer g.Close()
+
+	response := httptest.NewRecorder()
+	g.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "http://gateway/", nil))
+	if response.Code != http.StatusOK || response.Body.String() != "inside root" {
+		t.Fatalf("symlinked root = %d %q", response.Code, response.Body.String())
+	}
+}

@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"errors"
 	"net/http"
 	"net/url"
 	"os"
@@ -11,17 +12,23 @@ import (
 	"janus/internal/config"
 )
 
+var errStaticPathOutsideRoot = errors.New("static path resolves outside root")
+
 // newStaticHandler serves one validated local asset directory. Route
 // middleware has already run when this handler receives the request, so a
 // configured strip_prefix can provide an explicit mount point.
 func newStaticHandler(action config.StaticAction) (http.Handler, error) {
 	action = action.WithDefaults()
-	info, err := os.Stat(action.Root)
+	root, err := filepath.EvalSymlinks(action.Root)
+	if err != nil {
+		return nil, err
+	}
+	info, err := os.Stat(root)
 	if err != nil {
 		return nil, err
 	}
 	if !info.IsDir() {
-		return nil, &os.PathError{Op: "stat", Path: action.Root, Err: os.ErrNotExist}
+		return nil, &os.PathError{Op: "stat", Path: root, Err: os.ErrNotExist}
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
@@ -29,37 +36,83 @@ func newStaticHandler(action config.StaticAction) (http.Handler, error) {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		asset, ok := staticAssetPath(action.Root, r.URL)
+		asset, ok := staticAssetPath(root, r.URL)
 		if !ok {
 			http.NotFound(w, r)
 			return
 		}
-		info, statErr := os.Stat(asset)
+		asset, info, statErr := resolveStaticPath(root, asset)
 		requestedDirectory := statErr == nil && info.IsDir()
 		if statErr == nil && info.IsDir() {
 			asset = filepath.Join(asset, filepath.FromSlash(action.Index))
-			info, statErr = os.Stat(asset)
+			asset, info, statErr = resolveStaticPath(root, asset)
 		}
 		if statErr == nil && !info.IsDir() {
 			applyStaticCacheControl(w, action.CacheControl)
-			http.ServeFile(w, r, asset)
+			serveStaticFile(w, r, asset, info)
 			return
 		}
 		if requestedDirectory && action.DirectoryListing && os.IsNotExist(statErr) {
 			applyStaticCacheControl(w, action.CacheControl)
-			http.FileServer(http.Dir(action.Root)).ServeHTTP(w, r)
+			http.FileServer(staticFileSystem{root: root}).ServeHTTP(w, r)
 			return
 		}
 		if action.SPAFallback && !requestedDirectory && r.Method == http.MethodGet && os.IsNotExist(statErr) {
-			fallback := filepath.Join(action.Root, filepath.FromSlash(action.Index))
-			if fallbackInfo, fallbackErr := os.Stat(fallback); fallbackErr == nil && !fallbackInfo.IsDir() {
+			fallback := filepath.Join(root, filepath.FromSlash(action.Index))
+			if fallback, fallbackInfo, fallbackErr := resolveStaticPath(root, fallback); fallbackErr == nil && !fallbackInfo.IsDir() {
 				applyStaticCacheControl(w, action.CacheControl)
-				http.ServeFile(w, r, fallback)
+				serveStaticFile(w, r, fallback, fallbackInfo)
 				return
 			}
 		}
 		http.NotFound(w, r)
 	}), nil
+}
+
+func serveStaticFile(w http.ResponseWriter, r *http.Request, asset string, info os.FileInfo) {
+	file, err := os.Open(asset)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	defer file.Close()
+	// ServeContent reads from the already-open file, preventing a later path
+	// replacement from changing the resource after confinement was checked.
+	http.ServeContent(w, r, filepath.Base(asset), info.ModTime(), file)
+}
+
+// staticFileSystem keeps http.FileServer's directory formatting while ensuring
+// that every file it opens still resolves beneath the configured root.
+type staticFileSystem struct{ root string }
+
+func (fs staticFileSystem) Open(name string) (http.File, error) {
+	clean := path.Clean("/" + name)
+	asset := filepath.Join(fs.root, filepath.FromSlash(strings.TrimPrefix(clean, "/")))
+	resolved, _, err := resolveStaticPath(fs.root, asset)
+	if err != nil {
+		return nil, err
+	}
+	return os.Open(resolved)
+}
+
+func resolveStaticPath(root, asset string) (string, os.FileInfo, error) {
+	resolved, err := filepath.EvalSymlinks(asset)
+	if err != nil {
+		return "", nil, err
+	}
+	if !staticPathWithinRoot(root, resolved) {
+		return "", nil, errStaticPathOutsideRoot
+	}
+	info, err := os.Stat(resolved)
+	if err != nil {
+		return "", nil, err
+	}
+	return resolved, info, nil
+}
+
+func staticPathWithinRoot(root, candidate string) bool {
+	relative, err := filepath.Rel(root, candidate)
+	return err == nil && !filepath.IsAbs(relative) && relative != ".." && !strings.HasPrefix(relative, ".."+string(os.PathSeparator))
 }
 
 func applyStaticCacheControl(w http.ResponseWriter, value string) {
@@ -90,8 +143,7 @@ func staticAssetPath(root string, requestURL *url.URL) (string, bool) {
 		relative = ""
 	}
 	asset := filepath.Join(root, filepath.FromSlash(relative))
-	relativeAsset, err := filepath.Rel(root, asset)
-	if err != nil || filepath.IsAbs(relativeAsset) || relativeAsset == ".." || strings.HasPrefix(relativeAsset, ".."+string(os.PathSeparator)) {
+	if !staticPathWithinRoot(root, asset) {
 		return "", false
 	}
 	return asset, true

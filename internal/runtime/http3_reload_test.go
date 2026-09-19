@@ -29,6 +29,8 @@ import (
 	"go.uber.org/zap"
 )
 
+const http3ReloadTestTimeout = 5 * time.Second
+
 func TestHTTP3ReloadKeepsOldStreamOnOldGeneration(t *testing.T) {
 	certFile, keyFile, roots := writeRuntimeTestCertificate(t)
 	configOne := http3ReloadConfig(certFile, keyFile, "first")
@@ -104,7 +106,7 @@ func TestHTTP3ReloadKeepsOldStreamOnOldGeneration(t *testing.T) {
 	case <-started:
 	case err := <-slowErr:
 		t.Fatal(err)
-	case <-time.After(2 * time.Second):
+	case <-time.After(http3ReloadTestTimeout):
 		t.Fatal("old HTTP/3 stream did not start")
 	}
 
@@ -134,7 +136,7 @@ func TestHTTP3ReloadKeepsOldStreamOnOldGeneration(t *testing.T) {
 		}
 	case err := <-slowErr:
 		t.Fatal(err)
-	case <-time.After(2 * time.Second):
+	case <-time.After(http3ReloadTestTimeout):
 		t.Fatal("old HTTP/3 stream did not finish")
 	}
 }
