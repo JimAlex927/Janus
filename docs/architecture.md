@@ -88,10 +88,12 @@ safe fallback candidate set until a matcher planner can index them without
 omitting a possible match.
 
 Every route has one terminal action. `forward` enters the named service and its
-service middleware, while `redirect` and `respond` produce a direct HTTP
-response. Route middleware still wraps the action, and route metadata is set
-before that chain runs. This keeps matching, policy composition and terminal
-behavior separate.
+service middleware, while `redirect`, `respond`, and `static` produce a direct
+HTTP response. The static action serves a validated absolute local directory,
+supports GET/HEAD, optional SPA fallback and controlled directory listings, and
+retains standard HTTP file metadata and range handling. Route middleware still
+wraps the action, and route metadata is set before that chain runs. This keeps
+matching, policy composition and terminal behavior separate.
 
 The route priority is explicit. Higher `priority` wins; equal priorities use
 host specificity, path length and then configuration order as deterministic

@@ -1,0 +1,31 @@
+{
+  "listen": "127.0.0.1:8080",
+  "routes": [
+    {
+      "name": "api",
+      "match": "PathPrefix(`/api`)",
+      "priority": 100,
+      "action": {
+        "respond": {
+          "status": 200,
+          "body": "configure an API route or service here\n",
+          "headers": { "Content-Type": "text/plain; charset=utf-8" }
+        }
+      }
+    },
+    {
+      "name": "frontend",
+      "match": "PathPrefix(`/`)",
+      "priority": 10,
+      "action": {
+        "static": {
+          "root": "/srv/janus/web/dist",
+          "index": "index.html",
+          "spa_fallback": true,
+          "directory_listing": false,
+          "cache_control": "public, max-age=3600"
+        }
+      }
+    }
+  ]
+}

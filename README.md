@@ -80,6 +80,7 @@ configs/janus-nacos.example.json      single-namespace Nacos service discovery e
 configs/janus-nacos-multi-namespace.example.json  multiple namespaces, accounts and servers
 configs/janus-nacos-mixed.example.json  authenticated Nacos and static upstreams together
 configs/janus-nacos-env.example.json   Nacos username with password injected by environment
+configs/janus-static.example.json      local static frontend / SPA route example
 examples/backend/     local test service
 docs/                  architecture, delivery plan, protocol learning guide
 deploy/systemd/        native Linux non-root systemd deployment artifact

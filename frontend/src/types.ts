@@ -34,10 +34,19 @@ export interface RespondAction {
   headers?: Record<string, string>;
 }
 
+export interface StaticAction {
+  root: string;
+  index?: string;
+  spa_fallback?: boolean;
+  directory_listing?: boolean;
+  cache_control?: string;
+}
+
 export interface RouteAction {
   forward?: ForwardAction;
   redirect?: RedirectAction;
   respond?: RespondAction;
+  static?: StaticAction;
 }
 
 export interface Route {

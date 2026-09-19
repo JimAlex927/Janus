@@ -3,6 +3,21 @@
 This document records the purpose, scope, and verification for each Janus
 repository commit. Add a new dated section before every future commit.
 
+## 2026-09-19 — Static file route action
+
+Commit message: `feat(gateway): add static file route action`.
+
+Scope:
+
+- Added a validated `route.action.static` terminal action with absolute roots,
+  index files, SPA fallback, optional directory listings, cache policy, and
+  GET/HEAD-only serving with traversal protection.
+- Added Admin Console editing support, embedded frontend build output, a
+  deployable configuration example, and static-file operations documentation.
+- Added configuration, gateway, and directory-listing regression coverage.
+
+Verification: `npm --prefix frontend run build` and `go test ./...` passed.
+
 ## 2026-09-18 — Nacos discovery core
 
 Commit: `6fa8045` (`feat(discovery): add Nacos-backed dynamic services`).

@@ -272,6 +272,13 @@ func buildRouteAction(route config.Route, services map[string]http.Handler) (htt
 			_, _ = w.Write(body)
 		}), "direct", nil
 	}
+	if route.Action.Static != nil {
+		handler, err := newStaticHandler(*route.Action.Static)
+		if err != nil {
+			return nil, "", fmt.Errorf("route %q static action: %w", route.Name, err)
+		}
+		return handler, "static", nil
+	}
 	return nil, "", fmt.Errorf("route %q has no supported action", route.Name)
 }
 

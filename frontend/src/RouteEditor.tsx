@@ -54,7 +54,7 @@ export function RouteEditor({ draft, value, isNew, onChange, onConfirm, onCancel
   onOpenMiddlewareManager?: () => void;
 }) {
   const [showAdvanced, setShowAdvanced] = useState(() => !parseMatchExpression(value.match || "").safe);
-  const actionType = value.action?.redirect ? "redirect" : value.action?.respond ? "respond" : "forward";
+  const actionType = value.action?.redirect ? "redirect" : value.action?.respond ? "respond" : value.action?.static ? "static" : "forward";
   const services = serviceNames(draft);
   const limens = limenNames(draft);
   const parsedMatch = useMemo(() => parseMatchExpression(value.match || ""), [value.match]);
@@ -67,6 +67,7 @@ export function RouteEditor({ draft, value, isNew, onChange, onConfirm, onCancel
   function setActionType(type: string) {
     if (type === "redirect") set({ action: { redirect: { status: 308, location: "https://example.com" } } });
     else if (type === "respond") set({ action: { respond: { status: 200, body: "ok\n" } } });
+    else if (type === "static") set({ action: { static: { root: "", index: "index.html", spa_fallback: true } } });
     else set({ action: { forward: { service: value.action?.forward?.service || services[0] || "" } } });
   }
 
@@ -144,6 +145,7 @@ export function RouteEditor({ draft, value, isNew, onChange, onConfirm, onCancel
       <Field label="动作 Action">
         <select value={actionType} onChange={(e) => setActionType(e.target.value)}>
           <option value="forward">Forward 到 Service</option>
+          <option value="static">Static 静态文件</option>
           <option value="redirect">Redirect</option>
           <option value="respond">Direct Response</option>
         </select>
@@ -155,6 +157,29 @@ export function RouteEditor({ draft, value, isNew, onChange, onConfirm, onCancel
             {services.map((name) => <option key={name} value={name}>{name}</option>)}
           </select>
         </Field>
+      )}
+      {actionType === "static" && (
+        <>
+          <Field label="静态根目录 Root" hint="必须是绝对路径；网关进程必须拥有读取权限">
+            <input value={value.action?.static?.root || ""} placeholder="/srv/janus/web/dist" onChange={(e) => set({ action: { static: { ...value.action?.static, root: e.target.value } } })} />
+          </Field>
+          <div className="grid-2">
+            <Field label="默认文件 Index">
+              <input value={value.action?.static?.index || "index.html"} placeholder="index.html" onChange={(e) => set({ action: { static: { ...value.action?.static, root: value.action?.static?.root || "", index: e.target.value } } })} />
+            </Field>
+            <Field label="Cache-Control" hint="可选响应缓存策略">
+              <input value={value.action?.static?.cache_control || ""} placeholder="public, max-age=3600" onChange={(e) => set({ action: { static: { ...value.action?.static, root: value.action?.static?.root || "", cache_control: e.target.value } } })} />
+            </Field>
+          </div>
+          <div className="check-group">
+            <label className="check-row">
+              <span className="check-row-main"><input type="checkbox" checked={value.action?.static?.spa_fallback ?? true} onChange={(e) => set({ action: { static: { ...value.action?.static, root: value.action?.static?.root || "", spa_fallback: e.target.checked } } })} /><span><strong>SPA fallback</strong><small>找不到普通文件时回退到 Index，适用于 React、Vue 等前端路由。</small></span></span>
+            </label>
+            <label className="check-row">
+              <span className="check-row-main"><input type="checkbox" checked={value.action?.static?.directory_listing ?? false} onChange={(e) => set({ action: { static: { ...value.action?.static, root: value.action?.static?.root || "", directory_listing: e.target.checked } } })} /><span><strong>目录浏览</strong><small>默认关闭；只建议用于受控的内部文件分发。</small></span></span>
+            </label>
+          </div>
+        </>
       )}
       {actionType === "redirect" && (
         <div className="grid-2">

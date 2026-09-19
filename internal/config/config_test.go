@@ -24,6 +24,26 @@ func TestComprehensiveExampleConfig(t *testing.T) {
 	}
 }
 
+func TestStaticActionRequiresSafeLocalPaths(t *testing.T) {
+	root := t.TempDir()
+	base := Config{Listen: "127.0.0.1:8080", Routes: []Route{{Name: "static", PathPrefix: "/", Action: &RouteAction{Static: &StaticAction{Root: root}}}}}
+	if err := base.WithDefaults().Validate(); err != nil {
+		t.Fatalf("valid static action: %v", err)
+	}
+	for _, action := range []StaticAction{
+		{Root: "relative/site"},
+		{Root: root + string(filepath.Separator) + ".."},
+		{Root: root, Index: "../private/index.html"},
+		{Root: root, CacheControl: "public\r\nX-Injected: true"},
+	} {
+		candidate := base
+		candidate.Routes = []Route{{Name: "static", PathPrefix: "/", Action: &RouteAction{Static: &action}}}
+		if err := candidate.WithDefaults().Validate(); err == nil {
+			t.Fatalf("static action %+v unexpectedly validated", action)
+		}
+	}
+}
+
 func TestAllExampleConfigsUseCurrentRouteShape(t *testing.T) {
 	paths, err := filepath.Glob(filepath.Join("..", "..", "configs", "*.json"))
 	if err != nil {

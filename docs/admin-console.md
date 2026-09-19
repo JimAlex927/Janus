@@ -86,6 +86,9 @@ not build a duplicate generation.
   高级 DSL 模式，以免可视化表单改变原语义。选择 Middleware Scope 后，类型
   列表只显示该 Scope 可用的后端能力；目录给出的必填项、字段类型和数值范围
   也会在保存、校验和发布前做本地快速检查。
+- Route 的动作编辑器支持 `Static 静态文件`。填写绝对 `root` 后，可配置
+  `index`、SPA fallback、目录浏览和 `Cache-Control`；网关只接受 GET/HEAD，
+  并在启动或发布构建时验证根目录和路径安全性。
 - 配置画布顶栏提供三种视图：`画布`用于拖拽查看资源关系，`规则`将 Route
   按优先级、名称或配置顺序列出，并可在配置顺序下上下移动；`JSON`用于直接
   查看和编辑完整配置。JSON 修改需要点击“应用 JSON”才会进入草稿，之后仍

@@ -339,6 +339,7 @@ type RouteAction struct {
 	Forward  *ForwardAction  `json:"forward,omitempty"`
 	Redirect *RedirectAction `json:"redirect,omitempty"`
 	Respond  *RespondAction  `json:"respond,omitempty"`
+	Static   *StaticAction   `json:"static,omitempty"`
 }
 
 type ForwardAction struct {
@@ -354,6 +355,26 @@ type RespondAction struct {
 	Status  int               `json:"status,omitempty"`
 	Body    string            `json:"body,omitempty"`
 	Headers map[string]string `json:"headers,omitempty"`
+}
+
+// StaticAction serves files from one explicitly configured local directory.
+// Root is intentionally absolute so startup files, admin drafts and reloads
+// all resolve the same filesystem location.
+type StaticAction struct {
+	Root             string `json:"root"`
+	Index            string `json:"index,omitempty"`
+	SPAFallback      bool   `json:"spa_fallback,omitempty"`
+	DirectoryListing bool   `json:"directory_listing,omitempty"`
+	CacheControl     string `json:"cache_control,omitempty"`
+}
+
+const DefaultStaticIndex = "index.html"
+
+func (a StaticAction) WithDefaults() StaticAction {
+	if a.Index == "" {
+		a.Index = DefaultStaticIndex
+	}
+	return a
 }
 
 func Load(r io.Reader) (Config, error) {
@@ -1087,8 +1108,11 @@ func routeServiceName(route Route) (string, error) {
 	if route.Action.Respond != nil {
 		defined++
 	}
+	if route.Action.Static != nil {
+		defined++
+	}
 	if defined != 1 {
-		return "", fmt.Errorf("action must define exactly one of forward, redirect, or respond")
+		return "", fmt.Errorf("action must define exactly one of forward, redirect, respond, or static")
 	}
 	if route.Action.Forward != nil {
 		if route.Action.Forward.Service == "" {
@@ -1113,7 +1137,36 @@ func routeServiceName(route Route) (string, error) {
 	if route.Action.Respond != nil && route.Action.Respond.Status != 0 && (route.Action.Respond.Status < 100 || route.Action.Respond.Status > 599) {
 		return "", fmt.Errorf("action.respond.status must be between 100 and 599")
 	}
+	if route.Action.Static != nil {
+		static := route.Action.Static.WithDefaults()
+		if err := validateStaticAction(static); err != nil {
+			return "", err
+		}
+	}
 	return "", nil
+}
+
+func validateStaticAction(action StaticAction) error {
+	if action.Root == "" || !filepath.IsAbs(action.Root) || strings.ContainsRune(action.Root, '\x00') {
+		return fmt.Errorf("action.static.root must be a non-empty absolute path")
+	}
+	cleanRoot := filepath.Clean(action.Root)
+	if cleanRoot != action.Root {
+		return fmt.Errorf("action.static.root must be cleaned")
+	}
+	index := filepath.ToSlash(action.Index)
+	if index == "" || index == "." || strings.HasPrefix(index, "/") || strings.ContainsRune(index, '\x00') {
+		return fmt.Errorf("action.static.index must be a relative file path")
+	}
+	for _, part := range strings.Split(index, "/") {
+		if part == ".." || part == "" {
+			return fmt.Errorf("action.static.index must stay within root")
+		}
+	}
+	if strings.ContainsAny(action.CacheControl, "\x00\r\n") || len(action.CacheControl) > 1024 {
+		return fmt.Errorf("action.static.cache_control must be a valid bounded header value")
+	}
+	return nil
 }
 
 func validateHealthCheck(service string, check HealthCheckSettings) error {
@@ -1322,6 +1375,19 @@ func (c Config) WithDefaults() Config {
 			services[name] = service
 		}
 		c.Services = services
+	}
+	if len(c.Routes) > 0 {
+		routes := make([]Route, len(c.Routes))
+		for index, route := range c.Routes {
+			if route.Action != nil && route.Action.Static != nil {
+				static := route.Action.Static.WithDefaults()
+				action := *route.Action
+				action.Static = &static
+				route.Action = &action
+			}
+			routes[index] = route
+		}
+		c.Routes = routes
 	}
 	return c
 }

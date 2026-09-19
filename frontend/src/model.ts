@@ -37,6 +37,7 @@ export function routeService(route: Route): string {
 export function routeActionLabel(route: Route): string {
   if (route.action?.redirect) return "Redirect";
   if (route.action?.respond) return "Direct response";
+  if (route.action?.static) return "Static files";
   const service = routeService(route);
   return service ? `→ ${service}` : "→ 未选择 Service";
 }
