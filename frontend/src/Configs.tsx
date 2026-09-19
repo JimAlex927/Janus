@@ -179,8 +179,8 @@ export function ConfigsPage({ store, onEdit }: { store: ConfigStore; onEdit: (id
   if (error) return <Empty text={`加载失败：${error}`} action={<button className="btn primary" onClick={loadConfigs}>重试</button>} />;
 
   return (
-    <section className="page">
-      <div className="hero">
+    <section className="page config-library-page">
+      <div className="hero config-library-hero">
         <div className="hero-content">
           <div className="eyebrow">CONFIGURATIONS</div>
           <h2>配置管理</h2>
@@ -193,7 +193,7 @@ export function ConfigsPage({ store, onEdit }: { store: ConfigStore; onEdit: (id
         <input ref={fileInput} type="file" accept=".json,application/json" hidden onChange={importConfig} />
       </div>
 
-      <div className="stat-grid">
+      <div className="stat-grid config-summary-grid">
         <StatCard label="生效中" value={active ? 1 : 0} sub={active?.name} />
         <StatCard label="草稿" value={drafts.length} />
         <StatCard label="历史版本" value={archived.length} />

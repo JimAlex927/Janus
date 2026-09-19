@@ -76,7 +76,7 @@ export function SettingsPage({ store }: { store: ConfigStore }) {
   });
 
   return (
-    <section className="page">
+    <section className="page settings-page">
       <div className="toolbar">
         <p className="muted">
           {dirty ? "文件有未保存的修改。" : "与配置文件一致。"}保存后必须重启 Janus，运行中的流量不受影响。

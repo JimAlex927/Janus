@@ -974,7 +974,7 @@ function translateWarning(warning: string): string {
   if (loading || !draft) return <Empty text="正在加载配置…" />;
 
   return (
-    <section className="editor-shell">
+    <section className="editor-shell editor-page">
       <div className="editor-topbar">
         <button type="button" className="btn ghost" onClick={() => { if (!dirty || window.confirm("有未保存的草稿，离开会丢失。继续吗？")) onBack(); }}>
           ← 返回列表
