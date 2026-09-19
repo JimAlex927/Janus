@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { getConfig } from "./api";
 import type { ConfigStore } from "./useConfig";
-import { Badge, Empty, StatCard } from "./ui";
+import { Badge, Empty, StatCard, useDialogController } from "./ui";
 
 export interface ConfigRecord {
   id: number;
@@ -15,6 +15,7 @@ export function ConfigsPage({ store, onEdit }: { store: ConfigStore; onEdit: (id
   const [configs, setConfigs] = useState<ConfigRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const dialogs = useDialogController();
 
   useEffect(() => {
     loadConfigs();
@@ -36,7 +37,13 @@ export function ConfigsPage({ store, onEdit }: { store: ConfigStore; onEdit: (id
   }
 
   async function createConfig() {
-    const name = window.prompt("配置名称：", `config-${configs.length + 1}`);
+    const name = (await dialogs.prompt({
+      title: "新建配置",
+      message: "为这份配置设置一个便于识别的名称。",
+      initialValue: `config-${configs.length + 1}`,
+      placeholder: "例如 production",
+      confirmLabel: "创建配置",
+    }))?.trim();
     if (!name) return;
     try {
       const snap = await getConfig();
@@ -75,7 +82,13 @@ export function ConfigsPage({ store, onEdit }: { store: ConfigStore; onEdit: (id
   }
 
   async function duplicateConfig(id: number, name: string) {
-    const next = window.prompt("复制为新配置，名称：", `${name}-copy`);
+    const next = (await dialogs.prompt({
+      title: "复制配置",
+      message: `将复制「${name}」的完整内容与凭据，生成一份新的草稿。`,
+      initialValue: `${name}-copy`,
+      placeholder: "请输入新配置名称",
+      confirmLabel: "创建副本",
+    }))?.trim();
     if (!next) return;
     try {
       const res = await fetch("/api/v1/configs", {
@@ -111,7 +124,13 @@ export function ConfigsPage({ store, onEdit }: { store: ConfigStore; onEdit: (id
         throw new Error("文件不是 Janus 完整配置（缺少 routes 数组）。");
       }
       const fallback = file.name.replace(/\.json$/i, "") || "imported";
-      const name = window.prompt("导入为新配置，名称：", fallback);
+      const name = (await dialogs.prompt({
+        title: "导入配置",
+        message: "为导入的 JSON 设置名称。脱敏凭据需要在导入后重新填写。",
+        initialValue: fallback,
+        placeholder: "请输入配置名称",
+        confirmLabel: "导入配置",
+      }))?.trim();
       if (!name) return;
       const res = await fetch("/api/v1/configs", {
         method: "POST",
@@ -134,7 +153,12 @@ export function ConfigsPage({ store, onEdit }: { store: ConfigStore; onEdit: (id
   }
 
   async function deleteConfig(id: number, name: string) {
-    if (!window.confirm(`删除配置 "${name}"？`)) return;
+    if (!(await dialogs.confirm({
+      title: "删除配置",
+      message: `确定删除「${name}」吗？该操作不可撤销。`,
+      confirmLabel: "删除配置",
+      tone: "danger",
+    }))) return;
     try {
       const res = await fetch(`/api/v1/configs/${id}`, { method: "DELETE" });
       if (!res.ok) throw new Error(await res.text());
@@ -146,7 +170,12 @@ export function ConfigsPage({ store, onEdit }: { store: ConfigStore; onEdit: (id
   }
 
   async function publishConfig(id: number) {
-    if (!window.confirm("发布此配置？当前生效配置将被替换。")) return;
+    if (!(await dialogs.confirm({
+      title: "发布配置",
+      message: "当前生效配置将被替换，发布后路由配置会立即进入新的 generation。",
+      confirmLabel: "确认发布",
+      tone: "warning",
+    }))) return;
     try {
       const res = await fetch(`/api/v1/configs/${id}/publish`, {
         method: "POST",
@@ -229,6 +258,7 @@ export function ConfigsPage({ store, onEdit }: { store: ConfigStore; onEdit: (id
           ))}
         </div>
       )}
+      {dialogs.dialog}
     </section>
   );
 }

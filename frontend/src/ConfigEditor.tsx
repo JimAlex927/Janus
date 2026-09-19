@@ -31,7 +31,7 @@ import { cloneConfig, limenNames, routeActionLabel, routeMatchLabel, serviceSubt
 import { MiddlewareManagerModal, type MiddlewareScopeFilter } from "./MiddlewareManager";
 import { RegistryManagerModal } from "./RegistryManager";
 import { RouteEditor } from "./RouteEditor";
-import { Badge, Drawer, Empty } from "./ui";
+import { Badge, Drawer, Empty, useDialogController } from "./ui";
 import type { ConfigStore } from "./useConfig";
 import { validateLocal } from "./validate";
 import type { JanusConfig, Limen, Middleware, MiddlewareCapability, NacosRegistry, Route, Service } from "./types";
@@ -254,6 +254,7 @@ function ConfigEditor({ store, id, onBack, onStatusChange }: { store: ConfigStor
   const [nodes, setNodes, onNodesChangeDefault] = useNodesState<FlowNode>([]);
   const [edges, setEdges, onEdgesChangeDefault] = useEdgesState<Edge>([]);
   const { screenToFlowPosition } = useReactFlow();
+  const dialogs = useDialogController();
   const draftRef = useRef<JanusConfig | null>(null);
   draftRef.current = draft;
 
@@ -663,13 +664,18 @@ function ConfigEditor({ store, id, onBack, onStatusChange }: { store: ConfigStor
     setEditing(null);
   }
 
-  function deleteEditing() {
+  async function deleteEditing() {
     if (!editing || editing.kind === "limen") return;
     const nid = nodeId(editing.kind, editing.originalName);
     if (editing.isNew) {
       // 新建未确认：直接移除刚创建的节点与数据
       removeFlowNode(nid);
-    } else if (window.confirm(`删除 ${editing.name}？该操作会同步清理引用。`)) {
+    } else if (await dialogs.confirm({
+      title: `删除 ${editing.kind === "route" ? "Route" : "Service"}`,
+      message: `删除「${editing.name}」后，相关引用会同步清理。该操作不可撤销。`,
+      confirmLabel: "确认删除",
+      tone: "danger",
+    })) {
       removeFlowNode(nid);
     } else {
       return;
@@ -738,7 +744,7 @@ function ConfigEditor({ store, id, onBack, onStatusChange }: { store: ConfigStor
   }
 
   /** 删除中间件定义并同步清理草稿与打开中抽屉内的所有引用。 */
-  function removeMiddlewareDef(original: string) {
+  async function removeMiddlewareDef(original: string) {
     const draft = draftRef.current;
     if (!draft) return;
     const usedRoutes = (draft.routes || []).filter((r) => (r.middlewares || []).includes(original)).map((r) => r.name);
@@ -749,7 +755,12 @@ function ConfigEditor({ store, id, onBack, onStatusChange }: { store: ConfigStor
       openRefs.push(editing.kind === "route" ? `Route ${editing.name}（编辑中）` : `Service ${editing.name}（编辑中）`);
     }
     const total = usedRoutes.length + usedServices.length + openRefs.length;
-    if (!window.confirm(`删除 Middleware ${original}？会同步从 ${total} 处引用移除。`)) return;
+    if (!(await dialogs.confirm({
+      title: "删除 Middleware",
+      message: `删除「${original}」后，会同步从 ${total} 处引用中移除。该操作不可撤销。`,
+      confirmLabel: "确认删除",
+      tone: "danger",
+    }))) return;
     const stale = original;
     mutate((prev) => {
       const next = { ...(prev.middlewares || {}) };
@@ -814,7 +825,7 @@ function ConfigEditor({ store, id, onBack, onStatusChange }: { store: ConfigStor
     });
   }
 
-  function deleteRegistry(name: string) {
+  async function deleteRegistry(name: string) {
     const draft = draftRef.current;
     if (!draft) return;
     const usedBy = Object.entries(draft.services || {}).filter(([, s]) => s.nacos?.registry === name).map(([serviceName]) => serviceName);
@@ -827,7 +838,12 @@ function ConfigEditor({ store, id, onBack, onStatusChange }: { store: ConfigStor
       store.setMessage(`Registry ${name} 仍被引用：${who.join("、")}，请先修改这些 Service。`);
       return;
     }
-    if (!window.confirm(`删除 Registry ${name}？`)) return;
+    if (!(await dialogs.confirm({
+      title: "删除 Registry",
+      message: `确定删除「${name}」吗？请先确认没有 Service 依赖它。`,
+      confirmLabel: "确认删除",
+      tone: "danger",
+    }))) return;
     mutate((prev) => {
       const next = { ...(prev.discovery?.nacos || {}) };
       delete next[name];
@@ -843,9 +859,14 @@ function ConfigEditor({ store, id, onBack, onStatusChange }: { store: ConfigStor
     setRegManager(null);
   }
 
-  function deleteSelected() {
+  async function deleteSelected() {
     if (selectedIds.length === 0) return;
-    if (!window.confirm(`删除选中的 ${selectedIds.length} 个节点？引用会同步清理，被引用的节点会拒绝并提示。`)) return;
+    if (!(await dialogs.confirm({
+      title: "删除选中节点",
+      message: `确定删除选中的 ${selectedIds.length} 个节点吗？引用会同步清理，被引用的节点会拒绝并提示。`,
+      confirmLabel: "删除节点",
+      tone: "danger",
+    }))) return;
     for (const nid of selectedIds) removeFlowNode(nid);
     setSelectedIds([]);
   }
@@ -862,9 +883,14 @@ function ConfigEditor({ store, id, onBack, onStatusChange }: { store: ConfigStor
   return Object.fromEntries(nodes.map((n) => [n.id, { x: Math.round(n.position.x), y: Math.round(n.position.y) }]));
 }
 
-  function switchView(next: EditorView) {
+  async function switchView(next: EditorView) {
     if (viewMode === "json" && draft && jsonText.trim() !== JSON.stringify(draft, null, 2)) {
-      if (!window.confirm("JSON 有未应用的修改，切换视图会丢失这些修改。继续吗？")) return;
+      if (!(await dialogs.confirm({
+        title: "放弃 JSON 修改？",
+        message: "当前 JSON 还有未应用的修改，切换视图会丢失这些内容。",
+        confirmLabel: "放弃并切换",
+        tone: "warning",
+      }))) return;
     }
     if (next === "json" && draft) setJsonText(JSON.stringify(draft, null, 2));
     setJsonError("");
@@ -943,7 +969,12 @@ function routeCoreLabel(route: Route): string {
       store.setMessage("草稿有未保存的修改，请先确认抽屉并保存草稿，再写入文件。");
       return;
     }
-    if (!window.confirm("将本配置已保存的入口写入生效文件？运行不受影响，重启 Janus 后生效。")) return;
+    if (!(await dialogs.confirm({
+      title: "写入入口配置",
+      message: "将已保存的入口写入生效文件。当前运行不受影响，重启 Janus 后才会生效。",
+      confirmLabel: "写入文件",
+      tone: "warning",
+    }))) return;
     setBusy(true);
     try {
       const result = await stageLimens(id);
@@ -981,7 +1012,12 @@ function routeCoreLabel(route: Route): string {
 
   async function publish() {
     if (dirty && !(await save())) return;
-    if (!window.confirm(`发布配置「${meta?.name}」？当前生效配置将被替换。`)) return;
+    if (!(await dialogs.confirm({
+      title: "发布配置",
+      message: `当前生效配置将被「${meta?.name}」替换，路由变化会立即进入新的 generation。`,
+      confirmLabel: "确认发布",
+      tone: "warning",
+    }))) return;
     setBusy(true);
     try {
       const result = await publishStoredConfig(id, store.revision);
@@ -1017,6 +1053,17 @@ function translateWarning(warning: string): string {
   return warning;
 }
 
+  async function leaveEditor() {
+    if (!dirty || await dialogs.confirm({
+      title: "离开配置编辑",
+      message: "当前有未保存的草稿，离开后这些修改会丢失。",
+      confirmLabel: "放弃并离开",
+      tone: "warning",
+    })) {
+      onBack();
+    }
+  }
+
   if (loading || !draft) return <Empty text="正在加载配置…" />;
 
   const routes = [...(draft.routes || [])];
@@ -1037,7 +1084,7 @@ function translateWarning(warning: string): string {
   return (
     <section className="editor-shell editor-page">
       <div className="editor-topbar">
-        <button type="button" className="btn ghost" onClick={() => { if (!dirty || window.confirm("有未保存的草稿，离开会丢失。继续吗？")) onBack(); }}>
+        <button type="button" className="btn ghost" onClick={leaveEditor}>
           ← 返回列表
         </button>
         <div className="editor-title">
@@ -1276,6 +1323,7 @@ function translateWarning(warning: string): string {
           notify={store.setMessage}
         />
       )}
+      {dialogs.dialog}
     </section>
   );
 }
