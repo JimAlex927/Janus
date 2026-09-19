@@ -23,7 +23,7 @@ export function validateLocal(config: JanusConfig, catalog: MiddlewareCapability
         || value === null
         || value === ""
         || (field.kind === "string_list" && Array.isArray(value) && value.length === 0)
-        || (field.kind === "string_map" && value && typeof value === "object" && !Array.isArray(value) && Object.keys(value).length === 0);
+        || ((field.kind === "string_map" || field.kind === "json_object") && value && typeof value === "object" && !Array.isArray(value) && Object.keys(value).length === 0);
       if (field.required && missing) {
         errors.push(`Middleware ${name} 的 ${field.label} 不能为空`);
         continue;
@@ -43,6 +43,8 @@ export function validateLocal(config: JanusConfig, catalog: MiddlewareCapability
         errors.push(`Middleware ${name} 的 ${field.label} 必须是文本列表`);
       } else if (field.kind === "string_map" && (typeof value !== "object" || Array.isArray(value) || Object.values(value as Record<string, unknown>).some((item) => typeof item !== "string"))) {
         errors.push(`Middleware ${name} 的 ${field.label} 必须是文本键值对`);
+      } else if (field.kind === "json_object" && (typeof value !== "object" || value === null || Array.isArray(value))) {
+        errors.push(`Middleware ${name} 的 ${field.label} 必须是 JSON 对象`);
       }
     }
   };

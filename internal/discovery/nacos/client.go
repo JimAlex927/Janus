@@ -90,7 +90,10 @@ func (c *client) Watch(query config.NacosService, changed func()) (func(), error
 	if err := c.naming.Subscribe(param); err != nil {
 		// The SDK installs its local callback before its network subscription.
 		// Return cleanup even on failure so construction rollback removes it.
-		return cancel, fmt.Errorf("nacos subscription failed")
+		// Preserve the SDK error: it identifies the actual failure (for example
+		// an invalid namespace, authentication rejection, or gRPC connectivity)
+		// while still keeping the public error scoped to the Nacos subscription.
+		return cancel, fmt.Errorf("nacos subscription failed: %w", err)
 	}
 	return cancel, nil
 }
@@ -98,7 +101,7 @@ func (c *client) Watch(query config.NacosService, changed func()) (func(), error
 func (c *client) Snapshot(query config.NacosService) (discovery.Snapshot, error) {
 	service, err := c.naming.GetService(vo.GetServiceParam{ServiceName: query.ServiceName, GroupName: query.GroupName, Clusters: query.Clusters})
 	if err != nil {
-		return discovery.Snapshot{}, fmt.Errorf("nacos service snapshot unavailable")
+		return discovery.Snapshot{}, fmt.Errorf("nacos service snapshot unavailable: %w", err)
 	}
 	result := discovery.Snapshot{Version: service.LastRefTime, Instances: make([]discovery.Instance, 0, len(service.Hosts))}
 	for _, instance := range service.Hosts {

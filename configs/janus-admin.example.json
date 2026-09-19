@@ -79,7 +79,7 @@
     "service-2": {
       "nacos": {
         "registry": "registry-1",
-        "service_name": "test",
+        "service_name": "clever-detector-906",
         "group_name": "DEFAULT_GROUP",
         "scheme": "http"
       },
@@ -118,10 +118,12 @@
       "registry-1": {
         "servers": [
           {
-            "address": "192.168.20.69",
-            "port": 8848
+            "address": "39.104.66.49",
+            "port": 18848,
+            "grpc_port": 19848
           }
         ],
+        "namespace_id": "uds-saas-test",
         "timeout": "5s",
         "stale_after": "2m0s"
       }

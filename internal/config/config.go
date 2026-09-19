@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -101,8 +102,13 @@ type Middleware struct {
 	InFlight    *InFlightSettings    `json:"in_flight,omitempty"`
 	Headers     *HeadersSettings     `json:"headers,omitempty"`
 	CORS        *CORSSettings        `json:"cors,omitempty"`
+	JWT         *JWTSettings         `json:"jwt,omitempty"`
 	StripPrefix *StripPrefixSettings `json:"strip_prefix,omitempty"`
 	AddPrefix   *AddPrefixSettings   `json:"add_prefix,omitempty"`
+	BasicAuth   *BasicAuthSettings   `json:"basic_auth,omitempty"`
+	IPAllowList *IPAllowListSettings `json:"ip_allowlist,omitempty"`
+	RateLimit   *RateLimitSettings   `json:"rate_limit,omitempty"`
+	Compress    *CompressSettings    `json:"compress,omitempty"`
 }
 
 const (
@@ -141,6 +147,51 @@ type InFlightSettings struct {
 	MaxConcurrent int `json:"max_concurrent"`
 }
 
+type BasicAuthSettings struct {
+	Realm        string            `json:"realm"`
+	Users        map[string]string `json:"users"`
+	RemoveHeader bool              `json:"remove_header,omitempty"`
+}
+
+type IPAllowListSettings struct {
+	SourceRanges []string `json:"source_ranges"`
+}
+
+type RateLimitSettings struct {
+	Average int      `json:"average"`
+	Period  Duration `json:"period"`
+	Burst   int      `json:"burst"`
+	MaxKeys int      `json:"max_keys,omitempty"`
+}
+
+type CompressSettings struct{}
+
+const (
+	DefaultRateLimitAverage = 100
+	DefaultRateLimitPeriod  = Duration(time.Second)
+	DefaultRateLimitBurst   = 100
+	DefaultRateLimitMaxKeys = 10000
+	MaxRateLimitAverage     = 1_000_000
+	MaxRateLimitBurst       = 1_000_000
+	MaxRateLimitKeys        = 1_000_000
+)
+
+func (s RateLimitSettings) WithDefaults() RateLimitSettings {
+	if s.Average == 0 {
+		s.Average = DefaultRateLimitAverage
+	}
+	if s.Period == 0 {
+		s.Period = DefaultRateLimitPeriod
+	}
+	if s.Burst == 0 {
+		s.Burst = DefaultRateLimitBurst
+	}
+	if s.MaxKeys == 0 {
+		s.MaxKeys = DefaultRateLimitMaxKeys
+	}
+	return s
+}
+
 // HeadersSettings mutates end-to-end headers around the selected handler.
 // Hop-by-hop and framing headers are rejected during configuration validation.
 type HeadersSettings struct {
@@ -163,6 +214,33 @@ type CORSSettings struct {
 }
 
 const MaxCORSMaxAgeSeconds = 86400
+
+// JWTSettings configures authentication without forwarding claims to an
+// upstream. Exactly one key source is required.
+type JWTSettings struct {
+	KeySource      JWTKeySource `json:"key_source"`
+	Algorithms     []string     `json:"algorithms"`
+	Issuer         string       `json:"issuer"`
+	Audience       []string     `json:"audience"`
+	RequiredClaims []string     `json:"required_claims,omitempty"`
+	ClockSkew      Duration     `json:"clock_skew,omitempty"`
+}
+
+type JWTKeySource struct {
+	JWKSURL       string `json:"jwks_url,omitempty"`
+	PublicKeyFile string `json:"public_key_file,omitempty"`
+	SecretEnv     string `json:"secret_env,omitempty"`
+}
+
+func (s JWTSettings) WithDefaults() JWTSettings {
+	if s.ClockSkew == 0 {
+		s.ClockSkew = Duration(30 * time.Second)
+	}
+	s.Algorithms = append([]string(nil), s.Algorithms...)
+	s.Audience = append([]string(nil), s.Audience...)
+	s.RequiredClaims = append([]string(nil), s.RequiredClaims...)
+	return s
+}
 
 // StripPrefixSettings removes Prefix from a matching request path before it
 // reaches the service. Janus emits the accumulated stripped prefix as the
@@ -627,10 +705,25 @@ func (c Config) Validate() error {
 		if definition.CORS != nil {
 			defined++
 		}
+		if definition.JWT != nil {
+			defined++
+		}
 		if definition.StripPrefix != nil {
 			defined++
 		}
 		if definition.AddPrefix != nil {
+			defined++
+		}
+		if definition.BasicAuth != nil {
+			defined++
+		}
+		if definition.IPAllowList != nil {
+			defined++
+		}
+		if definition.RateLimit != nil {
+			defined++
+		}
+		if definition.Compress != nil {
 			defined++
 		}
 		if defined != 1 {
@@ -658,6 +751,11 @@ func (c Config) Validate() error {
 				return fmt.Errorf("middleware %q cors: %w", name, err)
 			}
 		}
+		if definition.JWT != nil {
+			if err := validateJWTSettings(*definition.JWT); err != nil {
+				return fmt.Errorf("middleware %q jwt: %w", name, err)
+			}
+		}
 		if definition.StripPrefix != nil {
 			if err := validateMiddlewarePathPrefix(name, "strip_prefix", definition.StripPrefix.Prefix); err != nil {
 				return err
@@ -666,6 +764,145 @@ func (c Config) Validate() error {
 		if definition.AddPrefix != nil {
 			if err := validateMiddlewarePathPrefix(name, "add_prefix", definition.AddPrefix.Prefix); err != nil {
 				return err
+			}
+		}
+		if definition.BasicAuth != nil {
+			if err := validateBasicAuthSettings(*definition.BasicAuth); err != nil {
+				return fmt.Errorf("middleware %q basic_auth: %w", name, err)
+			}
+		}
+		if definition.IPAllowList != nil {
+			if err := validateIPAllowListSettings(*definition.IPAllowList); err != nil {
+				return fmt.Errorf("middleware %q ip_allowlist: %w", name, err)
+			}
+		}
+		if definition.RateLimit != nil {
+			if err := validateRateLimitSettings(definition.RateLimit.WithDefaults()); err != nil {
+				return fmt.Errorf("middleware %q rate_limit: %w", name, err)
+			}
+		}
+	}
+	return nil
+}
+
+func validateBasicAuthSettings(settings BasicAuthSettings) error {
+	if strings.TrimSpace(settings.Realm) == "" || strings.ContainsAny(settings.Realm, "\r\n") {
+		return errors.New("realm is required")
+	}
+	if len(settings.Users) == 0 || len(settings.Users) > 256 {
+		return errors.New("users must contain 1 to 256 entries")
+	}
+	for username, hash := range settings.Users {
+		if username == "" || strings.ContainsAny(username, "\r\n:") || strings.TrimSpace(hash) == "" {
+			return errors.New("usernames and bcrypt hashes are invalid")
+		}
+	}
+	return nil
+}
+
+func validateIPAllowListSettings(settings IPAllowListSettings) error {
+	if len(settings.SourceRanges) == 0 || len(settings.SourceRanges) > MaxTrustedProxyCIDRs {
+		return fmt.Errorf("source_ranges must contain 1 to %d CIDRs", MaxTrustedProxyCIDRs)
+	}
+	for _, raw := range settings.SourceRanges {
+		if _, _, err := net.ParseCIDR(raw); err != nil {
+			return fmt.Errorf("invalid source range %q", raw)
+		}
+	}
+	return nil
+}
+
+func validateRateLimitSettings(settings RateLimitSettings) error {
+	if settings.Average < 1 || settings.Average > MaxRateLimitAverage {
+		return fmt.Errorf("average must be between 1 and %d", MaxRateLimitAverage)
+	}
+	if settings.Period.Duration() <= 0 || settings.Period.Duration() > time.Hour {
+		return errors.New("period must be between 1ns and 1h")
+	}
+	if settings.Burst < 1 || settings.Burst > MaxRateLimitBurst {
+		return fmt.Errorf("burst must be between 1 and %d", MaxRateLimitBurst)
+	}
+	if settings.MaxKeys < 1 || settings.MaxKeys > MaxRateLimitKeys {
+		return fmt.Errorf("max_keys must be between 1 and %d", MaxRateLimitKeys)
+	}
+	return nil
+}
+
+var jwtAlgorithms = map[string]struct{}{
+	"RS256": {}, "RS384": {}, "RS512": {}, "PS256": {}, "PS384": {}, "PS512": {},
+	"ES256": {}, "ES384": {}, "ES512": {}, "EdDSA": {}, "HS256": {}, "HS384": {}, "HS512": {},
+}
+
+func validateJWTSettings(settings JWTSettings) error {
+	if len(settings.Algorithms) == 0 || len(settings.Algorithms) > 8 {
+		return errors.New("algorithms must contain between 1 and 8 values")
+	}
+	seen := map[string]bool{}
+	for _, algorithm := range settings.Algorithms {
+		if _, ok := jwtAlgorithms[algorithm]; !ok {
+			return fmt.Errorf("unsupported algorithm %q", algorithm)
+		}
+		if seen[algorithm] {
+			return fmt.Errorf("algorithm %q is duplicated", algorithm)
+		}
+		seen[algorithm] = true
+	}
+	if strings.TrimSpace(settings.Issuer) == "" || strings.ContainsAny(settings.Issuer, "\x00\r\n") {
+		return errors.New("issuer is required")
+	}
+	if len(settings.Audience) == 0 || len(settings.Audience) > 16 {
+		return errors.New("audience must contain between 1 and 16 values")
+	}
+	for _, value := range append(append([]string(nil), settings.Audience...), settings.RequiredClaims...) {
+		if strings.TrimSpace(value) == "" || strings.ContainsAny(value, "\x00\r\n") {
+			return errors.New("audience and claim names must be nonempty and contain no control characters")
+		}
+	}
+	if len(settings.RequiredClaims) > 16 {
+		return errors.New("required_claims cannot contain more than 16 values")
+	}
+	claims := map[string]bool{}
+	for _, claim := range settings.RequiredClaims {
+		if claims[claim] {
+			return fmt.Errorf("required claim %q is duplicated", claim)
+		}
+		claims[claim] = true
+	}
+	if settings.ClockSkew.Duration() < 0 || settings.ClockSkew.Duration() > 5*time.Minute {
+		return errors.New("clock_skew must be between 0 and 5m")
+	}
+	sources := 0
+	if settings.KeySource.JWKSURL != "" {
+		sources++
+	}
+	if settings.KeySource.PublicKeyFile != "" {
+		sources++
+	}
+	if settings.KeySource.SecretEnv != "" {
+		sources++
+	}
+	if sources != 1 {
+		return errors.New("key_source must configure exactly one of jwks_url, public_key_file or secret_env")
+	}
+	if settings.KeySource.JWKSURL != "" {
+		u, err := url.Parse(settings.KeySource.JWKSURL)
+		if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+			return errors.New("jwks_url must be an HTTPS URL without credentials, query or fragment")
+		}
+	}
+	if settings.KeySource.SecretEnv != "" {
+		if !environmentName.MatchString(settings.KeySource.SecretEnv) {
+			return errors.New("secret_env is not a valid environment variable name")
+		}
+		for _, algorithm := range settings.Algorithms {
+			if !strings.HasPrefix(algorithm, "HS") {
+				return errors.New("secret_env only supports HS algorithms")
+			}
+		}
+	} else {
+		for _, algorithm := range settings.Algorithms {
+			if strings.HasPrefix(algorithm, "HS") {
+				return errors.New("HS algorithms require secret_env")
 			}
 		}
 	}
@@ -939,6 +1176,21 @@ func validateTLSSettings(name string, settings *TLSSettings) error {
 func (c Config) WithDefaults() Config {
 	c.Settings = c.Settings.WithDefaults() // 这里是配置进行一个矫正 没写的配置填充默认值的作用
 	c.Discovery = c.Discovery.WithDefaults()
+	if c.Middlewares != nil {
+		middlewares := make(map[string]Middleware, len(c.Middlewares))
+		for name, definition := range c.Middlewares {
+			if definition.JWT != nil {
+				jwt := definition.JWT.WithDefaults()
+				definition.JWT = &jwt
+			}
+			if definition.RateLimit != nil {
+				rate := definition.RateLimit.WithDefaults()
+				definition.RateLimit = &rate
+			}
+			middlewares[name] = definition
+		}
+		c.Middlewares = middlewares
+	}
 	if len(c.Services) > 0 {
 		services := make(map[string]Service, len(c.Services))
 		for name, service := range c.Services {

@@ -1,9 +1,9 @@
-# JWT middleware design
+# JWT middleware
 
-This document records the design boundary for a future built-in `jwt`
-middleware. The middleware is not implemented or advertised by the current
-capability catalog yet. Keeping the design separate prevents a partially
-verified token parser from becoming a production authentication boundary.
+This document describes the built-in `jwt` middleware. It is available at
+route and service scope and is advertised by the backend capability catalog.
+JWT authenticates the caller; authorization and claim forwarding remain
+separate policies.
 
 ## Why it fits Janus
 
@@ -25,7 +25,7 @@ required claims. Claim-to-header forwarding, arbitrary claim expressions and
 scope/role authorization should be separate reviewed features; forwarding
 untrusted claims to an upstream by default would create a new trust boundary.
 
-## Proposed policy shape
+## Policy shape
 
 The candidate configuration is intentionally explicit. Exactly one key source
 must be configured, and algorithms must be an allowlist rather than inferred
@@ -51,15 +51,17 @@ from the token header:
 }
 ```
 
-The first production profile should prefer asymmetric verification:
+The supported key sources are:
 
-- `jwks_url` supports issuer key rotation, with HTTPS certificate verification,
-  bounded fetches, an immutable cached key set and stale-key behavior defined
-  before implementation.
+- `jwks_url` supports issuer key rotation. It is HTTPS-only, follows only
+  same-host HTTPS redirects, fetches at most 1 MiB, caches keys for five
+  minutes, and can use the last good set for up to fifteen minutes during a
+  provider outage.
 - `public_key_file` is a deterministic offline alternative for installations
   that distribute public keys with the deployment.
-- `secret_env` may be supported for small internal deployments only; it must
-  never be returned by the admin API or written into access logs.
+- `secret_env` supports HS256/384/512 for internal deployments. The secret is
+  read only from the process environment, must be at least 32 bytes, and is
+  never returned by the admin API or written into access logs.
 
 The implementation must reject `none`, algorithm confusion, missing `kid` when
 the selected key set requires it, duplicate claims with ambiguous decoding,
@@ -79,31 +81,25 @@ JWT must not accept tokens in query strings. The initial source is the
 `Authorization: Bearer <token>` header only. Cookie support, if needed later,
 needs CSRF and SameSite policy of its own.
 
-## Implementation stages
+## Current implementation
 
-1. Add typed config, strict validation and a capability-catalog entry only when
-   the constructor has a real verifier. Add redaction rules for every secret
-   source.
-2. Implement a leaf verifier package with an explicit algorithm allowlist,
-   bounded compact-token parsing, standard time claims, issuer/audience checks,
-   and generic client errors. Unit-test every rejection before wiring it into
-   HTTP middleware.
-3. Add static public-key verification first. Add a bounded JWKS cache and key
-   rotation worker only after lifecycle ownership across Runtime generations
-   is specified. A failed candidate generation must release its verifier/cache.
-4. Wire Route and Service construction through the existing typed factory.
-   Add real handler tests for 401/200, preflight, backend non-contact,
-   streaming protocols, reload rollback and old-generation retirement.
-5. Generate the console form from the backend catalog. Do not add JWT field or
-   type branches to TypeScript; the existing dynamic editor should render its
-   fields and restrictions.
+The verifier uses an explicit algorithm allowlist and the
+`golang-jwt/jwt/v5` parser. It bounds compact tokens at 16 KiB, rejects
+duplicate JSON object members, requires `exp`, validates `nbf`/`iss`/`aud` with
+configured clock skew, and returns a generic `401` with
+`WWW-Authenticate: Bearer`. Tokens are accepted only from the
+`Authorization: Bearer` header; query strings and cookies are not
+authentication sources.
+
+Each routing generation owns its verifier. A failed generation construction
+cannot publish a partially initialized policy, and a retired generation
+releases its verifier with the rest of its handler graph.
 
 ## Production acceptance
 
 Before enabling JWT for a business route, verify key rotation, clock skew,
 issuer/audience isolation, malformed and oversized tokens, concurrent request
 load, 401 response headers, no upstream contact on rejection, and behavior
-through H1/H2/H3, SSE and WebSocket paths. The deployment must also define
-whether the identity provider is reachable during startup and what happens
-when a cached JWKS becomes stale. Until those answers and tests exist, JWT is
-not part of the supported production middleware set.
+through H1/H2/H3, SSE and WebSocket paths. CORS must be attached outside JWT
+so an allowed preflight completes before authentication; JWT itself never
+bypasses authentication for OPTIONS requests.

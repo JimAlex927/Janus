@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"os"
 	"strconv"
 
 	"janus/internal/config"
@@ -13,6 +14,7 @@ import (
 	"janus/internal/forwarding"
 	"janus/internal/health"
 	"janus/internal/middleware"
+	"janus/internal/protocol"
 	"janus/internal/proxy"
 	"janus/internal/router"
 	"janus/internal/telemetry"
@@ -162,7 +164,7 @@ func NewWithDiscovery(c config.Config, logger *zap.Logger, transport http.RoundT
 				serviceLimiter = middleware.NewLimiter(limit)
 			}
 		}
-		serviceMiddlewares, err := buildMiddlewares(c, service.Middlewares, serviceLimiter)
+		serviceMiddlewares, err := buildMiddlewares(c, service.Middlewares, serviceLimiter, forwardingPolicies)
 		if err != nil {
 			return nil, err
 		}
@@ -171,7 +173,7 @@ func NewWithDiscovery(c config.Config, logger *zap.Logger, transport http.RoundT
 	}
 	routes := make([]router.Route, 0, len(c.Routes))
 	for _, r := range c.Routes {
-		routeMiddlewares, err := buildMiddlewares(c, r.Middlewares, nil)
+		routeMiddlewares, err := buildMiddlewares(c, r.Middlewares, nil, forwardingPolicies)
 		if err != nil {
 			return nil, err
 		}
@@ -282,7 +284,7 @@ func configuredServiceLimit(c config.Config, service config.Service) (int, bool)
 	return 0, false
 }
 
-func buildMiddlewares(c config.Config, names []string, serviceLimiter *middleware.Limiter) ([]middleware.Middleware, error) {
+func buildMiddlewares(c config.Config, names []string, serviceLimiter *middleware.Limiter, forwardingPolicies forwarding.Policies) ([]middleware.Middleware, error) {
 	result := make([]middleware.Middleware, 0, len(names))
 	for _, name := range names {
 		definition := c.Middlewares[name]
@@ -309,10 +311,52 @@ func buildMiddlewares(c config.Config, names []string, serviceLimiter *middlewar
 				AllowCredentials: rules.AllowCredentials,
 				MaxAgeSeconds:    rules.MaxAgeSeconds,
 			}))
+		case definition.JWT != nil:
+			rules := definition.JWT.WithDefaults()
+			var secret []byte
+			if rules.KeySource.SecretEnv != "" {
+				secret = []byte(os.Getenv(rules.KeySource.SecretEnv))
+				if len(secret) == 0 {
+					return nil, fmt.Errorf("middleware %q jwt secret_env is unset or empty", name)
+				}
+			}
+			jwtMiddleware, err := middleware.JWT(middleware.JWTOptions{
+				JWKSURL: rules.KeySource.JWKSURL, PublicKeyFile: rules.KeySource.PublicKeyFile,
+				Secret: secret, Algorithms: rules.Algorithms, Issuer: rules.Issuer,
+				Audience: rules.Audience, RequiredClaims: rules.RequiredClaims,
+				ClockSkew: rules.ClockSkew.Duration(),
+			})
+			if err != nil {
+				return nil, fmt.Errorf("middleware %q jwt: %w", name, err)
+			}
+			result = append(result, jwtMiddleware)
 		case definition.StripPrefix != nil:
 			result = append(result, middleware.StripPrefix(definition.StripPrefix.Prefix))
 		case definition.AddPrefix != nil:
 			result = append(result, middleware.AddPrefix(definition.AddPrefix.Prefix))
+		case definition.BasicAuth != nil:
+			rules := definition.BasicAuth
+			auth, err := middleware.BasicAuth(middleware.BasicAuthOptions{Realm: rules.Realm, Users: rules.Users, RemoveHeader: rules.RemoveHeader})
+			if err != nil {
+				return nil, fmt.Errorf("middleware %q basic_auth: %w", name, err)
+			}
+			result = append(result, auth)
+		case definition.IPAllowList != nil:
+			rules := definition.IPAllowList
+			allow, err := middleware.IPAllowList(middleware.IPAllowListOptions{SourceRanges: rules.SourceRanges, ClientIP: func(r *http.Request) string { return forwardingPolicies.For(protocol.LimenID(r)).Resolve(r).ClientIP }})
+			if err != nil {
+				return nil, fmt.Errorf("middleware %q ip_allowlist: %w", name, err)
+			}
+			result = append(result, allow)
+		case definition.RateLimit != nil:
+			rules := definition.RateLimit.WithDefaults()
+			limit, err := middleware.RateLimit(middleware.RateLimitOptions{Average: rules.Average, Period: rules.Period.Duration(), Burst: rules.Burst, MaxKeys: rules.MaxKeys, ClientIP: func(r *http.Request) string { return forwardingPolicies.For(protocol.LimenID(r)).Resolve(r).ClientIP }})
+			if err != nil {
+				return nil, fmt.Errorf("middleware %q rate_limit: %w", name, err)
+			}
+			result = append(result, limit)
+		case definition.Compress != nil:
+			result = append(result, middleware.Compress(middleware.CompressOptions{}))
 		default:
 			return nil, fmt.Errorf("middleware %q has no supported policy", name)
 		}

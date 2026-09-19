@@ -77,6 +77,18 @@ func MiddlewareCapabilities() []MiddlewareCapability {
 			},
 		},
 		{
+			Type: "jwt", Label: "JWT Authentication", Scopes: []string{MiddlewareScopeRoute, MiddlewareScopeService},
+			Description: "验证 Authorization Bearer JWT；校验签名、有效期、issuer、audience 和必需 claims，不向上游自动转发 claims。",
+			Fields: []MiddlewareFieldCapability{
+				{Name: "key_source", Label: "密钥来源", Kind: "json_object", Required: true, Description: "jwks_url、public_key_file、secret_env 三选一。"},
+				{Name: "algorithms", Label: "允许算法", Kind: "string_list", Required: true, Description: "显式算法白名单，禁止根据 token header 推断。"},
+				{Name: "issuer", Label: "Issuer", Kind: "string", Required: true},
+				{Name: "audience", Label: "Audience", Kind: "string_list", Required: true},
+				{Name: "required_claims", Label: "必需 Claims", Kind: "string_list", Description: "认证通过后只在请求上下文中提供，不自动转发。"},
+				{Name: "clock_skew", Label: "时钟偏差", Kind: "string", Default: "30s"},
+			},
+		},
+		{
 			Type: "strip_prefix", Label: "Strip Prefix", Scopes: []string{MiddlewareScopeRoute},
 			Description: "将匹配的路径前缀移除后再交给路由动作；转发到上游时会写入可信的 X-Forwarded-Prefix。",
 			Fields: []MiddlewareFieldCapability{{
@@ -91,6 +103,35 @@ func MiddlewareCapabilities() []MiddlewareCapability {
 				Name: "prefix", Label: "路径前缀", Kind: "string", Required: true, Default: "/internal",
 				Description: "必须是以 / 开头且不以 / 结尾的非根路径前缀。",
 			}},
+		},
+		{
+			Type: "basic_auth", Label: "Basic Authentication", Scopes: []string{MiddlewareScopeRoute, MiddlewareScopeService},
+			Description: "使用 bcrypt 密码哈希验证 HTTP Basic Auth；认证失败返回 401 challenge。",
+			Fields: []MiddlewareFieldCapability{
+				{Name: "realm", Label: "Realm", Kind: "string", Required: true, Default: "Janus"},
+				{Name: "users", Label: "用户哈希", Kind: "string_map", Required: true, Description: "用户名到 bcrypt 哈希的映射，禁止明文密码。"},
+				{Name: "remove_header", Label: "移除认证头", Kind: "boolean", Default: false, Description: "认证成功后不把 Authorization 传给上游。"},
+			},
+		},
+		{
+			Type: "ip_allowlist", Label: "IP Allow List", Scopes: []string{MiddlewareScopeRoute, MiddlewareScopeService},
+			Description: "只允许来自配置 CIDR 的客户端 IP；客户端 IP 使用 Janus 可信代理策略解析。",
+			Fields:      []MiddlewareFieldCapability{{Name: "source_ranges", Label: "来源 CIDR", Kind: "string_list", Required: true, Description: "每行一个 IPv4/IPv6 CIDR。"}},
+		},
+		{
+			Type: "rate_limit", Label: "Rate Limit", Scopes: []string{MiddlewareScopeRoute, MiddlewareScopeService},
+			Description: "按可信客户端 IP 进行有界 token-bucket 限流，拒绝时返回 429 和 Retry-After。",
+			Fields: []MiddlewareFieldCapability{
+				{Name: "average", Label: "平均速率", Kind: "integer", Required: true, Default: int64(DefaultRateLimitAverage), Min: int64Pointer(1), Max: int64Pointer(MaxRateLimitAverage)},
+				{Name: "period", Label: "周期", Kind: "string", Required: true, Default: "1s", Description: "average 个令牌在此周期内补充。"},
+				{Name: "burst", Label: "突发容量", Kind: "integer", Required: true, Default: int64(DefaultRateLimitBurst), Min: int64Pointer(1), Max: int64Pointer(MaxRateLimitBurst)},
+				{Name: "max_keys", Label: "最大客户端数", Kind: "integer", Default: int64(DefaultRateLimitMaxKeys), Min: int64Pointer(1), Max: int64Pointer(MaxRateLimitKeys)},
+			},
+		},
+		{
+			Type: "compress", Label: "Compress", Scopes: []string{MiddlewareScopeRoute, MiddlewareScopeService},
+			Description: "协商 gzip 压缩普通响应；自动跳过 WebSocket、SSE、空响应和已编码响应。",
+			Fields:      []MiddlewareFieldCapability{},
 		},
 	}
 }
@@ -109,10 +150,20 @@ func MiddlewareType(m Middleware) string {
 		return "headers"
 	case m.CORS != nil:
 		return "cors"
+	case m.JWT != nil:
+		return "jwt"
 	case m.StripPrefix != nil:
 		return "strip_prefix"
 	case m.AddPrefix != nil:
 		return "add_prefix"
+	case m.BasicAuth != nil:
+		return "basic_auth"
+	case m.IPAllowList != nil:
+		return "ip_allowlist"
+	case m.RateLimit != nil:
+		return "rate_limit"
+	case m.Compress != nil:
+		return "compress"
 	default:
 		return ""
 	}

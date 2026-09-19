@@ -89,11 +89,24 @@ export interface Middleware {
     response_set?: Record<string, string>;
     response_remove?: string[];
   };
+  cors?: {
+    allow_origins?: string[];
+    allow_methods?: string[];
+    allow_headers?: string[];
+    expose_headers?: string[];
+    allow_credentials?: boolean;
+    max_age_seconds?: number;
+  };
+  jwt?: Record<string, unknown>;
+  basic_auth?: { realm?: string; users?: Record<string, string>; remove_header?: boolean };
+  ip_allowlist?: { source_ranges?: string[] };
+  rate_limit?: { average?: number; period?: string; burst?: number; max_keys?: number };
+  compress?: Record<string, never>;
   strip_prefix?: { prefix?: string };
   [policy: string]: unknown;
 }
 
-export type MiddlewareFieldKind = "integer" | "string" | "string_list" | "string_map" | "boolean";
+export type MiddlewareFieldKind = "integer" | "string" | "string_list" | "string_map" | "json_object" | "boolean";
 
 export interface MiddlewareFieldCapability {
   name: string;

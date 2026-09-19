@@ -227,6 +227,22 @@ function CapabilityField({ field, value, onChange }: { field: MiddlewareFieldCap
   if (field.kind === "string_map") {
     return <DraftTextarea rows={4} value={mapToLines(value)} parse={linesToMap} onChange={onChange} placeholder="Header-Name: value" />;
   }
+  if (field.kind === "json_object") {
+    return <DraftTextarea
+      rows={4}
+      value={value && typeof value === "object" ? JSON.stringify(value, null, 2) : "{}"}
+      parse={(raw) => {
+        try {
+          const parsed = JSON.parse(raw);
+          return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+        } catch {
+          return value && typeof value === "object" ? value : {};
+        }
+      }}
+      onChange={onChange}
+      placeholder='{"jwks_url":"https://idp.example/.well-known/jwks.json"}'
+    />;
+  }
   return <input value={typeof value === "string" ? value : String(field.default ?? "")} onChange={(e) => onChange(e.target.value)} />;
 }
 

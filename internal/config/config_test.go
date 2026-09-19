@@ -180,6 +180,26 @@ func TestServiceMiddlewareConfig(t *testing.T) {
 	}
 }
 
+func TestJWTMiddlewareConfig(t *testing.T) {
+	valid := `{"listen":"127.0.0.1:8080","middlewares":{"auth":{"scope":"route","jwt":{"key_source":{"secret_env":"JANUS_JWT_SECRET"},"algorithms":["HS256"],"issuer":"https://issuer.example","audience":["janus"],"required_claims":["sub"]}}},"services":{"s":{"upstreams":["http://localhost:9000"]}},"routes":[{"name":"r","path_prefix":"/api","service":"s","middlewares":["auth"]}]}`
+	c, err := Load(strings.NewReader(valid))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Middlewares["auth"].JWT == nil || c.Middlewares["auth"].JWT.ClockSkew.Duration() != 30*time.Second {
+		t.Fatalf("jwt defaults were not applied: %+v", c.Middlewares["auth"].JWT)
+	}
+	if _, err := Load(strings.NewReader(strings.Replace(valid, `"algorithms":["HS256"]`, `"algorithms":["none"]`, 1))); err == nil {
+		t.Fatal("accepted unsupported jwt algorithm")
+	}
+	if _, err := Load(strings.NewReader(strings.Replace(valid, `"key_source":{"secret_env":"JANUS_JWT_SECRET"}`, `"key_source":{"secret_env":"JANUS_JWT_SECRET","jwks_url":"https://issuer.example/keys"}`, 1))); err == nil {
+		t.Fatal("accepted multiple jwt key sources")
+	}
+	if _, err := Load(strings.NewReader(strings.Replace(valid, `"audience":["janus"]`, `"audience":[]`, 1))); err == nil {
+		t.Fatal("accepted empty jwt audience")
+	}
+}
+
 func TestMiddlewareScopeConfig(t *testing.T) {
 	base := `{"listen":"127.0.0.1:8080","middlewares":{"policy":{"scope":"%s","body_limit":{"max_bytes":1024}}},"services":{"s":{"upstreams":["http://localhost:9000"]}},"routes":[{"name":"r","path_prefix":"/api","service":"s","middlewares":["policy"]}]}`
 	if _, err := Load(strings.NewReader(fmt.Sprintf(base, MiddlewareScopeRoute))); err != nil {
@@ -324,6 +344,26 @@ func TestMiddlewareCapabilitiesIncludeCORS(t *testing.T) {
 		return
 	}
 	t.Fatal("middleware capability catalog does not expose cors")
+}
+
+func TestExpandedMiddlewareConfig(t *testing.T) {
+	c := Config{
+		Listen: "127.0.0.1:8080",
+		Middlewares: map[string]Middleware{
+			"allow": {IPAllowList: &IPAllowListSettings{SourceRanges: []string{"10.0.0.0/8"}}},
+			"limit": {RateLimit: &RateLimitSettings{}},
+			"gzip":  {Compress: &CompressSettings{}},
+			"auth":  {BasicAuth: &BasicAuthSettings{Realm: "Janus", Users: map[string]string{"admin": "$2a$10$hash"}}},
+		},
+		Services: map[string]Service{"s": {Upstreams: []string{"http://127.0.0.1:9000"}}},
+		Routes:   []Route{{Name: "r", PathPrefix: "/", Service: "s", Middlewares: []string{"allow", "limit", "gzip", "auth"}}},
+	}
+	if err := c.WithDefaults().Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if got := c.WithDefaults().Middlewares["limit"].RateLimit.Burst; got != DefaultRateLimitBurst {
+		t.Fatalf("rate limit defaults not applied: %d", got)
+	}
 }
 
 func TestAddPrefixMiddlewareConfigAndScopes(t *testing.T) {

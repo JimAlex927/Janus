@@ -228,15 +228,16 @@ stays explicit and reviewable. Adding a type therefore requires config schema,
 validation, implementation, constructor and tests, but no frontend type switch.
 No route-level timeout override or arbitrary global policy list is needed initially.
 
-JWT is a future authentication policy, not part of the current supported
-catalog. Its key-source, algorithm allowlist, JWKS lifecycle, preflight order
-and claim-forwarding boundary are specified in
+JWT is a supported authentication policy in the current catalog. Its
+key-source, algorithm allowlist, JWKS lifecycle, preflight order and
+claim-forwarding boundary are specified in
 [jwt-middleware.md](jwt-middleware.md); the catalog must not advertise it
-until the verifier and lifecycle tests exist.
+without the verifier and lifecycle tests that define those boundaries.
 
 Initially use flat attachment arrays. A reusable named `chain` can be added when
 repetition warrants it; it then requires startup flattening, cycle detection,
-and bounded expansion. Traefik's [Chain middleware](https://doc.traefik.io/traefik/reference/routing-configuration/http/middlewares/chain/)
+and bounded expansion. The current Traefik-inspired policies and their limits
+are documented in [middleware.md](middleware.md). Traefik's [Chain middleware](https://doc.traefik.io/traefik/reference/routing-configuration/http/middlewares/chain/)
 is a reference for that later convenience, not a Phase 1 dependency.
 
 ## State and resource ownership

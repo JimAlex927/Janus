@@ -3,6 +3,7 @@ module janus
 go 1.25.13
 
 require (
+	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/nacos-group/nacos-sdk-go/v2 v2.3.5
 	github.com/quic-go/quic-go v0.61.0
 	go.uber.org/zap v1.21.0
