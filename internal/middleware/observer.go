@@ -82,6 +82,8 @@ func logOutcome(logger *zap.Logger, r *http.Request, observation *telemetry.Obse
 	}
 	fields := []zap.Field{
 		zap.String("request_id", outcome.RequestID),
+		zap.String("client_ip", boundedLogField(requestPeerIP(r))),
+		zap.String("remote_addr", boundedLogField(r.RemoteAddr)),
 		zap.String("method", boundedLogField(r.Method)),
 		zap.String("path", boundedLogField(r.URL.Path)),
 		zap.String("route", boundedLogField(outcome.Route)),

@@ -31,6 +31,7 @@ func TestObserveAddsRequestIDAndRecordsOutcome(t *testing.T) {
 		_, _ = io.WriteString(w, "ok")
 	})))
 	r := httptest.NewRequest(http.MethodPost, "http://gateway/orders?token=secret", strings.NewReader("abc"))
+	r.RemoteAddr = "203.0.113.9:4567"
 	r.Header.Set("X-Request-ID", "client-supplied")
 	w := &informationalResponseWriter{header: make(http.Header)}
 	h.ServeHTTP(w, r)
@@ -48,6 +49,8 @@ func TestObserveAddsRequestIDAndRecordsOutcome(t *testing.T) {
 	fields := entries[0].ContextMap()
 	for key, want := range map[string]any{
 		"request_id":     requestID,
+		"client_ip":      "203.0.113.9",
+		"remote_addr":    "203.0.113.9:4567",
 		"method":         "POST",
 		"path":           "/orders",
 		"route":          "orders",
