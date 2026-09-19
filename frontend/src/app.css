@@ -536,6 +536,19 @@ input:focus, select:focus, textarea:focus { outline: 2px solid #c7d0ff; border-c
 .config-card-actions { padding-top: 4px; border-top: 1px solid #e0e8e3; }
 
 /* global settings */
+.settings-hero { position: relative; overflow: hidden; display: flex; align-items: end; justify-content: space-between; gap: 26px; min-height: 178px; padding: 28px 32px; background: #12363a; color: #f7faf4; }
+.settings-hero::after { content: ""; position: absolute; right: -50px; top: -106px; width: 280px; height: 280px; border: 1px solid #6fc1ad42; border-radius: 50%; box-shadow: 0 0 0 36px #6fc1ad12, 0 0 0 72px #e3a35f0d; pointer-events: none; }
+.settings-hero > * { position: relative; z-index: 1; }
+.settings-kicker { display: flex; align-items: center; gap: 8px; color: #78c4b1; font-size: 10px; font-weight: 800; letter-spacing: .16em; }
+.settings-kicker span { width: 7px; height: 7px; border-radius: 50%; background: #84d5a1; box-shadow: 0 0 0 4px #84d5a125; }
+.settings-hero h2 { margin: 15px 0 8px; color: #f7faf4; font-size: 29px; font-weight: 650; }
+.settings-hero p { max-width: 460px; margin: 0; color: #aac6bf; font-size: 13px; line-height: 1.65; }
+.settings-hero-state { display: grid; gap: 7px; min-width: 160px; padding: 12px 0 3px 18px; border-left: 1px solid #6b9990; }
+.settings-hero-state strong { color: #d7eee7; font-size: 13px; }
+.settings-hero-state strong::before { content: ""; display: inline-block; width: 7px; height: 7px; margin-right: 8px; border-radius: 50%; background: #84d5a1; vertical-align: 1px; }
+.settings-hero-state span { color: #8eb1a9; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10px; letter-spacing: .1em; }
+.settings-hero-state.dirty strong { color: #ffe8c9; }
+.settings-hero-state.dirty strong::before { background: #e3a35f; }
 .settings-page .toolbar { align-items: center; padding: 14px 16px; border-top: 1px solid #ccd9d2; border-bottom: 1px solid #ccd9d2; }
 .settings-page .toolbar p { margin: 0; color: #758983; }
 .settings-page .settings-grid { gap: 26px 34px; }
@@ -575,12 +588,15 @@ input:focus, select:focus, textarea:focus { outline: 2px solid #c7d0ff; border-c
 
 @media (max-width: 900px) {
   .config-library-hero { display: grid; align-items: start; min-height: 0; padding: 24px; }
+  .settings-hero { align-items: start; padding: 24px; }
   .config-summary-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .editor-page .editor-topbar { padding: 12px; }
 }
 
 @media (max-width: 620px) {
   .config-library-hero { padding: 22px 20px; }
+  .settings-hero { display: grid; gap: 25px; padding: 22px 20px; }
+  .settings-hero-state { min-width: 0; padding: 12px 0 0; border-top: 1px solid #6b9990; border-left: 0; }
   .config-library-hero .toolbar-actions { justify-content: flex-start; }
   .config-summary-grid { grid-template-columns: 1fr; }
   .config-summary-grid .stat-card { border-right: 0; border-bottom: 1px solid #dce5df; }

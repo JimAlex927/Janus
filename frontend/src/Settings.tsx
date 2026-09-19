@@ -77,9 +77,20 @@ export function SettingsPage({ store }: { store: ConfigStore }) {
 
   return (
     <section className="page settings-page">
+      <div className="settings-hero">
+        <div>
+          <div className="settings-kicker"><span /> PROCESS SETTINGS</div>
+          <h2>全局运行设置</h2>
+          <p>控制请求生命周期、服务端连接与管理入口。保存后需要重启 Janus 才会生效。</p>
+        </div>
+        <div className={`settings-hero-state ${dirty ? "dirty" : ""}`}>
+          <strong>{dirty ? "有未保存修改" : "与配置文件同步"}</strong>
+          <span>REVISION {store.revision}</span>
+        </div>
+      </div>
       <div className="toolbar">
         <p className="muted">
-          {dirty ? "文件有未保存的修改。" : "与配置文件一致。"}保存后必须重启 Janus，运行中的流量不受影响。
+          {dirty ? "修改只保存在当前草稿，校验通过后写入文件。" : "当前内容与配置文件一致。"}
         </p>
         <div className="toolbar-actions">
           <button type="button" className="btn ghost" disabled={busy} onClick={() => store.validate()}>
