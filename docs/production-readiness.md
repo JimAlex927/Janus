@@ -83,6 +83,18 @@ It is explicitly development-only and does not close the Linux capacity gate.
    latency/error/resource thresholds and exercise traffic rollback plus process
    drain. Verify client results and backend state; rollback does not undo writes.
 
+### Local Linux container smoke: 2026-09-19
+
+At commit `ae9f22b`, a `CGO_ENABLED=0 GOOS=linux GOARCH=arm64` binary was run
+inside a clean `debian:bookworm-slim` container on the local OrbStack Linux
+engine. A temporary minimal configuration exposed one response route and the
+private admin listener. The smoke observed `/readyz` = `200 ok`, the route body
+`linux-ok`, then sent `SIGTERM`; the container exited with code `0` and the
+logs showed request draining plus the configured load-balancer removal delay.
+The container was removed after the check. This closes only a Linux process and
+socket smoke; it does not close the target-VM systemd, race, capacity, soak, or
+canary gates above.
+
 No live business traffic is switched until the destination, traffic scope and
 rollback baseline are identified. A local demo is not production canary evidence.
 

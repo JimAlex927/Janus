@@ -3,6 +3,20 @@
 This document records the purpose, scope, and verification for each Janus
 repository commit. Add a new dated section before every future commit.
 
+## 2026-09-19 — Record local Linux container smoke evidence
+
+Commit message: `docs(readiness): record Linux container smoke`.
+
+Scope:
+
+- Recorded the Debian Linux container check for readiness, a response route,
+  SIGTERM drain, and clean process exit.
+- Kept the remaining target-VM, systemd, capacity, soak, and canary gates
+  explicit rather than treating the local container as production approval.
+
+Verification: the documented container smoke completed at commit `ae9f22b`;
+the source tree remains covered by the Linux release gate recorded below.
+
 ## 2026-09-19 — Flush configuration directory metadata after publish
 
 Commit message: `fix(config): sync directory after atomic publish`.
