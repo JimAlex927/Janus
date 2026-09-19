@@ -117,6 +117,10 @@ cd frontend
 npm install
 npm run dev
 npm run build
+# from the repository root, refresh the tracked Go embed after reviewing dist/
+find internal/admin/ui/assets -type f -delete
+cp frontend/dist/index.html internal/admin/ui/index.html
+cp frontend/dist/assets/* internal/admin/ui/assets/
 ```
 
 The Vite development server proxies `/api`, `/livez`, `/readyz`, and `/metrics`

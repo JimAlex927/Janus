@@ -3,6 +3,21 @@
 This document records the purpose, scope, and verification for each Janus
 repository commit. Add a new dated section before every future commit.
 
+## 2026-09-19 — Refresh embedded Admin Console assets
+
+Commit message: `fix(console): refresh embedded admin assets`.
+
+Scope:
+
+- Replaced the tracked Go-embedded Admin Console bundle with the current Vite
+  build, including the designed action dialogs.
+- Updated the embedded index to reference the new hashed JavaScript and CSS
+  assets so release binaries do not serve a stale frontend after source edits.
+
+Verification: `npm --prefix frontend run build` and
+`go test ./internal/admin ./cmd/janus -count=1` passed locally; the embedded
+index references assets present under `internal/admin/ui/assets`.
+
 ## 2026-09-19 — Record local Linux container smoke evidence
 
 Commit message: `docs(readiness): record Linux container smoke`.
