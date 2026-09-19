@@ -137,3 +137,10 @@ func TestStaticDirectoryListing(t *testing.T) {
 		t.Fatalf("directory listing = %d %q", response.Code, response.Body.String())
 	}
 }
+
+func TestStaticAssetPathAllowsFilesystemRoot(t *testing.T) {
+	asset, ok := staticAssetPath(string(filepath.Separator), httptest.NewRequest(http.MethodGet, "http://gateway/etc/hosts", nil).URL)
+	if !ok || asset != filepath.Join(string(filepath.Separator), "etc", "hosts") {
+		t.Fatalf("filesystem-root asset = %q, %v", asset, ok)
+	}
+}

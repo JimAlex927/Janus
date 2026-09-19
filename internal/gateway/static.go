@@ -90,8 +90,8 @@ func staticAssetPath(root string, requestURL *url.URL) (string, bool) {
 		relative = ""
 	}
 	asset := filepath.Join(root, filepath.FromSlash(relative))
-	rootWithSeparator := root + string(os.PathSeparator)
-	if asset != root && !strings.HasPrefix(asset, rootWithSeparator) {
+	relativeAsset, err := filepath.Rel(root, asset)
+	if err != nil || filepath.IsAbs(relativeAsset) || relativeAsset == ".." || strings.HasPrefix(relativeAsset, ".."+string(os.PathSeparator)) {
 		return "", false
 	}
 	return asset, true
