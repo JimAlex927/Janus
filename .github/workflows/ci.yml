@@ -32,6 +32,12 @@ jobs:
       - name: Verify module integrity
         run: go mod verify
 
+      - name: Build and verify embedded Admin Console
+        run: |
+          npm --prefix frontend ci
+          npm --prefix frontend run build
+          ./scripts/verify-embedded-ui.sh
+
       - name: Linux release gate
         run: ./scripts/verify-linux.sh
 

@@ -121,7 +121,12 @@ npm run build
 find internal/admin/ui/assets -type f -delete
 cp frontend/dist/index.html internal/admin/ui/index.html
 cp frontend/dist/assets/* internal/admin/ui/assets/
+./scripts/verify-embedded-ui.sh
 ```
+
+CI runs the same build and comparison before the Go release gate. The tracked
+`internal/admin/ui` files are the release source of truth for `go:embed`; a
+successful frontend build alone does not update them.
 
 The Vite development server proxies `/api`, `/livez`, `/readyz`, and `/metrics`
 to the local Admin listener at `127.0.0.1:9090`. A release build is copied to `internal/admin/ui/` before

@@ -3,6 +3,21 @@
 This document records the purpose, scope, and verification for each Janus
 repository commit. Add a new dated section before every future commit.
 
+## 2026-09-19 — Gate embedded frontend drift in CI
+
+Commit message: `ci(console): verify embedded frontend assets`.
+
+Scope:
+
+- Added `scripts/verify-embedded-ui.sh` to compare the reviewed Vite output,
+  asset set, and bytes with the tracked Go embed.
+- Added the frontend `npm ci`/build and comparison to CI before the Linux Go
+  release gate, preventing source-only UI changes from shipping stale assets.
+- Documented the synchronization and verification sequence for releases.
+
+Verification: local frontend build and the embedded asset comparison pass on the
+current tree; the hosted workflow now executes the same check.
+
 ## 2026-09-19 — Record non-root Linux container smoke
 
 Commit message: `docs(readiness): record non-root Linux smoke`.
