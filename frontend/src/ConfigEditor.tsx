@@ -248,6 +248,7 @@ function ConfigEditor({ store, id, onBack, onStatusChange }: { store: ConfigStor
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [viewMode, setViewMode] = useState<EditorView>("canvas");
   const [ruleSort, setRuleSort] = useState<RuleSort>("priority");
+  const [limenFilter, setLimenFilter] = useState("all");
   const [jsonText, setJsonText] = useState("");
   const [jsonError, setJsonError] = useState("");
   const [nodes, setNodes, onNodesChangeDefault] = useNodesState<FlowNode>([]);
@@ -1019,13 +1020,19 @@ function translateWarning(warning: string): string {
   if (loading || !draft) return <Empty text="正在加载配置…" />;
 
   const routes = [...(draft.routes || [])];
+  const limenOptions = Object.keys(draft.limens || {}).sort();
   const visibleRoutes = routes
     .map((route, index) => ({ route, index }))
+    .filter(({ route }) => {
+      const boundLimen = route.limen || (limenOptions.length === 1 ? limenOptions[0] : "");
+      return limenFilter === "all" || (limenFilter === "__unbound" ? !boundLimen : boundLimen === limenFilter);
+    })
     .sort((a, b) => {
       if (ruleSort === "name") return a.route.name.localeCompare(b.route.name);
       if (ruleSort === "order") return a.index - b.index;
       return (b.route.priority || 0) - (a.route.priority || 0) || a.index - b.index;
-    });
+    })
+    .map((entry, displayIndex) => ({ ...entry, displayIndex }));
 
   return (
     <section className="editor-shell editor-page">
@@ -1115,27 +1122,41 @@ function translateWarning(warning: string): string {
               <h2>路由规则</h2>
               <p>按优先级快速检查匹配、策略与转发目标；点击编辑进入完整规则抽屉。</p>
             </div>
-            <label className="rules-sort">排序
+            <div className="rules-filters">
+              <label className="rules-sort">入口 Limen
+                <select value={limenFilter} onChange={(event) => setLimenFilter(event.target.value)}>
+                  <option value="all">全部入口（{limenOptions.length}）</option>
+                  {limenOptions.map((name) => <option key={name} value={name}>{name}</option>)}
+                  {limenOptions.length > 1 && <option value="__unbound">未绑定入口</option>}
+                </select>
+              </label>
+              <label className="rules-sort">排序
               <select value={ruleSort} onChange={(event) => setRuleSort(event.target.value as RuleSort)}>
                 <option value="priority">优先级</option>
                 <option value="name">名称</option>
                 <option value="order">配置顺序</option>
               </select>
-            </label>
+              </label>
+            </div>
           </div>
           <div className="rules-list">
-            {visibleRoutes.length === 0 ? <Empty text="还没有路由规则。请切换到画布添加 Route。" /> : visibleRoutes.map(({ route, index }) => (
+            {visibleRoutes.length === 0 ? <Empty text="还没有符合筛选条件的路由规则。" /> : visibleRoutes.map(({ route, index, displayIndex }) => (
               <article className="rule-row" key={route.name}>
-                <div className="rule-order">{String(index + 1).padStart(2, "0")}</div>
+                <div className="rule-order">{String(displayIndex + 1).padStart(2, "0")}</div>
                 <div className="rule-main">
                   <div className="rule-title"><strong>{route.name}</strong><span>priority {route.priority || 0}</span></div>
+                  <div className={`rule-limen ${(route.limen || (limenOptions.length === 1 ? limenOptions[0] : "")) ? "" : "missing"}`}>
+                    <span>入口</span>
+                    <strong>{route.limen || (limenOptions.length === 1 ? limenOptions[0] : "未绑定入口")}</strong>
+                    {route.limen && draft.limens?.[route.limen] && <small>{draft.limens[route.limen].address}</small>}
+                  </div>
                   <code>{routeMatchLabel(route)}</code>
-                  <div className="rule-meta"><span>{routeActionLabel(route)}</span><span>{(route.middlewares || []).length} middleware</span><span>{route.limen || "未绑定入口"}</span></div>
+                  <div className="rule-meta"><span>{routeActionLabel(route)}</span><span>{(route.middlewares || []).length} middleware</span></div>
                 </div>
                 <div className="rule-actions">
                   <button type="button" className="btn small" onClick={() => openEditor(nodeId("route", route.name))}>编辑</button>
                   <button type="button" className="btn small" onClick={() => openRouteMiddleware(route.name)}>中间件</button>
-                  {ruleSort === "order" && <>
+                  {ruleSort === "order" && limenFilter === "all" && <>
                     <button type="button" className="btn small icon-text" disabled={index === 0} onClick={() => reorderRoute(route.name, -1)} aria-label="上移">↑</button>
                     <button type="button" className="btn small icon-text" disabled={index === routes.length - 1} onClick={() => reorderRoute(route.name, 1)} aria-label="下移">↓</button>
                   </>}
