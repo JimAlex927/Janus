@@ -3,6 +3,23 @@
 This document records the purpose, scope, and verification for each Janus
 repository commit. Add a new dated section before every future commit.
 
+## 2026-09-19 — State the candidate support boundary
+
+Commit message: `docs(readiness): define candidate support boundary`.
+
+Scope:
+
+- Added one authoritative release-candidate matrix for supported inbound
+  protocols, streaming modes, routing/actions, discovery, identity policies
+  and operational behavior.
+- Named the intentional exclusions, including arbitrary TCP/UDP tunnels,
+  extended CONNECT, general gRPC support claims, trust-all identity forwarding,
+  and treating local smoke evidence as production certification.
+
+Verification: compared against the implemented protocol, middleware and static
+file contracts in `README.md`, `docs/protocols.md`, `docs/middleware.md` and
+`docs/static-files.md`; `git diff --check` passes.
+
 ## 2026-09-19 — Polish Admin Console action feedback and release toolchain
 
 Commit message: `fix(console): polish action dialogs and pin patched toolchain`.

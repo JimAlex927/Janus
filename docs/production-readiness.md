@@ -13,6 +13,21 @@ selection. The local development host currently runs Go 1.26.5; its
 line has seven standard-library findings fixed in Go 1.26.6. Release approval
 requires the pinned Go 1.25.14 CI scan to complete successfully.
 
+## Candidate support boundary
+
+This is the release candidate's explicit support contract. A feature listed as
+supported still requires the Linux, load and canary gates below before it is
+approved for production use.
+
+| Area | Supported contract | Explicit non-goals |
+| --- | --- | --- |
+| Inbound protocols | HTTP/1; native TLS HTTP/2; native TLS HTTP/3 with a TCP HTTP/1 or HTTP/2 fallback; explicit cleartext h2c on its own Limen | Arbitrary TCP/UDP tunnels; HTTP/2 or HTTP/3 extended CONNECT; public TLS termination as a Janus responsibility |
+| Application streams | Bounded ordinary HTTP, SSE, and classic HTTP/1 WebSocket upgrades with separate stream budgets and drain handling | A general gRPC support claim; WebSocket extended CONNECT over HTTP/2 or HTTP/3 |
+| Routing/actions | Host/path or Match DSL rules with ordered middleware, forward/redirect/respond actions, and controlled Static file serving for GET/HEAD | Path rules as an authorization boundary without backend normalization agreement; cross-directory static mounts |
+| Discovery/upstreams | Static HTTP/HTTPS origins, Nacos services with named registries and namespaces, bounded health checks, TLS certificate verification | Arbitrary service-discovery plugins or unbounded retry/circuit-breaker semantics |
+| Identity/policy | JWT validation, explicit claims-to-header allowlists, Traefik-style ForwardAuth, Basic Auth, IP allowlists, CORS, rate limits, body limits, headers and prefix policies | Automatic claim/header forwarding without configuration; trust-all forwarded identity; plaintext credentials in config |
+| Operations | Authenticated private admin console, versioned config library, atomic reload, certificate rotation, readiness/metrics, graceful drain and rollback artifacts | Treating the local container smoke or a single localhost benchmark as production certification |
+
 ## Evidence and remaining work
 
 | Gate | Candidate evidence | Still required |
