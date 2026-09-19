@@ -8,6 +8,8 @@ Type=simple
 User=janus
 Group=janus
 ExecStart=/usr/local/bin/janus -config /etc/janus/janus.json -reload-interval 1s
+# Fail before opening business or admin sockets when the candidate is invalid.
+ExecStartPre=/usr/local/bin/janus -check -config /etc/janus/janus.json
 Restart=on-failure
 RestartSec=2s
 KillSignal=SIGTERM

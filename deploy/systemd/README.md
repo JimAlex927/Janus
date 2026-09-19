@@ -55,6 +55,11 @@ The effective view includes defaults and normalized legacy Limen syntax, but
 does not include TLS certificate or private-key asset paths. It is suitable for
 review output; it is not a secret store or a readiness check.
 
+The unit repeats the `-check` validation as `ExecStartPre` on every start and
+restart. A malformed replacement therefore fails before Janus binds either
+business or admin sockets; systemd retains the previous process if the change
+was deployed through a parallel rollout.
+
 The unit deliberately keeps `/etc/janus` writable while `ProtectSystem=strict`
 is enabled. Janus needs that directory for the SQLite configuration library,
 atomic configuration replacement, and its temporary file; keep the certificate

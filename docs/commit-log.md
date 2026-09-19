@@ -3,6 +3,21 @@
 This document records the purpose, scope, and verification for each Janus
 repository commit. Add a new dated section before every future commit.
 
+## 2026-09-19 — Validate systemd configuration before binding
+
+Commit message: `fix(systemd): validate config before start`.
+
+Scope:
+
+- Added an `ExecStartPre` call to Janus's existing non-listening `-check` mode.
+- A malformed configuration or unreadable TLS asset now fails before the unit
+  opens business or admin sockets, and the deployment runbook documents the
+  behavior.
+
+Verification: the unit remains valid shell-free systemd syntax; the repository
+Linux gate remains the executable binary/configuration verification. A real
+`systemd-analyze verify` result still requires a Linux host with systemd.
+
 ## 2026-09-19 — Keep published configuration history immutable
 
 Commit message: `fix(store): protect active rollback history`.
