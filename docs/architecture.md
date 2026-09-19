@@ -86,6 +86,8 @@ Host indexes and a segment-aware path tree, then evaluates the compiled
 conditions. Expressions containing complex `OR` or `NOT` branches remain in a
 safe fallback candidate set until a matcher planner can index them without
 omitting a possible match.
+`PathPattern(`/api/*`)` is also available for simple `*` wildcards; pattern
+routes stay in the fallback set because they are not segment-prefix indexes.
 
 Every route has one terminal action. `forward` enters the named service and its
 service middleware, while `redirect`, `respond`, and `static` produce a direct

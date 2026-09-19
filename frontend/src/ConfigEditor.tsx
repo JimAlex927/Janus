@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent } from "react";
 import {
   Background,
+  BaseEdge,
   Controls,
+  getSmoothStepPath,
   Handle,
   MiniMap,
   Position,
@@ -12,6 +14,7 @@ import {
   useReactFlow,
   type Edge,
   type EdgeChange,
+  type EdgeProps,
   type Node,
   type NodeChange,
 } from "@xyflow/react";
@@ -143,7 +146,7 @@ function deriveEdges(draft: JanusConfig): Edge[] {
         id: `${nodeId("limen", route.limen)}-->route:${route.name}`,
         source: nodeId("limen", route.limen),
         target: `route:${route.name}`,
-        type: "smoothstep",
+        type: "janus",
       });
     }
     const service = route.action?.forward?.service || route.service || "";
@@ -153,12 +156,17 @@ function deriveEdges(draft: JanusConfig): Edge[] {
         source: `route:${route.name}`,
         sourceHandle: "svc",
         target: `service:${service}`,
-        type: "smoothstep",
+        type: "janus",
         animated: true,
       });
     }
   }
   return edges;
+}
+
+function JanusEdge({ sourceX, sourceY, sourcePosition, targetX, targetY, targetPosition, selected }: EdgeProps) {
+  const [edgePath] = getSmoothStepPath({ sourceX, sourceY, sourcePosition, targetX, targetY, targetPosition, borderRadius: 12, offset: 22 });
+  return <BaseEdge path={edgePath} interactionWidth={28} style={{ stroke: selected ? "#356fcf" : "#91a7bf", strokeWidth: selected ? 4.5 : 2.5, filter: selected ? "drop-shadow(0 0 0.5px #fff) drop-shadow(0 0 3px #356fcf66)" : "none" }} />;
 }
 
 function JanusNode({ data, selected }: { data: NodeData; selected?: boolean }) {
@@ -218,6 +226,7 @@ function JanusNode({ data, selected }: { data: NodeData; selected?: boolean }) {
 }
 
 const nodeTypes = { janus: JanusNode };
+const edgeTypes = { janus: JanusEdge };
 
 type EditorState =
   | { kind: "route"; name: string; originalName: string; value: Route; isNew: boolean }
@@ -1151,6 +1160,7 @@ function translateWarning(warning: string): string {
             onNodeDoubleClick={(_, node) => openEditor(node.id)}
             onSelectionChange={({ nodes: selected }) => setSelectedIds(selected.map((n) => n.id))}
             nodeTypes={nodeTypes}
+            edgeTypes={edgeTypes}
             deleteKeyCode={["Backspace", "Delete"]}
             fitView
             fitViewOptions={{ padding: 0.2 }}

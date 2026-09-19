@@ -51,6 +51,31 @@ go vet ./...
 go build -o bin/janus ./cmd/janus
 ```
 
+To build the Admin Console, refresh the tracked `go:embed` assets, and compile
+a small static Janus executable in one step:
+
+```sh
+./scripts/build-app.sh
+```
+
+The default artifact is `bin/janus` on macOS/Linux. Set `JANUS_OUTPUT=app` to
+write the executable to the repository root, or set `GOOS`/`GOARCH` for a
+cross-build. Dependencies are installed with `npm ci` only when
+`frontend/node_modules` is missing; set `JANUS_INSTALL_DEPS=1` to force a clean
+dependency install. The build uses `CGO_ENABLED=0`, `-trimpath`, and stripped
+linker metadata (`-s -w -buildid=`). `JANUS_UPX=1` enables optional UPX
+compression when `upx` is installed.
+
+On Windows, run the equivalent PowerShell 7 script from the repository root:
+
+```powershell
+pwsh -File .\scripts\build-app.ps1
+```
+
+It produces `bin\janus.exe` by default and accepts the same
+`JANUS_OUTPUT`, `GOOS`, `GOARCH`, `JANUS_INSTALL_DEPS`, and `JANUS_UPX`
+environment variables.
+
 The Linux release gate is reproducible from a checked-out commit:
 
 ```sh

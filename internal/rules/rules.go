@@ -53,6 +53,7 @@ func NewRegistry() *Registry {
 	r.compilers["Host"] = compileHost
 	r.compilers["Path"] = compilePath
 	r.compilers["PathPrefix"] = compilePathPrefix
+	r.compilers["PathPattern"] = compilePathPattern
 	r.compilers["Method"] = compileMethod
 	r.compilers["Header"] = compileHeader
 	r.compilers["Query"] = compileQuery
@@ -206,6 +207,16 @@ func (p pathPrefixPredicate) Match(f *Facts) bool {
 	return prefix == "/" || f.Path == prefix || strings.HasPrefix(f.Path, prefix+"/")
 }
 
+// pathPatternPredicate is a deliberately small glob matcher for URL paths.
+// The only metacharacter is '*', which matches zero or more path characters.
+// It stays in the fallback candidate set because arbitrary patterns cannot be
+// safely represented by the segment-aware prefix index.
+type pathPatternPredicate string
+
+func (p pathPatternPredicate) Match(f *Facts) bool {
+	return f != nil && globMatch(string(p), f.Path)
+}
+
 type methodPredicate map[string]struct{}
 
 func (p methodPredicate) Match(f *Facts) bool {
@@ -293,6 +304,13 @@ func compilePathPrefix(args []string) (Predicate, error) {
 	return pathPrefixPredicate(arg), nil
 }
 
+func compilePathPattern(args []string) (Predicate, error) {
+	if len(args) != 1 || args[0] == "" || !strings.HasPrefix(args[0], "/") || strings.ContainsAny(args[0], "?#%\\ \t\r\n") {
+		return nil, fmt.Errorf("PathPattern requires one absolute path pattern")
+	}
+	return pathPatternPredicate(args[0]), nil
+}
+
 func onePathArg(name string, args []string) (string, error) {
 	if len(args) != 1 || args[0] == "" || !strings.HasPrefix(args[0], "/") || strings.ContainsAny(args[0], "?#%\\ \t\r\n") {
 		return "", fmt.Errorf("%s requires one unescaped absolute path argument", name)
@@ -301,6 +319,34 @@ func onePathArg(name string, args []string) (string, error) {
 		return "", fmt.Errorf("%s path must omit the trailing slash", name)
 	}
 	return args[0], nil
+}
+
+func globMatch(pattern, value string) bool {
+	patternIndex, valueIndex := 0, 0
+	starIndex, matchIndex := -1, 0
+	for valueIndex < len(value) {
+		if patternIndex < len(pattern) && pattern[patternIndex] == value[valueIndex] {
+			patternIndex++
+			valueIndex++
+			continue
+		}
+		if patternIndex < len(pattern) && pattern[patternIndex] == '*' {
+			starIndex = patternIndex
+			matchIndex = valueIndex
+			patternIndex++
+			continue
+		}
+		if starIndex < 0 {
+			return false
+		}
+		patternIndex = starIndex + 1
+		matchIndex++
+		valueIndex = matchIndex
+	}
+	for patternIndex < len(pattern) && pattern[patternIndex] == '*' {
+		patternIndex++
+	}
+	return patternIndex == len(pattern)
 }
 
 func compileMethod(args []string) (Predicate, error) {

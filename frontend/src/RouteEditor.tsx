@@ -3,17 +3,17 @@ import { limenNames, serviceNames } from "./model";
 import { Drawer, Field } from "./ui";
 import type { JanusConfig, Route } from "./types";
 
-export type MatchRule = { type: "host" | "path" | "pathPrefix" | "method" | "protocol" | "header" | "query"; value: string; extra?: string };
+export type MatchRule = { type: "host" | "path" | "pathPrefix" | "pathPattern" | "method" | "protocol" | "header" | "query"; value: string; extra?: string };
 
 function parseMatchExpression(expr: string): { rules: MatchRule[]; safe: boolean } {
   if (!expr.trim()) return { rules: [], safe: true };
   const rules: MatchRule[] = [];
   const names: Record<string, MatchRule["type"]> = {
-    Host: "host", Path: "path", PathPrefix: "pathPrefix", Method: "method",
+    Host: "host", Path: "path", PathPrefix: "pathPrefix", PathPattern: "pathPattern", Method: "method",
     Protocol: "protocol", Header: "header", Query: "query",
   };
   const source = expr.trim();
-  const token = /\s*(Host|Path|PathPrefix|Method|Protocol|Header|Query)\(\s*`([^`]*)`(?:\s*,\s*`([^`]*)`)?\s*\)\s*/y;
+  const token = /\s*(Host|Path|PathPrefix|PathPattern|Method|Protocol|Header|Query)\(\s*`([^`]*)`(?:\s*,\s*`([^`]*)`)?\s*\)\s*/y;
   let index = 0;
   while (index < source.length) {
     token.lastIndex = index;
@@ -40,6 +40,7 @@ function buildMatchExpression(rules: MatchRule[]): string {
       case "host": parts.push(`Host(\`${rule.value}\`)`); break;
       case "path": parts.push(`Path(\`${rule.value}\`)`); break;
       case "pathPrefix": parts.push(`PathPrefix(\`${rule.value}\`)`); break;
+      case "pathPattern": parts.push(`PathPattern(\`${rule.value}\`)`); break;
       case "method": parts.push(`Method(\`${rule.value}\`)`); break;
       case "protocol": parts.push(`Protocol(\`${rule.value}\`)`); break;
       case "header": if (rule.extra) parts.push(`Header(\`${rule.value}\`, \`${rule.extra}\`)`); break;
@@ -78,7 +79,7 @@ export function RouteEditor({ draft, value, isNew, onChange, onConfirm, onCancel
 
   function addRule(type: MatchRule["type"]) {
     const defaults: Record<MatchRule["type"], string> = {
-      host: "api.example.com", path: "/api/users", pathPrefix: "/api",
+      host: "api.example.com", path: "/api/users", pathPrefix: "/api", pathPattern: "/abcd/abc*",
       method: "GET", protocol: "http", header: "", query: "",
     };
     updateMatchRules([...matchRules, { type, value: defaults[type] }]);
@@ -115,7 +116,7 @@ export function RouteEditor({ draft, value, isNew, onChange, onConfirm, onCancel
             <div key={index} className="match-rule">
               <select value={rule.type} onChange={(e) => updateRule(index, { type: e.target.value as MatchRule["type"] })}>
                 <option value="host">Host</option><option value="path">Path</option>
-                <option value="pathPrefix">PathPrefix</option><option value="method">Method</option>
+                <option value="pathPrefix">PathPrefix</option><option value="pathPattern">PathPattern (*)</option><option value="method">Method</option>
                 <option value="protocol">Protocol</option><option value="header">Header</option>
                 <option value="query">Query</option>
               </select>
@@ -128,6 +129,7 @@ export function RouteEditor({ draft, value, isNew, onChange, onConfirm, onCancel
           ))}
           <div className="match-add">
             <button type="button" className="btn small" onClick={() => addRule("pathPrefix")}>＋ PathPrefix</button>
+            <button type="button" className="btn small" onClick={() => addRule("pathPattern")}>＋ PathPattern</button>
             <button type="button" className="btn small" onClick={() => addRule("host")}>＋ Host</button>
             <button type="button" className="btn small" onClick={() => addRule("method")}>＋ Method</button>
             <button type="button" className="btn small" onClick={() => addRule("protocol")}>＋ Protocol</button>

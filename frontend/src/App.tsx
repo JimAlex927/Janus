@@ -16,6 +16,16 @@ const NAV: { id: Page; label: string }[] = [
   { id: "settings", label: "全局设置" },
 ];
 
+function NavIcon({ type }: { type: Page }) {
+  if (type === "overview") {
+    return <svg className="nav-icon" viewBox="0 0 20 20" aria-hidden="true"><rect x="3" y="3" width="5" height="5" rx="1" /><rect x="12" y="3" width="5" height="5" rx="1" /><rect x="3" y="12" width="5" height="5" rx="1" /><rect x="12" y="12" width="5" height="5" rx="1" /></svg>;
+  }
+  if (type === "configs") {
+    return <svg className="nav-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M3 5h14M3 10h14M3 15h14" /><circle cx="7" cy="5" r="1.7" /><circle cx="13" cy="10" r="1.7" /><circle cx="9" cy="15" r="1.7" /></svg>;
+  }
+  return <svg className="nav-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M4 4h12M4 10h12M4 16h12" /><circle cx="8" cy="4" r="1.7" /><circle cx="13" cy="10" r="1.7" /><circle cx="7" cy="16" r="1.7" /></svg>;
+}
+
 const TITLES: Record<Page, string> = { overview: "系统概览", configs: "配置", settings: "全局设置" };
 
 function JanusMark({ className = "" }: { className?: string }) {
@@ -132,7 +142,7 @@ function Navigation({ page, onNavigate }: { page: Page; onNavigate: (page: Page)
     <>
       {NAV.map((item) => (
         <button key={item.id} type="button" className={page === item.id ? "active" : ""} onClick={() => onNavigate(item.id)}>
-          <span className="nav-dot" />
+          <NavIcon type={item.id} />
           {item.label}
         </button>
       ))}

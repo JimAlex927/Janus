@@ -50,6 +50,34 @@ func TestIndexHintsOnlyUseSafeConjunctions(t *testing.T) {
 	}
 }
 
+func TestPathPatternMatchesWildcardWithoutChangingPathPrefixSemantics(t *testing.T) {
+	m, err := DefaultRegistry().Compile("PathPattern(`/abcd/abc*`)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		path string
+		want bool
+	}{
+		{path: "/abcd/abc", want: true},
+		{path: "/abcd/abcdef", want: true},
+		{path: "/abcd/abc/child", want: true},
+		{path: "/abcd/ab", want: false},
+	} {
+		if got := m.Match(&Facts{Path: test.path}); got != test.want {
+			t.Errorf("PathPattern match for %q = %v, want %v", test.path, got, test.want)
+		}
+	}
+
+	prefix, err := DefaultRegistry().Compile("PathPrefix(`/abcd/abc`)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if prefix.Match(&Facts{Path: "/abcd/abcdef"}) {
+		t.Fatal("PathPrefix unexpectedly matched a partial path segment")
+	}
+}
+
 func TestCustomRuleRegistration(t *testing.T) {
 	registry := DefaultRegistry()
 	if err := registry.Register("SomeRule", func(args []string) (Predicate, error) {
