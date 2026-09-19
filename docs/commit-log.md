@@ -18,6 +18,9 @@ Verification: the unit remains valid shell-free systemd syntax; the repository
 Linux gate remains the executable binary/configuration verification. A real
 `systemd-analyze verify` result still requires a Linux host with systemd.
 
+The command entrypoint also now has a regression test proving `-check` accepts
+an already-occupied configured address without binding or disturbing it.
+
 ## 2026-09-19 — Keep published configuration history immutable
 
 Commit message: `fix(store): protect active rollback history`.

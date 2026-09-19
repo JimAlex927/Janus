@@ -158,6 +158,37 @@ func TestWriteConfigAtomicallyPreservesExistingPermissions(t *testing.T) {
 	}
 }
 
+func TestRunCheckDoesNotBindConfiguredListeners(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+
+	configPath := filepath.Join(t.TempDir(), "janus.json")
+	c := config.Config{
+		Version: config.CurrentConfigVersion,
+		Limens: map[string]config.LimenConfig{
+			"public": {Address: listener.Addr().String(), Protocols: []string{config.ProtocolHTTP1}},
+		},
+		Routes: []config.Route{{
+			Name:   "health",
+			Limen:  "public",
+			Match:  "Path(`/healthz`)",
+			Action: &config.RouteAction{Respond: &config.RespondAction{Status: 200, Body: "ok"}},
+		}},
+	}
+	writeMainTestConfig(t, configPath, c)
+	if err := run(context.Background(), configPath, true, false, time.Second, zap.NewNop()); err != nil {
+		t.Fatalf("check mode should not bind configured listener: %v", err)
+	}
+	probe, err := net.DialTimeout("tcp", listener.Addr().String(), 100*time.Millisecond)
+	if err != nil {
+		t.Fatalf("configured listener was disturbed by check mode: %v", err)
+	}
+	_ = probe.Close()
+}
+
 func reserveMainTestAddress(t *testing.T) string {
 	t.Helper()
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
