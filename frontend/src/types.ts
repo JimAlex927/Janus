@@ -187,6 +187,10 @@ export interface ConfigSnapshot {
 export interface MetricsSummary {
   requests: number;
   errors: number;
+  failed_requests?: number;
+  client_errors?: number;
+  server_errors?: number;
+  not_found?: number;
   in_flight: number;
 }
 

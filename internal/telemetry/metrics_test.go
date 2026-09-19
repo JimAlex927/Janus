@@ -65,3 +65,31 @@ func TestMetricsCountersAccumulateExistingSeries(t *testing.T) {
 		}
 	}
 }
+
+func TestMetricsSummaryClassifiesResponseFamilies(t *testing.T) {
+	m := NewMetrics()
+	m.RecordRequest(Outcome{Status: 200}, "", time.Millisecond)
+	m.RecordRequest(Outcome{Status: 404}, "route_not_found", time.Millisecond)
+	m.RecordRequest(Outcome{Status: 400}, "http_error", time.Millisecond)
+	m.RecordRequest(Outcome{Status: 502}, "upstream", time.Millisecond)
+	m.RecordRequest(Outcome{Status: 503}, "admission_rejected", time.Millisecond)
+
+	got := m.Summary()
+	if got.Requests != 5 || got.Errors != 4 || got.FailedRequests != 4 {
+		t.Fatalf("summary totals = %+v", got)
+	}
+	if got.ClientErrors != 1 || got.ServerErrors != 2 || got.NotFound != 1 {
+		t.Fatalf("summary classifications = %+v", got)
+	}
+	output := string(m.Render(nil))
+	for _, expected := range []string{
+		"janus_request_failures_total 4",
+		"janus_request_client_errors_total 1",
+		"janus_request_server_errors_total 2",
+		"janus_request_not_found_total 1",
+	} {
+		if !strings.Contains(output, expected) {
+			t.Fatalf("metrics missing %q in:\n%s", expected, output)
+		}
+	}
+}

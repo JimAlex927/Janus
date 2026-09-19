@@ -37,17 +37,25 @@ type Metrics struct {
 	rejections map[rejectionMetricKey]uint64
 	reloads    map[string]uint64
 
-	drainSeconds float64
-	drainSet     bool
+	drainSeconds   float64
+	drainSet       bool
+	failedRequests uint64
+	clientErrors   uint64
+	serverErrors   uint64
+	notFound       uint64
 }
 
 // Summary is a low-cardinality snapshot for the private admin console. It is
 // intentionally separate from Prometheus text so the UI does not parse a
 // scrape format or expose request paths and hosts.
 type Summary struct {
-	Requests uint64 `json:"requests"`
-	Errors   uint64 `json:"errors"`
-	InFlight int64  `json:"in_flight"`
+	Requests       uint64 `json:"requests"`
+	Errors         uint64 `json:"errors"`
+	FailedRequests uint64 `json:"failed_requests"`
+	ClientErrors   uint64 `json:"client_errors"`
+	ServerErrors   uint64 `json:"server_errors"`
+	NotFound       uint64 `json:"not_found"`
+	InFlight       int64  `json:"in_flight"`
 }
 
 type requestMetricKey struct {
@@ -104,11 +112,13 @@ func (m *Metrics) Summary() Summary {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var summary Summary
+	summary.FailedRequests = m.failedRequests
+	summary.Errors = summary.FailedRequests
+	summary.ClientErrors = m.clientErrors
+	summary.ServerErrors = m.serverErrors
+	summary.NotFound = m.notFound
 	for _, count := range m.requests {
 		summary.Requests += count
-	}
-	for _, count := range m.errors {
-		summary.Errors += count
 	}
 	for _, count := range m.inFlight {
 		summary.InFlight += count
@@ -132,6 +142,17 @@ func (m *Metrics) RecordRequest(outcome Outcome, errorClass string, duration tim
 		m.requests[requestKey]++
 	} else if m.seriesCount() < maxMetricSeries {
 		m.requests[requestKey] = 1
+	}
+	if errorClass != "" || status >= 400 {
+		m.failedRequests++
+		switch {
+		case status == 404:
+			m.notFound++
+		case status >= 400 && status < 500:
+			m.clientErrors++
+		case status >= 500:
+			m.serverErrors++
+		}
 	}
 	if errorClass != "" {
 		key := errorMetricKey{route: route, service: service, err: boundedLabel(errorClass)}
@@ -226,6 +247,7 @@ func (m *Metrics) Render(health []BackendHealth) []byte {
 	rejections := cloneRejections(m.rejections)
 	reloads := cloneStrings(m.reloads)
 	drainSeconds, drainSet := m.drainSeconds, m.drainSet
+	failedRequests, clientErrors, serverErrors, notFound := m.failedRequests, m.clientErrors, m.serverErrors, m.notFound
 	m.mu.Unlock()
 
 	var b strings.Builder
@@ -237,6 +259,14 @@ func (m *Metrics) Render(health []BackendHealth) []byte {
 	for _, key := range sortedErrorKeys(errors) {
 		fmt.Fprintf(&b, "janus_request_errors_total{route=\"%s\",service=\"%s\",error=\"%s\"} %d\n", esc(key.route), esc(key.service), esc(key.err), errors[key])
 	}
+	b.WriteString("# HELP janus_request_failures_total Requests with any classified error.\n# TYPE janus_request_failures_total counter\n")
+	fmt.Fprintf(&b, "janus_request_failures_total %d\n", failedRequests)
+	b.WriteString("# HELP janus_request_client_errors_total 4xx responses with a classified error.\n# TYPE janus_request_client_errors_total counter\n")
+	fmt.Fprintf(&b, "janus_request_client_errors_total %d\n", clientErrors)
+	b.WriteString("# HELP janus_request_server_errors_total 5xx responses with a classified error.\n# TYPE janus_request_server_errors_total counter\n")
+	fmt.Fprintf(&b, "janus_request_server_errors_total %d\n", serverErrors)
+	b.WriteString("# HELP janus_request_not_found_total 404 responses with a classified error.\n# TYPE janus_request_not_found_total counter\n")
+	fmt.Fprintf(&b, "janus_request_not_found_total %d\n", notFound)
 	b.WriteString("# HELP janus_request_duration_seconds Request duration histogram.\n# TYPE janus_request_duration_seconds histogram\n")
 	for _, key := range sortedDurationKeys(durations) {
 		value := durations[key]

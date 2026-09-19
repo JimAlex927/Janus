@@ -3,6 +3,24 @@
 This document records the purpose, scope, and verification for each Janus
 repository commit. Add a new dated section before every future commit.
 
+## 2026-09-19 — Classify overview request failures
+
+Commit message: `feat(console): classify overview request errors`.
+
+Scope:
+
+- Split the admin metrics summary into failed requests, non-404 client errors,
+  server errors and not-found responses while retaining the legacy `errors`
+  field for API compatibility.
+- Export the same aggregate counters in Prometheus text output so the console
+  and external monitoring use one classification model.
+- Redesigned the overview metric band as six stable cards; route/service counts
+  moved into the configuration detail section so 404s remain visible without
+  making them look like a server outage.
+
+Verification: telemetry/admin/middleware tests, frontend build, embedded UI
+parity and `git diff --check` pass.
+
 ## 2026-09-19 — Validate systemd configuration before binding
 
 Commit message: `fix(systemd): validate config before start`.

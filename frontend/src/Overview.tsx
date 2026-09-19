@@ -4,7 +4,7 @@ import type { ConfigStore } from "./useConfig";
 import type { MetricsSummary } from "./types";
 
 export function Overview({ store }: { store: ConfigStore }) {
-  const [metrics, setMetrics] = useState<MetricsSummary>({ requests: 0, errors: 0, in_flight: 0 });
+  const [metrics, setMetrics] = useState<MetricsSummary>({ requests: 0, errors: 0, failed_requests: 0, client_errors: 0, server_errors: 0, not_found: 0, in_flight: 0 });
   const [discovery, setDiscovery] = useState<Record<string, unknown>>({});
   const [configs, setConfigs] = useState<ConfigRecord[]>([]);
   const draft = store.draft;
@@ -44,7 +44,12 @@ export function Overview({ store }: { store: ConfigStore }) {
   });
   const serviceCount = Object.keys(draft?.services || {}).length;
   const discoveryCount = Object.keys(discovery).length;
-  const hasErrors = metrics.errors > 0;
+  const failedRequests = metrics.failed_requests ?? metrics.errors;
+  const clientErrors = metrics.client_errors ?? 0;
+  const serverErrors = metrics.server_errors ?? 0;
+  const notFound = metrics.not_found ?? 0;
+  const hasClientErrors = clientErrors > 0;
+  const hasServerErrors = serverErrors > 0;
 
   return (
     <section className="page overview-page">
@@ -73,19 +78,29 @@ export function Overview({ store }: { store: ConfigStore }) {
           <small>已完成请求</small>
         </div>
         <div className="overview-metric">
-          <span>ERRORS</span>
-          <strong className={hasErrors ? "overview-metric-warning" : ""}>{metrics.errors.toLocaleString()}</strong>
-          <small>{hasErrors ? "需要关注" : "当前无错误"}</small>
+          <span>FAILED REQUESTS</span>
+          <strong className={failedRequests > 0 ? "overview-metric-warning" : ""}>{failedRequests.toLocaleString()}</strong>
+          <small>{failedRequests > 0 ? "4xx + 5xx" : "当前无失败"}</small>
+        </div>
+        <div className="overview-metric">
+          <span>4XX CLIENT EXCL. 404</span>
+          <strong className={hasClientErrors ? "overview-metric-client" : ""}>{clientErrors.toLocaleString()}</strong>
+          <small>{hasClientErrors ? "除未找到外的客户端错误" : "当前无其他 4xx"}</small>
+        </div>
+        <div className="overview-metric">
+          <span>5XX SERVER</span>
+          <strong className={hasServerErrors ? "overview-metric-server" : ""}>{serverErrors.toLocaleString()}</strong>
+          <small>{hasServerErrors ? "需要排查网关或上游" : "当前无 5xx"}</small>
+        </div>
+        <div className="overview-metric">
+          <span>404 NOT FOUND</span>
+          <strong className={notFound > 0 ? "overview-metric-client" : ""}>{notFound.toLocaleString()}</strong>
+          <small>{notFound > 0 ? "未匹配路由或资源" : "当前无 404"}</small>
         </div>
         <div className="overview-metric">
           <span>IN FLIGHT</span>
           <strong>{metrics.in_flight.toLocaleString()}</strong>
           <small>正在处理</small>
-        </div>
-        <div className="overview-metric overview-metric-summary">
-          <span>ROUTE / SERVICE</span>
-          <strong>{routes.length}<i>/</i>{serviceCount}</strong>
-          <small>已装载路由与服务</small>
         </div>
       </div>
 
@@ -116,6 +131,10 @@ export function Overview({ store }: { store: ConfigStore }) {
             <div>
               <dt>配置总数</dt>
               <dd>{configs.length} 套</dd>
+            </div>
+            <div>
+              <dt>路由 / 服务</dt>
+              <dd>{routes.length} / {serviceCount}</dd>
             </div>
             <div>
               <dt>配置变更</dt>
