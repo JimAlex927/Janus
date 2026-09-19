@@ -67,6 +67,39 @@ func TestEmbeddedConsoleIsServed(t *testing.T) {
 	}
 }
 
+func TestEmbeddedConsoleCanMountBelowBuildBaseURL(t *testing.T) {
+	h := NewHandlerWithOptions(Options{
+		State: NewState(), UIBaseURL: "/janus",
+		Current: func() config.Config {
+			return config.Config{Settings: config.Settings{Admin: config.AdminSettings{Username: "admin", PasswordHash: "configured"}}}
+		},
+	})
+	redirect := httptest.NewRecorder()
+	h.ServeHTTP(redirect, httptest.NewRequest(http.MethodGet, "/janus", nil))
+	if redirect.Code != http.StatusTemporaryRedirect || redirect.Header().Get("Location") != "/janus/" {
+		t.Fatalf("base redirect = %d %q", redirect.Code, redirect.Header().Get("Location"))
+	}
+	page := httptest.NewRecorder()
+	h.ServeHTTP(page, httptest.NewRequest(http.MethodGet, "/janus/", nil))
+	if page.Code != http.StatusOK || !strings.Contains(page.Body.String(), "Janus Console") {
+		t.Fatalf("prefixed console = %d %q", page.Code, page.Body.String())
+	}
+	assetPath := regexp.MustCompile(`(?:src|href)="(/assets/[^"]+)"`).FindStringSubmatch(page.Body.String())
+	if len(assetPath) != 2 {
+		t.Fatal("console HTML does not reference an asset")
+	}
+	asset := httptest.NewRecorder()
+	h.ServeHTTP(asset, httptest.NewRequest(http.MethodGet, "/janus"+assetPath[1], nil))
+	if asset.Code != http.StatusOK || asset.Body.Len() == 0 {
+		t.Fatalf("prefixed asset = %d, length %d", asset.Code, asset.Body.Len())
+	}
+	api := httptest.NewRecorder()
+	h.ServeHTTP(api, httptest.NewRequest(http.MethodGet, "/janus/api/v1/config", nil))
+	if api.Code != http.StatusUnauthorized {
+		t.Fatalf("prefixed API = %d, want 401", api.Code)
+	}
+}
+
 func TestHealthEndpointsMethodAndHeadSemantics(t *testing.T) {
 	h := NewHandler(NewState())
 	post := httptest.NewRecorder()

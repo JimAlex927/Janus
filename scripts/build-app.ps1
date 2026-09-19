@@ -15,6 +15,7 @@ $embed = Join-Path $root "internal\admin\ui"
 $goos = if ($env:GOOS) { $env:GOOS } else { "windows" }
 $goarch = if ($env:GOARCH) { $env:GOARCH } else { "amd64" }
 $output = if ($env:JANUS_OUTPUT) { $env:JANUS_OUTPUT } else { Join-Path $root "bin\janus.exe" }
+$uiBase = if ($env:JANUS_UI_BASE_URL) { $env:JANUS_UI_BASE_URL.Trim() } else { "" }
 
 function Require-Command([string]$Name) {
   if (-not (Get-Command $Name -ErrorAction SilentlyContinue)) { throw "$Name is required" }
@@ -23,6 +24,12 @@ function Require-Command([string]$Name) {
 Require-Command "node"
 Require-Command "npm"
 Require-Command "go"
+
+if ($uiBase -eq "/") { $uiBase = "" }
+if ($uiBase) {
+  if ($uiBase -notmatch '^/[A-Za-z0-9._/-]*$' -or $uiBase.Contains("//")) { throw "JANUS_UI_BASE_URL must be empty or an absolute URL path such as /janus" }
+  $uiBase = $uiBase.TrimEnd("/")
+}
 
 if ($goos -eq "windows" -and -not $output.EndsWith(".exe", [StringComparison]::OrdinalIgnoreCase)) { $output = "$output.exe" }
 
@@ -33,7 +40,14 @@ if (($env:JANUS_INSTALL_DEPS -eq "1") -or -not (Test-Path $nodeModules)) {
   try { npm ci } finally { Pop-Location }
 }
 Push-Location $frontend
-try { npm run build } finally { Pop-Location }
+try {
+  $previousUiBase = $env:JANUS_UI_BASE_URL
+  $env:JANUS_UI_BASE_URL = $uiBase
+  npm run build
+} finally {
+  if ($null -eq $previousUiBase) { Remove-Item Env:JANUS_UI_BASE_URL -ErrorAction SilentlyContinue } else { $env:JANUS_UI_BASE_URL = $previousUiBase }
+  Pop-Location
+}
 
 if (-not (Test-Path (Join-Path $dist "index.html"))) { throw "frontend build did not produce dist/index.html" }
 $distAssets = Join-Path $dist "assets"
@@ -68,7 +82,7 @@ $env:CGO_ENABLED = "0"
 $env:GOOS = $goos
 $env:GOARCH = $goarch
 try {
-  & go build -trimpath -buildvcs=false '-ldflags=-s -w -buildid=' -o $output ./cmd/janus
+  & go build -trimpath -buildvcs=false "-ldflags=-s -w -buildid= -X janus/internal/admin.uiBaseURL=$uiBase" -o $output ./cmd/janus
 } finally {
   if ($null -eq $previousCgo) { Remove-Item Env:CGO_ENABLED -ErrorAction SilentlyContinue } else { $env:CGO_ENABLED = $previousCgo }
   if ($null -eq $previousGoos) { Remove-Item Env:GOOS -ErrorAction SilentlyContinue } else { $env:GOOS = $previousGoos }

@@ -1,7 +1,13 @@
 import { ApiError, type ConfigSnapshot, type JanusConfig, type MetricsSummary, type MiddlewareCapability, type NacosRegistry } from "./types";
 
+const consoleBase = import.meta.env.BASE_URL === "/" ? "" : import.meta.env.BASE_URL.replace(/\/$/, "");
+
+export function apiPath(path: string): string {
+  return `${consoleBase}${path}`;
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(path, {
+  const response = await fetch(apiPath(path), {
     ...init,
     headers: { "Content-Type": "application/json", ...(init?.headers || {}) },
   });
@@ -162,7 +168,7 @@ export function saveSettings(settings: unknown): Promise<{ ok: boolean; restart_
 
 /** 订阅远端 generation 变更；返回取消函数。401 时交由调用方处理。 */
 export function subscribeEvents(onGenerationChanged: () => void): () => void {
-  const source = new EventSource("/api/v1/events");
+  const source = new EventSource(apiPath("/api/v1/events"));
   source.addEventListener("generation_changed", () => onGenerationChanged());
   source.onerror = () => undefined;
   return () => source.close();

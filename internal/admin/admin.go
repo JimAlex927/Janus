@@ -27,6 +27,10 @@ import (
 //go:embed ui/* ui/assets/*
 var uiFiles embed.FS
 
+// uiBaseURL is set by the release build with -X. It intentionally defaults to
+// root so ordinary `go build` and existing deployments keep their URLs.
+var uiBaseURL string
+
 type State struct{ live, ready atomic.Bool }
 
 func NewState() *State { state := &State{}; state.live.Store(true); return state }
@@ -65,6 +69,9 @@ type Options struct {
 	Subscribe  func() (<-chan janusruntime.Event, func())
 	Library    *store.Store
 	SaveActive func(config.Config) error
+	// UIBaseURL mounts the console and its API below an absolute path such as
+	// /janus. Empty uses the build-time default, which is root by default.
+	UIBaseURL string
 }
 
 type Handler struct {
@@ -79,6 +86,7 @@ type Handler struct {
 	subscribe      func() (<-chan janusruntime.Event, func())
 	library        *store.Store
 	saveActive     func(config.Config) error
+	cookiePath     string
 	sessionsMu     sync.Mutex
 	sessions       map[string]time.Time
 }
@@ -94,29 +102,63 @@ func NewHandlerWithOptions(options Options) http.Handler {
 	if options.State == nil {
 		options.State = NewState()
 	}
-	h := &Handler{state: options.State, metrics: options.Metrics, health: options.Health, current: options.Current, revision: options.Revision, discovery: options.Discovery, registryHealth: options.RegistryHealth, publish: options.Publish, subscribe: options.Subscribe, library: options.Library, saveActive: options.SaveActive, sessions: make(map[string]time.Time)}
+	baseURL := normalizeUIBaseURL(options.UIBaseURL)
+	if baseURL == "" {
+		baseURL = normalizeUIBaseURL(uiBaseURL)
+	}
+	cookiePath := "/"
+	if baseURL != "" {
+		cookiePath = baseURL + "/"
+	}
+	h := &Handler{state: options.State, metrics: options.Metrics, health: options.Health, current: options.Current, revision: options.Revision, discovery: options.Discovery, registryHealth: options.RegistryHealth, publish: options.Publish, subscribe: options.Subscribe, library: options.Library, saveActive: options.SaveActive, cookiePath: cookiePath, sessions: make(map[string]time.Time)}
+	console := http.NewServeMux()
+	console.HandleFunc("/", h.ui)
+	console.HandleFunc("/api/v1/auth/login", h.login)
+	console.HandleFunc("/api/v1/auth/logout", h.logout)
+	console.HandleFunc("/api/v1/status", h.status)
+	console.HandleFunc("/api/v1/discovery", h.discoveryStatus)
+	console.HandleFunc("/api/v1/discovery/registries/health", h.registryHealthCheck)
+	console.HandleFunc("/api/v1/metrics", h.metricsSummary)
+	console.HandleFunc("/api/v1/capabilities/middlewares", h.middlewareCapabilities)
+	console.HandleFunc("/api/v1/config", h.configHandler)
+	console.HandleFunc("/api/v1/config/validate", h.validate)
+	console.HandleFunc("/api/v1/config/publish", h.publishConfig)
+	console.HandleFunc("/api/v1/config/settings", h.saveSettings)
+	console.HandleFunc("/api/v1/configs", h.configs)
+	console.HandleFunc("/api/v1/configs/", h.configsSub)
+	console.HandleFunc("/api/v1/events", h.events)
 	mux := http.NewServeMux()
 	mux.HandleFunc("/livez", h.livez)
 	mux.HandleFunc("/readyz", h.readyz)
 	if options.Metrics != nil {
 		mux.HandleFunc("/metrics", h.metricsHandler)
 	}
-	mux.HandleFunc("/", h.ui)
-	mux.HandleFunc("/api/v1/auth/login", h.login)
-	mux.HandleFunc("/api/v1/auth/logout", h.logout)
-	mux.HandleFunc("/api/v1/status", h.status)
-	mux.HandleFunc("/api/v1/discovery", h.discoveryStatus)
-	mux.HandleFunc("/api/v1/discovery/registries/health", h.registryHealthCheck)
-	mux.HandleFunc("/api/v1/metrics", h.metricsSummary)
-	mux.HandleFunc("/api/v1/capabilities/middlewares", h.middlewareCapabilities)
-	mux.HandleFunc("/api/v1/config", h.configHandler)
-	mux.HandleFunc("/api/v1/config/validate", h.validate)
-	mux.HandleFunc("/api/v1/config/publish", h.publishConfig)
-	mux.HandleFunc("/api/v1/config/settings", h.saveSettings)
-	mux.HandleFunc("/api/v1/configs", h.configs)
-	mux.HandleFunc("/api/v1/configs/", h.configsSub)
-	mux.HandleFunc("/api/v1/events", h.events)
+	if baseURL == "" {
+		mux.Handle("/", console)
+	} else {
+		mux.HandleFunc(baseURL, func(w http.ResponseWriter, r *http.Request) {
+			http.Redirect(w, r, baseURL+"/", http.StatusTemporaryRedirect)
+		})
+		mux.Handle(baseURL+"/", http.StripPrefix(baseURL, console))
+	}
 	return securityHeaders(mux)
+}
+
+func normalizeUIBaseURL(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" || value == "/" || !strings.HasPrefix(value, "/") || strings.Contains(value, "//") {
+		return ""
+	}
+	value = strings.TrimRight(value, "/")
+	if value == "" {
+		return ""
+	}
+	for _, character := range value {
+		if !(character == '/' || character == '-' || character == '_' || character == '.' || character >= 'a' && character <= 'z' || character >= 'A' && character <= 'Z' || character >= '0' && character <= '9') {
+			return ""
+		}
+	}
+	return value
 }
 
 func (h *Handler) livez(w http.ResponseWriter, r *http.Request) {
@@ -212,7 +254,7 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 	}
 	h.sessions[token] = now.Add(8 * time.Hour)
 	h.sessionsMu.Unlock()
-	http.SetCookie(w, &http.Cookie{Name: "janus_session", Value: token, Path: "/", HttpOnly: true, SameSite: http.SameSiteStrictMode, MaxAge: 8 * 60 * 60})
+	http.SetCookie(w, &http.Cookie{Name: "janus_session", Value: token, Path: h.cookiePath, HttpOnly: true, SameSite: http.SameSiteStrictMode, MaxAge: 8 * 60 * 60})
 	writeJSON(w, 200, map[string]any{"ok": true})
 }
 func (h *Handler) logout(w http.ResponseWriter, r *http.Request) {
@@ -224,7 +266,7 @@ func (h *Handler) logout(w http.ResponseWriter, r *http.Request) {
 		delete(h.sessions, c.Value)
 		h.sessionsMu.Unlock()
 	}
-	http.SetCookie(w, &http.Cookie{Name: "janus_session", Path: "/", MaxAge: -1, HttpOnly: true, SameSite: http.SameSiteStrictMode})
+	http.SetCookie(w, &http.Cookie{Name: "janus_session", Path: h.cookiePath, MaxAge: -1, HttpOnly: true, SameSite: http.SameSiteStrictMode})
 	writeJSON(w, 200, map[string]any{"ok": true})
 }
 func (h *Handler) status(w http.ResponseWriter, r *http.Request) {
@@ -516,7 +558,7 @@ func securityHeaders(next http.Handler) http.Handler {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("X-Frame-Options", "DENY")
 		w.Header().Set("Referrer-Policy", "same-origin")
-		if strings.HasPrefix(r.URL.Path, "/api/") {
+		if strings.Contains(r.URL.Path, "/api/") {
 			w.Header().Set("Cache-Control", "no-store")
 		}
 		next.ServeHTTP(w, r)

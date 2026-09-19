@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { getConfig, listConfigs, type ConfigRecord } from "./api";
+import { apiPath, getConfig, listConfigs, type ConfigRecord } from "./api";
 import type { ConfigStore } from "./useConfig";
 import { Badge, Empty, StatCard, useDialogController } from "./ui";
 
@@ -65,7 +65,7 @@ export function ConfigsPage({ store, onEdit }: { store: ConfigStore; onEdit: (id
     if (!name) return;
     try {
       const snap = await getConfig();
-      const res = await fetch("/api/v1/configs", {
+      const res = await fetch(apiPath("/api/v1/configs"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name, content: snap.config }),
@@ -81,7 +81,7 @@ export function ConfigsPage({ store, onEdit }: { store: ConfigStore; onEdit: (id
 
   async function exportConfig(id: number, name: string) {
     try {
-      const res = await fetch(`/api/v1/configs/${id}`);
+      const res = await fetch(apiPath(`/api/v1/configs/${id}`));
       if (!res.ok) throw new Error(await res.text());
       const data = await res.json();
       const blob = new Blob([JSON.stringify(data.content, null, 2)], { type: "application/json" });
@@ -113,7 +113,7 @@ export function ConfigsPage({ store, onEdit }: { store: ConfigStore; onEdit: (id
     }))?.trim();
     if (!next) return;
     try {
-      const res = await fetch("/api/v1/configs", {
+      const res = await fetch(apiPath("/api/v1/configs"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: next, from: String(id) }),
@@ -158,7 +158,7 @@ export function ConfigsPage({ store, onEdit }: { store: ConfigStore; onEdit: (id
         inputHint: "脱敏凭据不会恢复，导入后请在编辑器中重新填写。",
       }))?.trim();
       if (!name) return;
-      const res = await fetch("/api/v1/configs", {
+      const res = await fetch(apiPath("/api/v1/configs"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name, content }),
@@ -188,7 +188,7 @@ export function ConfigsPage({ store, onEdit }: { store: ConfigStore; onEdit: (id
       context: "DELETE",
     }))) return;
     try {
-      const res = await fetch(`/api/v1/configs/${id}`, { method: "DELETE" });
+      const res = await fetch(apiPath(`/api/v1/configs/${id}`), { method: "DELETE" });
       if (!res.ok) throw new Error(await res.text());
       if (drafts.length === 1 && draftOffset > 0) setDraftOffset((offset) => offset - PAGE_SIZE);
       else await loadConfigs();
@@ -208,7 +208,7 @@ export function ConfigsPage({ store, onEdit }: { store: ConfigStore; onEdit: (id
       context: "PUBLISH",
     }))) return;
     try {
-      const res = await fetch(`/api/v1/configs/${id}/publish`, {
+      const res = await fetch(apiPath(`/api/v1/configs/${id}/publish`), {
         method: "POST",
         headers: { "X-Janus-Revision": String(store.revision) },
       });

@@ -76,6 +76,11 @@ It produces `bin\janus.exe` by default and accepts the same
 `JANUS_OUTPUT`, `GOOS`, `GOARCH`, `JANUS_INSTALL_DEPS`, and `JANUS_UPX`
 environment variables.
 
+Set `JANUS_UI_BASE_URL=/janus` before either build command to mount the Admin
+Console below `/janus/`. The built console uses that prefix for assets, API
+requests and events, and the resulting Janus binary serves the same prefix.
+Leave it empty for the default root deployment.
+
 The Linux release gate is reproducible from a checked-out commit:
 
 ```sh

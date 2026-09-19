@@ -22,6 +22,15 @@ The example hash is only a development placeholder and must be replaced before
 deployment. Health probes remain available at `/livez` and `/readyz`; the
 console API requires the configured session when credentials are present.
 
+## Base URL deployment
+
+The console can be mounted below a path when it shares a host with other
+applications. Build with `JANUS_UI_BASE_URL=/janus ./scripts/build-app.sh` (or
+set the same environment variable before the PowerShell build). The generated
+assets, browser API requests, event stream and embedded Admin handler all use
+`/janus/`; `/livez`, `/readyz` and `/metrics` remain at the admin listener
+root. Leave `JANUS_UI_BASE_URL` empty for the default root deployment.
+
 Generate a replacement hash without putting the password in shell history:
 
 ```text
