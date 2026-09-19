@@ -69,9 +69,10 @@ It is explicitly development-only and does not close the Linux capacity gate.
 
 1. Record VM identity/specifications and install the pinned Go toolchain and a
    supported C compiler for race detection. Synchronize the reviewed candidate.
-2. Run `go mod verify`, `go test -count=1 ./...`, `go test -race -count=1 ./...`,
-   `go vet ./...`, and the pinned `govulncheck` from CI. The full suite includes
-   the Linux-only real-process SIGTERM regression and real TCP/UDP tests.
+2. Run `./scripts/verify-linux.sh` and the pinned `govulncheck` from CI. The
+   script runs module verification, the full suite, config fuzz smoke, race,
+   vet, and the reproducible static Linux build. The full suite includes the
+   Linux-only real-process SIGTERM regression and real TCP/UDP tests.
 3. Build and checksum the Linux binary. Validate effective configuration and TLS
    trust on that host. Deploy with the systemd instructions; prove readiness,
    SIGTERM drain, bounded force-close, restart and socket release using clients.

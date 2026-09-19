@@ -16,6 +16,14 @@ CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
 sha256sum bin/janus-linux-amd64
 ```
 
+Before installing a candidate, run the repository Linux gate from the checked
+out commit. It produces the same static artifact shape used by CI; archive the
+printed checksum with the configuration and deployment record:
+
+```sh
+JANUS_LINUX_ARTIFACT=bin/janus-linux-amd64 ./scripts/verify-linux.sh
+```
+
 Install the binary and configuration with a dedicated account. The service
 must be able to read the configuration and any TLS certificate/key files.
 Keep the private key readable only by `root` and the `janus` group.

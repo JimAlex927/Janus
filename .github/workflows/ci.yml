@@ -32,30 +32,12 @@ jobs:
       - name: Verify module integrity
         run: go mod verify
 
-      - name: Test
-        run: go test -count=2 ./...
-
-      - name: Config parser fuzz smoke
-        run: go test -fuzz=FuzzLoadNeverPanics -fuzztime=10s ./internal/config
-
-      - name: Race test
-        run: go test -race -count=1 ./...
-
-      - name: Vet
-        run: go vet ./...
+      - name: Linux release gate
+        run: ./scripts/verify-linux.sh
 
       - name: Vulnerability scan
         run: go run golang.org/x/vuln/cmd/govulncheck@v1.7.0 ./...
 
-      - name: Build static Linux artifact
-        env:
-          CGO_ENABLED: "0"
-          GOOS: linux
-          GOARCH: amd64
-        run: go build -trimpath -ldflags="-s -w" -o janus-linux-amd64 ./cmd/janus
-
-      - name: Check diff and artifact
+      - name: Check diff
         run: |
           git diff --check
-          test -x janus-linux-amd64
-          sha256sum janus-linux-amd64

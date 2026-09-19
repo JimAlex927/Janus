@@ -3,6 +3,22 @@
 This document records the purpose, scope, and verification for each Janus
 repository commit. Add a new dated section before every future commit.
 
+## 2026-09-19 — Unify the Linux release gate
+
+Commit message: `ci: unify reproducible Linux release gate`.
+
+Scope:
+
+- Added `scripts/verify-linux.sh` as the source-controlled gate for module
+  verification, repeated tests, config fuzz smoke, race, vet, and static Linux
+  amd64 artifact checksums.
+- Updated CI and the deployment/readiness runbooks to call the same gate,
+  reducing drift between hosted checks and operator verification.
+
+Verification: the gate completed locally with a Linux amd64 cross-build,
+including full tests, fuzz smoke, race, vet, and SHA-256 output. Hosted Linux
+execution and systemd/canary qualification remain deployment gates.
+
 ## 2026-09-19 — Static file route action
 
 Commit message: `feat(gateway): add static file route action`.

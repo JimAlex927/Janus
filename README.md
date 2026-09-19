@@ -51,6 +51,12 @@ go vet ./...
 go build -o bin/janus ./cmd/janus
 ```
 
+The Linux release gate is reproducible from a checked-out commit:
+
+```sh
+JANUS_LINUX_ARTIFACT=bin/janus-linux-amd64 ./scripts/verify-linux.sh
+```
+
 The race detector needs a supported C toolchain. On Windows, build to
 `bin/janus.exe` for a directly executable artifact.
 
@@ -86,6 +92,7 @@ docs/                  architecture, delivery plan, protocol learning guide
 deploy/systemd/        native Linux non-root systemd deployment artifact
 cmd/janus-loadtest/    separate qualification workload generator
 .github/workflows/     Linux test, race, vet and static-build gates
+scripts/verify-linux.sh repeatable Linux release gate used by CI and deployment
 ```
 
 Rules use exact, case-insensitive host matching with the incoming port removed.
