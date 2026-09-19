@@ -33,6 +33,10 @@ CREATE INDEX IF NOT EXISTS idx_configs_status ON configs(status);
 // ErrNotFound is returned when a config id does not exist.
 var ErrNotFound = errors.New("config not found")
 
+// ErrActiveImmutable prevents an already published record from being edited
+// in place. Published records are rollback history and must remain stable.
+var ErrActiveImmutable = errors.New("active configuration is immutable; duplicate it before editing")
+
 type Store struct {
 	db *sql.DB
 	mu sync.Mutex
@@ -268,6 +272,9 @@ func (s *Store) Create(name string, content config.Config) (*ConfigRecord, error
 func (s *Store) Update(id int64, name string, content config.Config) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := s.ensureDraftLocked(id); err != nil {
+		return err
+	}
 	raw, err := json.Marshal(content)
 	if err != nil {
 		return err
@@ -307,6 +314,14 @@ func (s *Store) UpdateWithLayout(id int64, name string, content config.Config, l
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	var status string
+	if err := tx.QueryRow("SELECT status FROM configs WHERE id = ?", id).Scan(&status); err == sql.ErrNoRows {
+		return ErrNotFound
+	} else if err != nil {
+		return err
+	} else if status == "active" {
+		return ErrActiveImmutable
+	}
 	now := time.Now().UTC().Format(time.RFC3339)
 	result, err := tx.Exec("UPDATE configs SET name = ?, content = ?, layout = ?, updated_at = ? WHERE id = ?",
 		name, string(raw), layout, now, id)
@@ -393,6 +408,9 @@ func (s *Store) SaveLayout(id int64, layout string) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := s.ensureDraftLocked(id); err != nil {
+		return err
+	}
 	now := time.Now().UTC().Format(time.RFC3339)
 	res, err := s.db.Exec("UPDATE configs SET layout = ?, updated_at = ? WHERE id = ?", layout, now, id)
 	if err != nil {
@@ -404,6 +422,21 @@ func (s *Store) SaveLayout(id int64, layout string) error {
 	}
 	if affected == 0 {
 		return ErrNotFound
+	}
+	return nil
+}
+
+func (s *Store) ensureDraftLocked(id int64) error {
+	var status string
+	err := s.db.QueryRow("SELECT status FROM configs WHERE id = ?", id).Scan(&status)
+	if err == sql.ErrNoRows {
+		return ErrNotFound
+	}
+	if err != nil {
+		return err
+	}
+	if status == "active" {
+		return ErrActiveImmutable
 	}
 	return nil
 }

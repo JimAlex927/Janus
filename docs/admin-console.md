@@ -64,6 +64,10 @@ covers a process crash between file publication and the SQLite status update;
 an unrecognized file is served normally but produces an explicit warning so an
 operator can decide whether to import or roll back it.
 
+Published records are immutable rollback history. The console may open an
+active record for inspection, but saving content or canvas layout in place is
+rejected; use `复制` to create a draft before editing.
+
 ## Console 页面
 
 控制台只有三个模块：`概览`、`Config`、`全局设置`。

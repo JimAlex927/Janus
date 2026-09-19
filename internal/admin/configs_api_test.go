@@ -238,6 +238,10 @@ func TestConfigLibraryPublishAndDeleteGuard(t *testing.T) {
 	if refused.Code != http.StatusConflict {
 		t.Fatalf("delete active status = %d, want 409", refused.Code)
 	}
+	editActive := f.do(t, http.MethodPut, "/api/v1/configs/1", `{"name":"mutated","layout":{"nodes":[]}}`)
+	if editActive.Code != http.StatusConflict || !strings.Contains(editActive.Body.String(), "immutable") {
+		t.Fatalf("edit active status = %d %s, want immutable conflict", editActive.Code, editActive.Body.String())
+	}
 }
 
 func TestConfigLibraryPublishRejectsStaleRuntimeRevision(t *testing.T) {

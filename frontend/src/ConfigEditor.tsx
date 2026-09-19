@@ -952,7 +952,9 @@ function routeCoreLabel(route: Route): string {
       return true;
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) store.setStatus("unauthorized");
-      else store.setMessage(error instanceof Error ? error.message : String(error));
+      else if (error instanceof ApiError && error.status === 409) {
+        store.setMessage("已发布配置不可原地修改，请返回后使用“复制”创建草稿。");
+      } else store.setMessage(error instanceof Error ? error.message : String(error));
       return false;
     } finally {
       setBusy(false);

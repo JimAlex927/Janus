@@ -3,6 +3,20 @@
 This document records the purpose, scope, and verification for each Janus
 repository commit. Add a new dated section before every future commit.
 
+## 2026-09-19 — Keep published configuration history immutable
+
+Commit message: `fix(store): protect active rollback history`.
+
+Scope:
+
+- Reject in-place content and canvas updates to the published `active` record.
+- Preserve the existing copy-to-draft workflow as the only edit path for a
+  published configuration, keeping crash reconciliation and rollback history
+  deterministic.
+- Added Store and Admin API coverage for rejected active writes.
+
+Verification: affected Store/Admin tests and their race checks pass.
+
 ## 2026-09-19 — Persist configuration drafts atomically
 
 Commit message: `fix(admin): atomically persist draft layout`

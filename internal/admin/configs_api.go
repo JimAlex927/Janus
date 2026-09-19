@@ -576,6 +576,8 @@ func writeLibraryError(w http.ResponseWriter, err error) {
 	}
 	message := err.Error()
 	switch {
+	case errors.Is(err, store.ErrActiveImmutable):
+		http.Error(w, err.Error(), http.StatusConflict)
 	case strings.Contains(message, "cannot delete active config"):
 		http.Error(w, message, http.StatusConflict)
 	default:

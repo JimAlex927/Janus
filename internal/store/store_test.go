@@ -105,6 +105,30 @@ func TestStoreSaveLayoutRejectsNull(t *testing.T) {
 	}
 }
 
+func TestStorePublishedRecordsAreImmutable(t *testing.T) {
+	s := openTestStore(t)
+	record, err := s.Create("published", testConfig("before"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Publish(record.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Update(record.ID, "changed", testConfig("after")); !errors.Is(err, ErrActiveImmutable) {
+		t.Fatalf("active update = %v, want ErrActiveImmutable", err)
+	}
+	if err := s.UpdateWithLayout(record.ID, "changed", testConfig("after"), `{"x":1}`); !errors.Is(err, ErrActiveImmutable) {
+		t.Fatalf("active update with layout = %v, want ErrActiveImmutable", err)
+	}
+	if err := s.SaveLayout(record.ID, `{"x":1}`); !errors.Is(err, ErrActiveImmutable) {
+		t.Fatalf("active layout update = %v, want ErrActiveImmutable", err)
+	}
+	got, err := s.Get(record.ID)
+	if err != nil || got.Name != "published" || got.Content.Routes[0].Name != "before" {
+		t.Fatalf("active record changed after rejected writes: %+v, %v", got, err)
+	}
+}
+
 func TestStorePublishMakesSingleActive(t *testing.T) {
 	s := openTestStore(t)
 	first, _ := s.Create("first", testConfig("a"))
