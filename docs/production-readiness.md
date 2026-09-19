@@ -52,7 +52,7 @@ passed the following local checks:
 | Embedded UI parity | pass | `./scripts/verify-embedded-ui.sh` |
 | Admin package tests | pass | `go test ./internal/admin/...` |
 | Linux release gate | pass | `JANUS_FUZZ_TIME=20s JANUS_LINUX_ARTIFACT=/private/tmp/janus-linux-amd64 ./scripts/verify-linux.sh` |
-| Linux artifact | `sha256: 317c6872a0fa99e937ff3478c05c154e7752a45f11777ed346220d6e8785e975` | Static `linux/amd64`, built by the gate |
+| Linux artifact | `sha256: 8c9f893a814c425211cd4085e10901489a476f0657823e9a9f32356a8681a5e3` | Static `linux/amd64`, built by the gate after the atomic-write mode fix |
 | Vulnerability scan | open | Local Go 1.26.5 reports seven standard-library findings; do not release from this toolchain |
 
 The release gate was run with a 20-second fuzz smoke because the local machine

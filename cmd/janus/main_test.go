@@ -125,6 +125,39 @@ func writeMainTestConfig(t *testing.T, path string, c config.Config) {
 	}
 }
 
+func TestWriteConfigAtomicallyPreservesExistingPermissions(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "janus.json")
+	if err := os.WriteFile(path, []byte("previous"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(path, 0o640); err != nil {
+		t.Fatal(err)
+	}
+
+	want := config.Config{Version: config.CurrentConfigVersion}
+	if err := writeConfigAtomically(path, want); err != nil {
+		t.Fatalf("writeConfigAtomically: %v", err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := info.Mode().Perm(); got != 0o640 {
+		t.Fatalf("configuration mode = %04o, want 0640", got)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got config.Config
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("replacement is not JSON: %v", err)
+	}
+	if got.Version != want.Version {
+		t.Fatalf("replacement version = %d, want %d", got.Version, want.Version)
+	}
+}
+
 func reserveMainTestAddress(t *testing.T) string {
 	t.Helper()
 	listener, err := net.Listen("tcp", "127.0.0.1:0")

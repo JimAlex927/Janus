@@ -3,6 +3,26 @@
 This document records the purpose, scope, and verification for each Janus
 repository commit. Add a new dated section before every future commit.
 
+## 2026-09-19 — Persist configuration permissions with atomic writes
+
+Commit message: `fix(config): fsync preserved mode before publish`.
+
+Scope:
+
+- Applies the existing configuration file mode to the temporary replacement
+  before encoding and `fsync`, instead of changing permissions after the data
+  sync.
+- Treats a failure to inspect or apply the existing mode as a publish failure,
+  preventing an apparently successful write with an unknown access policy.
+- Added a regression test covering replacement content and preservation of a
+  `0640` configuration mode.
+
+Verification: the focused regression and `go test ./cmd/janus -count=1` pass;
+the broader Linux release gate also passes with
+`JANUS_FUZZ_TIME=20s JANUS_LINUX_ARTIFACT=/private/tmp/janus-linux-amd64-02b86eb
+./scripts/verify-linux.sh`, producing SHA-256
+`8c9f893a814c425211cd4085e10901489a476f0657823e9a9f32356a8681a5e3`.
+
 ## 2026-09-19 — State the candidate support boundary
 
 Commit message: `docs(readiness): define candidate support boundary`.

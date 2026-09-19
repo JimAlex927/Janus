@@ -372,6 +372,18 @@ func writeConfigAtomically(path string, c config.Config) error {
 	}
 	tempName := temp.Name()
 	defer func() { _ = os.Remove(tempName) }()
+	// Preserve the existing mode before writing and syncing. Applying chmod after
+	// fsync would leave a crash window where the replacement content is durable
+	// but its access policy is not.
+	if info, statErr := os.Stat(path); statErr == nil {
+		if err := temp.Chmod(info.Mode().Perm()); err != nil {
+			_ = temp.Close()
+			return fmt.Errorf("preserve configuration mode: %w", err)
+		}
+	} else if !errors.Is(statErr, os.ErrNotExist) {
+		_ = temp.Close()
+		return fmt.Errorf("stat existing configuration: %w", statErr)
+	}
 	encoder := json.NewEncoder(temp)
 	encoder.SetIndent("", "  ")
 	if err := encoder.Encode(c); err != nil {
@@ -384,9 +396,6 @@ func writeConfigAtomically(path string, c config.Config) error {
 	}
 	if err := temp.Close(); err != nil {
 		return err
-	}
-	if info, statErr := os.Stat(path); statErr == nil {
-		_ = os.Chmod(tempName, info.Mode().Perm())
 	}
 	if err := os.Rename(tempName, path); err != nil {
 		return err
