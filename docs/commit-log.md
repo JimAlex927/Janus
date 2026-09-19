@@ -3,6 +3,20 @@
 This document records the purpose, scope, and verification for each Janus
 repository commit. Add a new dated section before every future commit.
 
+## 2026-09-19 — Record non-root Linux container smoke
+
+Commit message: `docs(readiness): record non-root Linux smoke`.
+
+Scope:
+
+- Recorded the UID 1001 container run that created the SQLite library, served
+  readiness and route checks, drained on SIGTERM, and exited with code `0`.
+- Connected the evidence to the systemd writable configuration-directory
+  contract without claiming a full systemd host qualification.
+
+Verification: the non-root Debian Linux smoke completed locally after commit
+`b3e7e0b`; the source tree remains covered by the Linux release gate.
+
 ## 2026-09-19 — Make the systemd configuration state writable
 
 Commit message: `fix(systemd): allow managed configuration state`.

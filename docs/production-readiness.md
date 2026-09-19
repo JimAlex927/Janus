@@ -95,6 +95,12 @@ The container was removed after the check. This closes only a Linux process and
 socket smoke; it does not close the target-VM systemd, race, capacity, soak, or
 canary gates above.
 
+A second run used a non-root UID 1001 as the Janus process itself (without a
+privileged wrapper). It created the SQLite library in the writable configuration
+directory, served the same checks, received `SIGTERM`, entered drain, and exited
+with code `0`. This specifically exercises the permissions required by the
+native unit's `ReadWritePaths=/etc/janus` contract.
+
 No live business traffic is switched until the destination, traffic scope and
 rollback baseline are identified. A local demo is not production canary evidence.
 
