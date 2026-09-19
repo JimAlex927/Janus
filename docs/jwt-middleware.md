@@ -2,8 +2,8 @@
 
 This document describes the built-in `jwt` middleware. It is available at
 route and service scope and is advertised by the backend capability catalog.
-JWT authenticates the caller; authorization and claim forwarding remain
-separate policies.
+JWT authenticates the caller. Claim forwarding is available only through an
+explicit allowlist in the same JWT policy; it is disabled by default.
 
 ## Why it fits Janus
 
@@ -19,11 +19,10 @@ service. Therefore it fits the existing named middleware model:
   `WWW-Authenticate: Bearer` challenge. Token details stay in bounded server
   logs and are never returned to the client.
 
-JWT is authentication, not authorization by itself. A first release should
-only establish the caller identity and validate configured issuer/audience and
-required claims. Claim-to-header forwarding, arbitrary claim expressions and
-scope/role authorization should be separate reviewed features; forwarding
-untrusted claims to an upstream by default would create a new trust boundary.
+JWT is authentication, not authorization by itself. The gateway validates the
+token once and can then pass selected verified identity fields to the
+application as request headers. This is deliberately an allowlist rather than
+a general claim expression engine.
 
 ## Policy shape
 
@@ -44,6 +43,12 @@ from the token header:
         "issuer": "https://idp.example.com/",
         "audience": ["janus-orders"],
         "required_claims": ["sub"],
+        "claim_headers": {
+          "User": "user",
+          "X-User-ID": "sub",
+          "X-User-Roles": "roles"
+        },
+        "remove_authorization": true,
         "clock_skew": "30s"
       }
     }
@@ -90,6 +95,16 @@ configured clock skew, and returns a generic `401` with
 `WWW-Authenticate: Bearer`. Tokens are accepted only from the
 `Authorization: Bearer` header; query strings and cookies are not
 authentication sources.
+
+`claim_headers` maps an upstream header name to a verified top-level claim
+name. String claims are copied as-is; arrays and objects are JSON encoded, so a
+claim such as `user` can be consumed from the `User` request header by the app.
+The gateway deletes each mapped header before applying the mapping, preventing
+a client-provided stale value from surviving when a claim is absent. Header
+names are restricted to ordinary end-to-end headers; `Authorization`,
+`Cookie`, `X-Forwarded-*`, hop-by-hop and framing headers are rejected. Each
+value is bounded to 8 KiB and CR/LF is rejected. `remove_authorization` is
+useful when the app should trust only gateway-provided identity headers.
 
 Each routing generation owns its verifier. A failed generation construction
 cannot publish a partially initialized policy, and a retired generation

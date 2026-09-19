@@ -7,7 +7,14 @@ schema. The admin console reads the capability catalog from the running binary.
 The production middleware set currently includes:
 
 - `jwt`: signature, issuer, audience, time and required-claim validation. It
-  never forwards claims or credentials to an upstream automatically.
+  never forwards claims or credentials to an upstream automatically unless an
+  explicit `claim_headers` mapping is configured.
+- `jwt_claims_headers`: local JWT verification plus a required explicit mapping
+  from verified top-level claims to upstream request headers.
+- `forward_auth`: Traefik-compatible external authentication flow. Janus sends
+  a sanitized request to the auth service, allows the original request on 2xx,
+  returns the auth response on non-2xx, and can copy selected auth response
+  headers to the upstream request.
 - `basic_auth`: HTTP Basic authentication backed by bcrypt hashes. Successful
   authentication can remove `Authorization` before proxying.
 - `ip_allowlist`: CIDR allow/deny using the client IP resolved through the
@@ -20,11 +27,10 @@ The production middleware set currently includes:
 - `headers`, `cors`, `body_limit`, `buffer`, `in_flight`, `strip_prefix` and
   `add_prefix` for request shaping and routing.
 
-`retry`, `circuit_breaker` and `forward_auth` are intentionally not enabled by
-default yet. They require explicit upstream retry semantics, response
-buffering, or an external authentication lifecycle; adding them without those
-contracts would make failure behavior ambiguous. They should be introduced as
-separate typed policies with bounded resources and dedicated tests.
+`retry` and `circuit_breaker` remain deferred because they require explicit
+upstream retry semantics and response buffering. `forward_auth` is available,
+but should be configured with a bounded response size and a narrow response
+header allowlist in production.
 
 Example:
 

@@ -312,24 +312,33 @@ func buildMiddlewares(c config.Config, names []string, serviceLimiter *middlewar
 				MaxAgeSeconds:    rules.MaxAgeSeconds,
 			}))
 		case definition.JWT != nil:
-			rules := definition.JWT.WithDefaults()
-			var secret []byte
-			if rules.KeySource.SecretEnv != "" {
-				secret = []byte(os.Getenv(rules.KeySource.SecretEnv))
-				if len(secret) == 0 {
-					return nil, fmt.Errorf("middleware %q jwt secret_env is unset or empty", name)
-				}
-			}
-			jwtMiddleware, err := middleware.JWT(middleware.JWTOptions{
-				JWKSURL: rules.KeySource.JWKSURL, PublicKeyFile: rules.KeySource.PublicKeyFile,
-				Secret: secret, Algorithms: rules.Algorithms, Issuer: rules.Issuer,
-				Audience: rules.Audience, RequiredClaims: rules.RequiredClaims,
-				ClockSkew: rules.ClockSkew.Duration(),
-			})
+			jwtMiddleware, err := buildJWTMiddleware(*definition.JWT)
 			if err != nil {
 				return nil, fmt.Errorf("middleware %q jwt: %w", name, err)
 			}
 			result = append(result, jwtMiddleware)
+		case definition.JWTClaimsHeaders != nil:
+			jwtMiddleware, err := buildJWTMiddleware(*definition.JWTClaimsHeaders)
+			if err != nil {
+				return nil, fmt.Errorf("middleware %q jwt_claims_headers: %w", name, err)
+			}
+			result = append(result, jwtMiddleware)
+		case definition.ForwardAuth != nil:
+			rules := definition.ForwardAuth
+			auth, err := middleware.ForwardAuth(middleware.ForwardAuthOptions{
+				Address: rules.Address, AuthRequestHeaders: rules.AuthRequestHeaders,
+				AuthResponseHeaders: rules.AuthResponseHeaders, AuthResponseHeadersRegex: rules.AuthResponseHeadersRegex,
+				HeaderField: rules.HeaderField, ForwardBody: rules.ForwardBody, MaxBodyBytes: rules.MaxBodyBytes,
+				MaxResponseBodyBytes: rules.MaxResponseBodyBytes, PreserveRequestMethod: rules.PreserveRequestMethod,
+				Timeout: rules.Timeout.Duration(), ForwardedHeaders: func(r *http.Request) map[string]string {
+					identity := forwardingPolicies.For(protocol.LimenID(r)).Resolve(r)
+					return map[string]string{"X-Forwarded-For": identity.ForwardedFor, "X-Forwarded-Proto": identity.ForwardedProto, "X-Forwarded-Host": identity.ForwardedHost}
+				},
+			})
+			if err != nil {
+				return nil, fmt.Errorf("middleware %q forward_auth: %w", name, err)
+			}
+			result = append(result, auth)
 		case definition.StripPrefix != nil:
 			result = append(result, middleware.StripPrefix(definition.StripPrefix.Prefix))
 		case definition.AddPrefix != nil:
@@ -362,6 +371,24 @@ func buildMiddlewares(c config.Config, names []string, serviceLimiter *middlewar
 		}
 	}
 	return result, nil
+}
+
+func buildJWTMiddleware(settings config.JWTSettings) (middleware.Middleware, error) {
+	rules := settings.WithDefaults()
+	var secret []byte
+	if rules.KeySource.SecretEnv != "" {
+		secret = []byte(os.Getenv(rules.KeySource.SecretEnv))
+		if len(secret) == 0 {
+			return nil, fmt.Errorf("secret_env is unset or empty")
+		}
+	}
+	return middleware.JWT(middleware.JWTOptions{
+		JWKSURL: rules.KeySource.JWKSURL, PublicKeyFile: rules.KeySource.PublicKeyFile,
+		Secret: secret, Algorithms: rules.Algorithms, Issuer: rules.Issuer,
+		Audience: rules.Audience, RequiredClaims: rules.RequiredClaims,
+		ClaimHeaders: rules.ClaimHeaders, RemoveAuthorization: rules.RemoveAuthorization,
+		ClockSkew: rules.ClockSkew.Duration(),
+	})
 }
 
 func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {

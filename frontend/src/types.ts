@@ -98,6 +98,19 @@ export interface Middleware {
     max_age_seconds?: number;
   };
   jwt?: Record<string, unknown>;
+  jwt_claims_headers?: Record<string, unknown>;
+  forward_auth?: {
+    address?: string;
+    auth_request_headers?: string[];
+    auth_response_headers?: string[];
+    auth_response_headers_regex?: string;
+    header_field?: string;
+    forward_body?: boolean;
+    max_body_bytes?: number;
+    max_response_body_bytes?: number;
+    preserve_request_method?: boolean;
+    timeout?: string;
+  };
   basic_auth?: { realm?: string; users?: Record<string, string>; remove_header?: boolean };
   ip_allowlist?: { source_ranges?: string[] };
   rate_limit?: { average?: number; period?: string; burst?: number; max_keys?: number };

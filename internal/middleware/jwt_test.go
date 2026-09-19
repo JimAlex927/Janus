@@ -60,6 +60,48 @@ func TestJWTValidatesBearerTokenAndClaims(t *testing.T) {
 	}
 }
 
+func TestJWTForwardsExplicitClaimHeaders(t *testing.T) {
+	options := testJWTOptions()
+	options.ClaimHeaders = map[string]string{"User": "user", "X-User-ID": "sub", "X-User-Roles": "roles"}
+	options.RemoveAuthorization = true
+	mw, err := JWT(options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	token := signedTestToken(t, jwt.MapClaims{
+		"iss": "https://issuer.example", "aud": "janus", "sub": "user-1",
+		"user": map[string]any{"id": "user-1", "name": "Jim"}, "roles": []string{"admin"},
+		"exp": float64(time.Now().Add(time.Minute).Unix()),
+	})
+	request := httptest.NewRequest(http.MethodGet, "/orders", nil)
+	request.Header.Set("Authorization", "Bearer "+token)
+	request.Header.Set("User", "attacker-value")
+	response := httptest.NewRecorder()
+	mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("User") != `{"id":"user-1","name":"Jim"}` {
+			t.Errorf("user header = %q", r.Header.Get("User"))
+		}
+		if r.Header.Get("X-User-ID") != "user-1" || r.Header.Get("X-User-Roles") != `["admin"]` {
+			t.Errorf("claim headers = %v", r.Header)
+		}
+		if r.Header.Get("Authorization") != "" {
+			t.Error("authorization header was not removed")
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})).ServeHTTP(response, request)
+	if response.Code != http.StatusNoContent {
+		t.Fatalf("status = %d", response.Code)
+	}
+}
+
+func TestJWTRejectsReservedClaimHeaders(t *testing.T) {
+	options := testJWTOptions()
+	options.ClaimHeaders = map[string]string{"Authorization": "sub"}
+	if _, err := JWT(options); err == nil {
+		t.Fatal("accepted Authorization claim header")
+	}
+}
+
 func TestJWTRejectsInvalidTokensWithoutCallingNext(t *testing.T) {
 	middleware, err := JWT(testJWTOptions())
 	if err != nil {

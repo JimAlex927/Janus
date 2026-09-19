@@ -22,6 +22,7 @@ import (
 	"time"
 
 	jwt "github.com/golang-jwt/jwt/v5"
+	"golang.org/x/net/http/httpguts"
 
 	"janus/internal/telemetry"
 )
@@ -43,7 +44,11 @@ type JWTOptions struct {
 	Issuer         string
 	Audience       []string
 	RequiredClaims []string
-	ClockSkew      time.Duration
+	// ClaimHeaders maps an upstream header name to a verified top-level claim.
+	// It is empty by default; claims are never forwarded implicitly.
+	ClaimHeaders        map[string]string
+	RemoveAuthorization bool
+	ClockSkew           time.Duration
 }
 
 // JWTClaims returns verified claims installed by JWT middleware. Claims are
@@ -91,9 +96,49 @@ func JWT(options JWTOptions) (Middleware, error) {
 				rejectJWT(w)
 				return
 			}
-			next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), jwtClaimsKey{}, claims)))
+			r = r.WithContext(context.WithValue(r.Context(), jwtClaimsKey{}, claims))
+			if len(v.opts.ClaimHeaders) > 0 {
+				r = r.Clone(r.Context())
+				r.Header = r.Header.Clone()
+				forwardJWTClaimHeaders(r.Header, claims, v.opts.ClaimHeaders)
+			}
+			if v.opts.RemoveAuthorization {
+				if r.Header == nil {
+					r.Header = make(http.Header)
+				}
+				r.Header.Del("Authorization")
+			}
+			next.ServeHTTP(w, r)
 		})
 	}, nil
+}
+
+const maxJWTForwardedHeaderValue = 8 << 10
+
+func forwardJWTClaimHeaders(header http.Header, claims map[string]any, mappings map[string]string) {
+	for output, claimName := range mappings {
+		// Delete first so a client cannot smuggle a stale value when the
+		// configured claim is absent.
+		header.Del(output)
+		value, ok := claims[claimName]
+		if !ok || value == nil {
+			continue
+		}
+		encoded, err := json.Marshal(value)
+		if err != nil {
+			continue
+		}
+		var text string
+		if stringValue, ok := value.(string); ok {
+			text = stringValue
+		} else {
+			text = string(encoded)
+		}
+		if len(text) > maxJWTForwardedHeaderValue || strings.ContainsAny(text, "\x00\r\n") {
+			continue
+		}
+		header.Set(output, text)
+	}
 }
 
 func bearerToken(header http.Header) (string, bool) {
@@ -135,6 +180,9 @@ func newJWTVerifier(options JWTOptions) (*jwtVerifier, error) {
 	}
 	if len(options.Audience) == 0 {
 		return nil, errors.New("jwt requires at least one audience")
+	}
+	if err := validateJWTClaimHeaders(options.ClaimHeaders); err != nil {
+		return nil, err
 	}
 	if len(options.JWKSURL) > 0 && (options.PublicKeyFile != "" || len(options.Secret) > 0) {
 		return nil, errors.New("jwt key sources are mutually exclusive")
@@ -183,6 +231,30 @@ func newJWTVerifier(options JWTOptions) (*jwtVerifier, error) {
 		v.staticKey = append([]byte(nil), options.Secret...)
 	}
 	return v, nil
+}
+
+func validateJWTClaimHeaders(headers map[string]string) error {
+	if len(headers) > 32 {
+		return errors.New("jwt claim_headers cannot contain more than 32 mappings")
+	}
+	for header, claim := range headers {
+		canonical := http.CanonicalHeaderKey(strings.TrimSpace(header))
+		if canonical == "" || strings.TrimSpace(header) != header || !httpguts.ValidHeaderFieldName(header) {
+			return fmt.Errorf("jwt claim header %q is invalid", header)
+		}
+		switch {
+		case canonical == "Authorization", canonical == "Cookie":
+			return fmt.Errorf("jwt claim header %q is reserved", canonical)
+		case strings.HasPrefix(canonical, "X-Forwarded-"):
+			return fmt.Errorf("jwt claim header %q is reserved", canonical)
+		case canonical == "Connection", canonical == "Content-Length", canonical == "Host", canonical == "Keep-Alive", canonical == "Proxy-Authenticate", canonical == "Proxy-Authorization", canonical == "Proxy-Connection", canonical == "Te", canonical == "Trailer", canonical == "Transfer-Encoding", canonical == "Upgrade":
+			return fmt.Errorf("jwt claim header %q is reserved", canonical)
+		}
+		if strings.TrimSpace(claim) == "" || strings.ContainsAny(claim, "\x00\r\n") || len(claim) > 128 {
+			return fmt.Errorf("jwt claim name for header %q is invalid", canonical)
+		}
+	}
+	return nil
 }
 
 func supportedJWTAlgorithm(algorithm string) bool {

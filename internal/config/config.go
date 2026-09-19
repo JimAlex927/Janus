@@ -8,11 +8,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -96,19 +98,21 @@ func (s HTTP3Settings) Validate() error {
 // definition may be attached to either a route or a service. New definitions
 // should declare route or service explicitly.
 type Middleware struct {
-	Scope       string               `json:"scope,omitempty"`
-	Buffer      *BufferSettings      `json:"buffer,omitempty"`
-	BodyLimit   *BodyLimitSettings   `json:"body_limit,omitempty"`
-	InFlight    *InFlightSettings    `json:"in_flight,omitempty"`
-	Headers     *HeadersSettings     `json:"headers,omitempty"`
-	CORS        *CORSSettings        `json:"cors,omitempty"`
-	JWT         *JWTSettings         `json:"jwt,omitempty"`
-	StripPrefix *StripPrefixSettings `json:"strip_prefix,omitempty"`
-	AddPrefix   *AddPrefixSettings   `json:"add_prefix,omitempty"`
-	BasicAuth   *BasicAuthSettings   `json:"basic_auth,omitempty"`
-	IPAllowList *IPAllowListSettings `json:"ip_allowlist,omitempty"`
-	RateLimit   *RateLimitSettings   `json:"rate_limit,omitempty"`
-	Compress    *CompressSettings    `json:"compress,omitempty"`
+	Scope            string               `json:"scope,omitempty"`
+	Buffer           *BufferSettings      `json:"buffer,omitempty"`
+	BodyLimit        *BodyLimitSettings   `json:"body_limit,omitempty"`
+	InFlight         *InFlightSettings    `json:"in_flight,omitempty"`
+	Headers          *HeadersSettings     `json:"headers,omitempty"`
+	CORS             *CORSSettings        `json:"cors,omitempty"`
+	JWT              *JWTSettings         `json:"jwt,omitempty"`
+	JWTClaimsHeaders *JWTSettings         `json:"jwt_claims_headers,omitempty"`
+	ForwardAuth      *ForwardAuthSettings `json:"forward_auth,omitempty"`
+	StripPrefix      *StripPrefixSettings `json:"strip_prefix,omitempty"`
+	AddPrefix        *AddPrefixSettings   `json:"add_prefix,omitempty"`
+	BasicAuth        *BasicAuthSettings   `json:"basic_auth,omitempty"`
+	IPAllowList      *IPAllowListSettings `json:"ip_allowlist,omitempty"`
+	RateLimit        *RateLimitSettings   `json:"rate_limit,omitempty"`
+	Compress         *CompressSettings    `json:"compress,omitempty"`
 }
 
 const (
@@ -215,21 +219,36 @@ type CORSSettings struct {
 
 const MaxCORSMaxAgeSeconds = 86400
 
-// JWTSettings configures authentication without forwarding claims to an
-// upstream. Exactly one key source is required.
+// JWTSettings configures JWT authentication. Claims are forwarded only through
+// an explicit ClaimHeaders allowlist. Exactly one key source is required.
 type JWTSettings struct {
-	KeySource      JWTKeySource `json:"key_source"`
-	Algorithms     []string     `json:"algorithms"`
-	Issuer         string       `json:"issuer"`
-	Audience       []string     `json:"audience"`
-	RequiredClaims []string     `json:"required_claims,omitempty"`
-	ClockSkew      Duration     `json:"clock_skew,omitempty"`
+	KeySource           JWTKeySource      `json:"key_source"`
+	Algorithms          []string          `json:"algorithms"`
+	Issuer              string            `json:"issuer"`
+	Audience            []string          `json:"audience"`
+	RequiredClaims      []string          `json:"required_claims,omitempty"`
+	ClaimHeaders        map[string]string `json:"claim_headers,omitempty"`
+	RemoveAuthorization bool              `json:"remove_authorization,omitempty"`
+	ClockSkew           Duration          `json:"clock_skew,omitempty"`
 }
 
 type JWTKeySource struct {
 	JWKSURL       string `json:"jwks_url,omitempty"`
 	PublicKeyFile string `json:"public_key_file,omitempty"`
 	SecretEnv     string `json:"secret_env,omitempty"`
+}
+
+type ForwardAuthSettings struct {
+	Address                  string   `json:"address"`
+	AuthRequestHeaders       []string `json:"auth_request_headers,omitempty"`
+	AuthResponseHeaders      []string `json:"auth_response_headers,omitempty"`
+	AuthResponseHeadersRegex string   `json:"auth_response_headers_regex,omitempty"`
+	HeaderField              string   `json:"header_field,omitempty"`
+	ForwardBody              bool     `json:"forward_body,omitempty"`
+	MaxBodyBytes             int64    `json:"max_body_bytes,omitempty"`
+	MaxResponseBodyBytes     int64    `json:"max_response_body_bytes,omitempty"`
+	PreserveRequestMethod    bool     `json:"preserve_request_method,omitempty"`
+	Timeout                  Duration `json:"timeout,omitempty"`
 }
 
 func (s JWTSettings) WithDefaults() JWTSettings {
@@ -239,6 +258,9 @@ func (s JWTSettings) WithDefaults() JWTSettings {
 	s.Algorithms = append([]string(nil), s.Algorithms...)
 	s.Audience = append([]string(nil), s.Audience...)
 	s.RequiredClaims = append([]string(nil), s.RequiredClaims...)
+	if s.ClaimHeaders != nil {
+		s.ClaimHeaders = maps.Clone(s.ClaimHeaders)
+	}
 	return s
 }
 
@@ -708,6 +730,12 @@ func (c Config) Validate() error {
 		if definition.JWT != nil {
 			defined++
 		}
+		if definition.JWTClaimsHeaders != nil {
+			defined++
+		}
+		if definition.ForwardAuth != nil {
+			defined++
+		}
 		if definition.StripPrefix != nil {
 			defined++
 		}
@@ -754,6 +782,20 @@ func (c Config) Validate() error {
 		if definition.JWT != nil {
 			if err := validateJWTSettings(*definition.JWT); err != nil {
 				return fmt.Errorf("middleware %q jwt: %w", name, err)
+			}
+		}
+		if definition.JWTClaimsHeaders != nil {
+			settings := *definition.JWTClaimsHeaders
+			if len(settings.ClaimHeaders) == 0 {
+				return fmt.Errorf("middleware %q jwt_claims_headers requires claim_headers", name)
+			}
+			if err := validateJWTSettings(settings); err != nil {
+				return fmt.Errorf("middleware %q jwt_claims_headers: %w", name, err)
+			}
+		}
+		if definition.ForwardAuth != nil {
+			if err := validateForwardAuthSettings(*definition.ForwardAuth); err != nil {
+				return fmt.Errorf("middleware %q forward_auth: %w", name, err)
 			}
 		}
 		if definition.StripPrefix != nil {
@@ -868,6 +910,9 @@ func validateJWTSettings(settings JWTSettings) error {
 		}
 		claims[claim] = true
 	}
+	if err := validateJWTClaimHeaders(settings.ClaimHeaders); err != nil {
+		return err
+	}
 	if settings.ClockSkew.Duration() < 0 || settings.ClockSkew.Duration() > 5*time.Minute {
 		return errors.New("clock_skew must be between 0 and 5m")
 	}
@@ -907,6 +952,74 @@ func validateJWTSettings(settings JWTSettings) error {
 		}
 	}
 	return nil
+}
+
+func validateJWTClaimHeaders(headers map[string]string) error {
+	if len(headers) > 32 {
+		return errors.New("claim_headers cannot contain more than 32 mappings")
+	}
+	for header, claim := range headers {
+		canonical := http.CanonicalHeaderKey(strings.TrimSpace(header))
+		if canonical == "" || strings.TrimSpace(header) != header || !httpguts.ValidHeaderFieldName(header) {
+			return fmt.Errorf("claim header name %q is invalid", header)
+		}
+		if _, forbidden := forbiddenMiddlewareHeaders[canonical]; forbidden || canonical == "Authorization" || canonical == "Cookie" || strings.HasPrefix(canonical, "X-Forwarded-") {
+			return fmt.Errorf("claim header %q is reserved", canonical)
+		}
+		if strings.TrimSpace(claim) == "" || strings.ContainsAny(claim, "\x00\r\n") || len(claim) > 128 {
+			return fmt.Errorf("claim name for header %q is invalid", canonical)
+		}
+	}
+	return nil
+}
+
+func validateForwardAuthSettings(settings ForwardAuthSettings) error {
+	u, err := url.Parse(settings.Address)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil {
+		return errors.New("address must be an http(s) URL without credentials")
+	}
+	if settings.Timeout.Duration() < 0 || settings.Timeout.Duration() > time.Minute {
+		return errors.New("timeout must be between 0 and 1m")
+	}
+	if settings.MaxBodyBytes < 0 || settings.MaxBodyBytes > 64<<20 {
+		return errors.New("max_body_bytes must be between 0 and 64MiB")
+	}
+	if settings.MaxResponseBodyBytes < 0 || settings.MaxResponseBodyBytes > 1<<20 {
+		return errors.New("max_response_body_bytes must be between 0 and 1MiB")
+	}
+	for _, name := range settings.AuthRequestHeaders {
+		if !validForwardAuthRequestHeader(name) {
+			return fmt.Errorf("auth_request_headers contains invalid header %q", name)
+		}
+	}
+	for _, name := range append(append([]string{}, settings.AuthResponseHeaders...), []string{settings.HeaderField}...) {
+		if name != "" && !validJWTClaimHeaderName(name) {
+			return fmt.Errorf("response header %q is invalid or reserved", name)
+		}
+	}
+	if settings.AuthResponseHeadersRegex != "" {
+		if _, err := regexp.Compile(settings.AuthResponseHeadersRegex); err != nil {
+			return fmt.Errorf("auth_response_headers_regex: %w", err)
+		}
+	}
+	return nil
+}
+
+func validForwardAuthRequestHeader(name string) bool {
+	canonical := http.CanonicalHeaderKey(strings.TrimSpace(name))
+	return strings.TrimSpace(name) == name && name != "" && httpguts.ValidHeaderFieldName(name) && !strings.HasPrefix(canonical, "X-Forwarded-")
+}
+
+func validJWTClaimHeaderName(name string) bool {
+	canonical := http.CanonicalHeaderKey(strings.TrimSpace(name))
+	if canonical == "" || strings.TrimSpace(name) != name || !httpguts.ValidHeaderFieldName(name) {
+		return false
+	}
+	if canonical == "Authorization" || canonical == "Cookie" || strings.HasPrefix(canonical, "X-Forwarded-") {
+		return false
+	}
+	_, forbidden := forbiddenMiddlewareHeaders[canonical]
+	return !forbidden
 }
 
 func validateMiddlewarePathPrefix(name, kind, prefix string) error {
@@ -1182,6 +1295,10 @@ func (c Config) WithDefaults() Config {
 			if definition.JWT != nil {
 				jwt := definition.JWT.WithDefaults()
 				definition.JWT = &jwt
+			}
+			if definition.JWTClaimsHeaders != nil {
+				jwt := definition.JWTClaimsHeaders.WithDefaults()
+				definition.JWTClaimsHeaders = &jwt
 			}
 			if definition.RateLimit != nil {
 				rate := definition.RateLimit.WithDefaults()

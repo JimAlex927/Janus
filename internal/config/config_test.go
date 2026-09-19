@@ -366,6 +366,36 @@ func TestExpandedMiddlewareConfig(t *testing.T) {
 	}
 }
 
+func TestJWTClaimHeaderValidation(t *testing.T) {
+	settings := JWTSettings{
+		KeySource: JWTKeySource{SecretEnv: "JANUS_JWT_SECRET"}, Algorithms: []string{"HS256"},
+		Issuer: "https://issuer.example", Audience: []string{"janus"},
+		ClaimHeaders: map[string]string{"user": "user", "X-User-ID": "sub"},
+	}
+	if err := validateJWTSettings(settings); err != nil {
+		t.Fatal(err)
+	}
+	settings.ClaimHeaders = map[string]string{"Authorization": "sub"}
+	if err := validateJWTSettings(settings); err == nil {
+		t.Fatal("accepted reserved JWT claim header")
+	}
+}
+
+func TestForwardAuthAndJWTClaimsHeadersConfig(t *testing.T) {
+	c := Config{
+		Listen: "127.0.0.1:8080",
+		Middlewares: map[string]Middleware{
+			"external": {ForwardAuth: &ForwardAuthSettings{Address: "https://auth.example/check", AuthResponseHeaders: []string{"X-User"}}},
+			"local":    {JWTClaimsHeaders: &JWTSettings{KeySource: JWTKeySource{SecretEnv: "JANUS_JWT_SECRET"}, Algorithms: []string{"HS256"}, Issuer: "https://issuer.example", Audience: []string{"janus"}, ClaimHeaders: map[string]string{"User": "user"}}},
+		},
+		Services: map[string]Service{"s": {Upstreams: []string{"http://127.0.0.1:9000"}}},
+		Routes:   []Route{{Name: "r", PathPrefix: "/", Service: "s", Middlewares: []string{"external", "local"}}},
+	}
+	if err := c.WithDefaults().Validate(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestAddPrefixMiddlewareConfigAndScopes(t *testing.T) {
 	valid := `{"listen":"127.0.0.1:8080","middlewares":{"base":{"add_prefix":{"prefix":"/internal"}}},"services":{"s":{"upstreams":["http://localhost:9000"],"middlewares":["base"]}},"routes":[{"name":"r","path_prefix":"/api","service":"s"}]}`
 	if _, err := Load(strings.NewReader(valid)); err != nil {

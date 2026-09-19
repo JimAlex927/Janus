@@ -84,8 +84,40 @@ func MiddlewareCapabilities() []MiddlewareCapability {
 				{Name: "algorithms", Label: "允许算法", Kind: "string_list", Required: true, Description: "显式算法白名单，禁止根据 token header 推断。"},
 				{Name: "issuer", Label: "Issuer", Kind: "string", Required: true},
 				{Name: "audience", Label: "Audience", Kind: "string_list", Required: true},
-				{Name: "required_claims", Label: "必需 Claims", Kind: "string_list", Description: "认证通过后只在请求上下文中提供，不自动转发。"},
+				{Name: "required_claims", Label: "必需 Claims", Kind: "string_list", Description: "认证通过后可被 claim_headers 显式映射；不会自动转发。"},
+				{Name: "claim_headers", Label: "Claims 请求头映射", Kind: "string_map", Description: "Header 名称到顶层 claim 名称的映射；默认不转发 claims，禁止 Authorization、Cookie 和 X-Forwarded-*。"},
+				{Name: "remove_authorization", Label: "移除 Bearer 头", Kind: "boolean", Default: false, Description: "验签后删除传给上游的 Authorization。"},
 				{Name: "clock_skew", Label: "时钟偏差", Kind: "string", Default: "30s"},
+			},
+		},
+		{
+			Type: "jwt_claims_headers", Label: "JWT Claims Headers", Scopes: []string{MiddlewareScopeRoute, MiddlewareScopeService},
+			Description: "Janus 本地验证 JWT，并将显式选择的 claims 转换为上游请求头；适合应用直接读取 User 等身份头。",
+			Fields: []MiddlewareFieldCapability{
+				{Name: "key_source", Label: "密钥来源", Kind: "json_object", Required: true, Description: "jwks_url、public_key_file、secret_env 三选一。"},
+				{Name: "algorithms", Label: "允许算法", Kind: "string_list", Required: true},
+				{Name: "issuer", Label: "Issuer", Kind: "string", Required: true},
+				{Name: "audience", Label: "Audience", Kind: "string_list", Required: true},
+				{Name: "required_claims", Label: "必需 Claims", Kind: "string_list"},
+				{Name: "claim_headers", Label: "Claims 请求头映射", Kind: "string_map", Required: true, Description: "Header 名称到顶层 claim 名称的映射。"},
+				{Name: "remove_authorization", Label: "移除 Bearer 头", Kind: "boolean", Default: true},
+				{Name: "clock_skew", Label: "时钟偏差", Kind: "string", Default: "30s"},
+			},
+		},
+		{
+			Type: "forward_auth", Label: "Forward Auth", Scopes: []string{MiddlewareScopeRoute, MiddlewareScopeService},
+			Description: "调用外部鉴权服务；2xx 放行，非 2xx 将鉴权响应返回给客户端，并可复制鉴权响应头到上游请求。",
+			Fields: []MiddlewareFieldCapability{
+				{Name: "address", Label: "鉴权地址", Kind: "string", Required: true},
+				{Name: "auth_request_headers", Label: "发送到鉴权服务的请求头", Kind: "string_list", Description: "为空时发送普通请求头；X-Forwarded-* 由 Janus 重新生成。"},
+				{Name: "auth_response_headers", Label: "复制鉴权响应头", Kind: "string_list"},
+				{Name: "auth_response_headers_regex", Label: "响应头正则", Kind: "string"},
+				{Name: "header_field", Label: "用户头字段", Kind: "string"},
+				{Name: "forward_body", Label: "转发请求体", Kind: "boolean", Default: false},
+				{Name: "max_body_bytes", Label: "鉴权请求体上限", Kind: "integer", Default: int64(1 << 20), Min: int64Pointer(1), Max: int64Pointer(64 << 20)},
+				{Name: "max_response_body_bytes", Label: "鉴权响应体上限", Kind: "integer", Default: int64(1 << 20), Min: int64Pointer(1), Max: int64Pointer(1 << 20)},
+				{Name: "preserve_request_method", Label: "保留请求方法", Kind: "boolean", Default: false},
+				{Name: "timeout", Label: "超时", Kind: "string", Default: "5s"},
 			},
 		},
 		{
@@ -152,6 +184,10 @@ func MiddlewareType(m Middleware) string {
 		return "cors"
 	case m.JWT != nil:
 		return "jwt"
+	case m.JWTClaimsHeaders != nil:
+		return "jwt_claims_headers"
+	case m.ForwardAuth != nil:
+		return "forward_auth"
 	case m.StripPrefix != nil:
 		return "strip_prefix"
 	case m.AddPrefix != nil:
