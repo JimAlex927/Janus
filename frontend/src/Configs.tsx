@@ -43,6 +43,8 @@ export function ConfigsPage({ store, onEdit }: { store: ConfigStore; onEdit: (id
       initialValue: `config-${configs.length + 1}`,
       placeholder: "例如 production",
       confirmLabel: "创建配置",
+      icon: "plus",
+      context: "CREATE",
     }))?.trim();
     if (!name) return;
     try {
@@ -88,6 +90,8 @@ export function ConfigsPage({ store, onEdit }: { store: ConfigStore; onEdit: (id
       initialValue: `${name}-copy`,
       placeholder: "请输入新配置名称",
       confirmLabel: "创建副本",
+      icon: "copy",
+      context: "DUPLICATE",
     }))?.trim();
     if (!next) return;
     try {
@@ -130,6 +134,8 @@ export function ConfigsPage({ store, onEdit }: { store: ConfigStore; onEdit: (id
         initialValue: fallback,
         placeholder: "请输入配置名称",
         confirmLabel: "导入配置",
+        icon: "upload",
+        context: "IMPORT",
       }))?.trim();
       if (!name) return;
       const res = await fetch("/api/v1/configs", {
@@ -158,6 +164,8 @@ export function ConfigsPage({ store, onEdit }: { store: ConfigStore; onEdit: (id
       message: `确定删除「${name}」吗？该操作不可撤销。`,
       confirmLabel: "删除配置",
       tone: "danger",
+      icon: "trash",
+      context: "DELETE",
     }))) return;
     try {
       const res = await fetch(`/api/v1/configs/${id}`, { method: "DELETE" });
@@ -175,6 +183,8 @@ export function ConfigsPage({ store, onEdit }: { store: ConfigStore; onEdit: (id
       message: "当前生效配置将被替换，发布后路由配置会立即进入新的 generation。",
       confirmLabel: "确认发布",
       tone: "warning",
+      icon: "publish",
+      context: "PUBLISH",
     }))) return;
     try {
       const res = await fetch(`/api/v1/configs/${id}/publish`, {

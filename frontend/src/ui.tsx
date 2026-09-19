@@ -32,6 +32,7 @@ export function useDialogLifecycle(dialogRef: RefObject<HTMLElement>, onCancel: 
 }
 
 type DialogTone = "neutral" | "warning" | "danger";
+type DialogIcon = "copy" | "upload" | "plus" | "trash" | "publish" | "warning" | "edit";
 
 type ConfirmDialogOptions = {
   title: string;
@@ -39,6 +40,8 @@ type ConfirmDialogOptions = {
   confirmLabel?: string;
   cancelLabel?: string;
   tone?: DialogTone;
+  icon?: DialogIcon;
+  context?: string;
 };
 
 type PromptDialogOptions = ConfirmDialogOptions & {
@@ -105,12 +108,14 @@ function Dialog({
 
   const tone = request.tone || "neutral";
   const isPrompt = request.kind === "prompt";
+  const icon = request.icon || inferDialogIcon(request.title, tone);
+  const context = request.context || inferDialogContext(icon, request.kind);
   return (
     <div className="dialog-backdrop" onMouseDown={onCancel}>
       <div
         ref={dialogRef}
         className={`decision-dialog decision-dialog-${tone}`}
-        role="dialog"
+        role={tone === "danger" ? "alertdialog" : "dialog"}
         aria-modal="true"
         aria-labelledby={titleId}
         aria-describedby={messageId}
@@ -119,24 +124,27 @@ function Dialog({
       >
         <form onSubmit={(event) => { event.preventDefault(); onConfirm(value); }}>
           <div className="decision-dialog-main">
-            <span className="decision-dialog-mark" aria-hidden="true">{tone === "danger" ? "!" : "?"}</span>
+            <span className="decision-dialog-mark" aria-hidden="true"><DialogGlyph icon={icon} /></span>
             <div>
-              <div className="eyebrow">JANUS CONTROL</div>
+              <div className="decision-dialog-kicker"><span>JANUS CONTROL</span><i>{context}</i></div>
               <h3 id={titleId}>{request.title}</h3>
               <p id={messageId}>{request.message}</p>
             </div>
             <button type="button" className="icon-button decision-dialog-close" onClick={onCancel} aria-label="关闭">×</button>
           </div>
           {isPrompt && (
-            <input
-              ref={inputRef}
-              className="decision-dialog-input"
-              value={value}
-              placeholder={request.placeholder}
-              onChange={(event) => setValue(event.target.value)}
-              aria-label="输入内容"
-              autoComplete="off"
-            />
+            <label className="decision-dialog-field">
+              <span>名称</span>
+              <input
+                ref={inputRef}
+                className="decision-dialog-input"
+                value={value}
+                placeholder={request.placeholder}
+                onChange={(event) => setValue(event.target.value)}
+                aria-label="输入内容"
+                autoComplete="off"
+              />
+            </label>
           )}
           <div className="decision-dialog-foot">
             <button type="button" className="btn ghost" onClick={onCancel}>{request.cancelLabel || "取消"}</button>
@@ -148,6 +156,39 @@ function Dialog({
       </div>
     </div>
   );
+}
+
+function inferDialogIcon(title: string, tone: DialogTone): DialogIcon {
+  if (/复制/.test(title)) return "copy";
+  if (/导入/.test(title)) return "upload";
+  if (/新建|创建/.test(title)) return "plus";
+  if (/删除/.test(title)) return "trash";
+  if (/发布|写入/.test(title)) return "publish";
+  if (/离开|放弃|丢失/.test(title)) return "warning";
+  return tone === "danger" || tone === "warning" ? "warning" : "edit";
+}
+
+function inferDialogContext(icon: DialogIcon, kind: DialogRequest["kind"]): string {
+  if (icon === "copy") return "DUPLICATE";
+  if (icon === "upload") return "IMPORT";
+  if (icon === "plus") return "CREATE";
+  if (icon === "trash") return "DELETE";
+  if (icon === "publish") return "PUBLISH";
+  if (icon === "warning") return "REVIEW";
+  return kind === "prompt" ? "EDIT" : "CONFIRM";
+}
+
+function DialogGlyph({ icon }: { icon: DialogIcon }) {
+  const paths: Record<DialogIcon, ReactNode> = {
+    copy: <><rect x="7" y="7" width="10" height="10" rx="2" /><path d="M10 7V5.5A1.5 1.5 0 0 1 11.5 4h7A1.5 1.5 0 0 1 20 5.5v7a1.5 1.5 0 0 1-1.5 1.5H17" /></>,
+    upload: <><path d="M12 15V4" /><path d="m8 8 4-4 4 4" /><path d="M5 14v3.5A1.5 1.5 0 0 0 6.5 19h11a1.5 1.5 0 0 0 1.5-1.5V14" /></>,
+    plus: <><path d="M12 5v14M5 12h14" /></>,
+    trash: <><path d="M5 7h14M10 11v5M14 11v5" /><path d="m8 7 .7-2h6.6l.7 2M7 7l.7 12h8.6L17 7" /></>,
+    publish: <><path d="M5 12h13" /><path d="m13 6 6 6-6 6" /></>,
+    warning: <><path d="M12 4 21 19H3L12 4Z" /><path d="M12 9v4M12 16h.01" /></>,
+    edit: <><path d="m5 16-.8 3.8L8 19l10.5-10.5a2.1 2.1 0 0 0-3-3L5 16Z" /><path d="m14 7 3 3" /></>,
+  };
+  return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">{paths[icon]}</svg>;
 }
 
 /** 通用编辑对话框：所有资源编辑器共用一致的确认、取消和关闭语义。 */
