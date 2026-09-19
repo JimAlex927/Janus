@@ -15,7 +15,7 @@ cross-compilation do not satisfy Linux execution or deployment gates.
 | Reload matches published bytes | Startup hash comes from the runtime input snapshot; certificate hash/parse/publication use the same bounded bytes; startup race regressions | Repeated route/certificate replacement and rollback during load |
 | Correct timeout response | 103 followed by deadline returns final 504 | Protocol fault-injection campaign |
 | Linux/race | Pinned CI definition; Linux process SIGTERM tests now cover TCP and H3 and cross-compile; Windows full test/vet plus repeated full tests and race pass | Actual full test/race/vet runs on VM; preserve logs |
-| Deployment | Native systemd unit and runbook | Install as non-root on VM, readiness, restart, ports, CA roots and resource caps |
+| Deployment | Native systemd unit and runbook; local Debian container smoke | Install as non-root on VM, readiness, restart, ports, CA roots and resource caps |
 | Capacity | Configuration limits exist | Agree workload, measure overload and 24h soak |
 | Canary | Not started | Name non-core business, traffic split, baseline and rollback target; qualify first |
 

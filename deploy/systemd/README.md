@@ -31,7 +31,8 @@ Keep the private key readable only by `root` and the `janus` group.
 ```sh
 useradd --system --home-dir /nonexistent --shell /usr/sbin/nologin janus
 install -o root -g root -m 0755 bin/janus-linux-amd64 /usr/local/bin/janus
-install -d -o root -g janus -m 0750 /etc/janus /etc/janus/certs
+install -d -o root -g janus -m 0770 /etc/janus
+install -d -o root -g janus -m 0750 /etc/janus/certs
 install -o root -g janus -m 0640 janus.json /etc/janus/janus.json
 install -o root -g janus -m 0640 janus.crt /etc/janus/certs/janus.crt
 install -o root -g janus -m 0640 janus.key /etc/janus/certs/janus.key
@@ -53,6 +54,12 @@ systemctl status janus
 The effective view includes defaults and normalized legacy Limen syntax, but
 does not include TLS certificate or private-key asset paths. It is suitable for
 review output; it is not a secret store or a readiness check.
+
+The unit deliberately keeps `/etc/janus` writable while `ProtectSystem=strict`
+is enabled. Janus needs that directory for the SQLite configuration library,
+atomic configuration replacement, and its temporary file; keep the certificate
+directory and certificate/key files non-writable by the `janus` user as shown
+above.
 
 `TimeoutStopSec` is aligned with the default 35-second drain budget. If
 `settings.shutdown.drain_timeout` is increased, increase the unit timeout with
@@ -88,8 +95,8 @@ unrecognized-file warning before choosing an archived version to publish.
 ## Current qualification boundary
 
 This artifact is syntax-checked and cross-compiled by the repository's release
-checks, but it has not been run here because the development host does not have
-Docker or a Linux systemd environment. The repository CI provides Linux Go
-test/race/vet/static-build checks; Linux signal/socket behavior, systemd
-resource limits, load, soak, and canary rollback still require a successful CI
-run or representative deployment host before production certification.
+checks and has passed a local Debian Linux container smoke. It has not yet been
+installed under a real systemd host. The repository CI provides Linux Go
+test/race/vet/static-build checks; systemd resource limits, load, soak, and
+canary rollback still require a successful CI run or representative deployment
+host before production certification.

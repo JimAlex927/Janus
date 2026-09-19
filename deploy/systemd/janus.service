@@ -20,13 +20,16 @@ LimitNOFILE=65536
 TasksMax=4096
 MemoryMax=1G
 
-# The gateway is an unprivileged network service. It has no filesystem write
-# requirement; route and certificate reloads only read atomically replaced files.
+# The gateway is an unprivileged network service. The configuration directory
+# is the sole writable area: publishes atomically replace the active file and
+# the admin configuration library stores SQLite state beside it. Certificate
+# files remain read-only through their Unix mode and separate cert directory.
 NoNewPrivileges=yes
 PrivateTmp=yes
 PrivateDevices=yes
 ProtectHome=yes
 ProtectSystem=strict
+ReadWritePaths=/etc/janus
 ProtectKernelTunables=yes
 ProtectKernelModules=yes
 ProtectKernelLogs=yes

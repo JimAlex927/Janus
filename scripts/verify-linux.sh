@@ -11,6 +11,12 @@ go test -fuzz=FuzzLoadNeverPanics -fuzztime="${JANUS_FUZZ_TIME:-10s}" ./internal
 go test -race -count=1 ./...
 go vet ./...
 
+# Validate the native unit when the host provides systemd tooling. macOS
+# development hosts do not ship systemd, so the release gate remains portable.
+if command -v systemd-analyze >/dev/null 2>&1; then
+  systemd-analyze verify deploy/systemd/janus.service
+fi
+
 CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
   go build -trimpath -ldflags="-s -w" -o "$artifact" ./cmd/janus
 

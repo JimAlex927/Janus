@@ -3,6 +3,23 @@
 This document records the purpose, scope, and verification for each Janus
 repository commit. Add a new dated section before every future commit.
 
+## 2026-09-19 — Make the systemd configuration state writable
+
+Commit message: `fix(systemd): allow managed configuration state`.
+
+Scope:
+
+- Added `ReadWritePaths=/etc/janus` to the hardened unit so atomic publishes
+  and the SQLite configuration library can work with `ProtectSystem=strict`.
+- Corrected the installation directory mode from `0750` to `0770`; the
+  unprivileged `janus` group must create the database and temporary publish
+  file, while certificate files remain read-only in their separate directory.
+- Added optional `systemd-analyze verify` coverage to the Linux release gate.
+
+Verification: unit directives were reviewed locally and
+`JANUS_FUZZ_TIME=1s ./scripts/verify-linux.sh` passed after this change,
+including the full test suite, fuzz smoke, race, vet, and Linux amd64 build.
+
 ## 2026-09-19 — Refresh embedded Admin Console assets
 
 Commit message: `fix(console): refresh embedded admin assets`.
