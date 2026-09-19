@@ -116,6 +116,44 @@ type ConfigRecord struct {
 	UpdatedAt time.Time     `json:"updated_at"`
 }
 
+// ListPage returns one status-filtered page and the full count for that
+// status. The active record is queried through the same API with a limit of
+// one; drafts and archived records can advance independently in the console.
+func (s *Store) ListPage(status string, limit, offset int) ([]ConfigRecord, int, error) {
+	if status != "active" && status != "draft" && status != "archived" {
+		return nil, 0, fmt.Errorf("invalid configuration status %q", status)
+	}
+	if limit <= 0 || limit > 100 || offset < 0 {
+		return nil, 0, fmt.Errorf("invalid configuration page")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var total int
+	if err := s.db.QueryRow("SELECT COUNT(*) FROM configs WHERE status = ?", status).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+	rows, err := s.db.Query("SELECT id, name, content, status, created_at, updated_at FROM configs WHERE status = ? ORDER BY updated_at DESC, id DESC LIMIT ? OFFSET ?", status, limit, offset)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	result := make([]ConfigRecord, 0, limit)
+	for rows.Next() {
+		var record ConfigRecord
+		var raw, created, updated string
+		if err := rows.Scan(&record.ID, &record.Name, &raw, &record.Status, &created, &updated); err != nil {
+			return nil, 0, err
+		}
+		if err := json.Unmarshal([]byte(raw), &record.Content); err != nil {
+			return nil, 0, fmt.Errorf("decode config %d: %w", record.ID, err)
+		}
+		record.CreatedAt = parseStoreTime(created)
+		record.UpdatedAt = parseStoreTime(updated)
+		result = append(result, record)
+	}
+	return result, total, rows.Err()
+}
+
 func (s *Store) List() ([]ConfigRecord, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

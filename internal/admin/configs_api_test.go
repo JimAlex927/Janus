@@ -172,6 +172,28 @@ func TestConfigLibraryCRUD(t *testing.T) {
 	}
 }
 
+func TestConfigLibraryListsIndependentStatusPages(t *testing.T) {
+	f := newLibraryFixture(t)
+	for _, name := range []string{"first", "second", "third"} {
+		created := f.do(t, http.MethodPost, "/api/v1/configs", `{"name":"`+name+`"}`)
+		if created.Code != http.StatusCreated {
+			t.Fatalf("create %s = %d %s", name, created.Code, created.Body.String())
+		}
+	}
+	page := f.do(t, http.MethodGet, "/api/v1/configs?status=draft&limit=2&offset=0", "")
+	if page.Code != http.StatusOK || !strings.Contains(page.Body.String(), `"total":3`) || strings.Count(page.Body.String(), `"status":"draft"`) != 3 {
+		t.Fatalf("draft page = %d %s", page.Code, page.Body.String())
+	}
+	next := f.do(t, http.MethodGet, "/api/v1/configs?status=draft&limit=2&offset=2", "")
+	if next.Code != http.StatusOK || !strings.Contains(next.Body.String(), `"offset":2`) || strings.Count(next.Body.String(), `"status":"draft"`) != 2 {
+		t.Fatalf("second draft page = %d %s", next.Code, next.Body.String())
+	}
+	invalid := f.do(t, http.MethodGet, "/api/v1/configs?status=all", "")
+	if invalid.Code != http.StatusBadRequest {
+		t.Fatalf("invalid status = %d %s", invalid.Code, invalid.Body.String())
+	}
+}
+
 func TestConfigLibraryPublishWarnsOnStartupDiff(t *testing.T) {
 	f := newLibraryFixture(t)
 

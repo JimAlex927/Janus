@@ -1,34 +1,48 @@
 import { useEffect, useRef, useState } from "react";
-import { getConfig } from "./api";
+import { getConfig, listConfigs, type ConfigRecord } from "./api";
 import type { ConfigStore } from "./useConfig";
 import { Badge, Empty, StatCard, useDialogController } from "./ui";
 
-export interface ConfigRecord {
-  id: number;
-  name: string;
-  status: string;
-  created_at: string;
-  updated_at: string;
-}
+const PAGE_SIZE = 12;
 
 export function ConfigsPage({ store, onEdit }: { store: ConfigStore; onEdit: (id: number) => void }) {
-  const [configs, setConfigs] = useState<ConfigRecord[]>([]);
+  const [active, setActive] = useState<ConfigRecord | null>(null);
+  const [drafts, setDrafts] = useState<ConfigRecord[]>([]);
+  const [archived, setArchived] = useState<ConfigRecord[]>([]);
+  const [draftTotal, setDraftTotal] = useState(0);
+  const [archivedTotal, setArchivedTotal] = useState(0);
+  const [draftOffset, setDraftOffset] = useState(0);
+  const [archivedOffset, setArchivedOffset] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const dialogs = useDialogController();
 
   useEffect(() => {
-    loadConfigs();
-  }, []);
+    loadConfigs().catch(() => undefined);
+    // Each status owns its own page cursor.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draftOffset, archivedOffset]);
 
   async function loadConfigs() {
     setLoading(true);
     setError("");
     try {
-      const res = await fetch("/api/v1/configs");
-      if (!res.ok) throw new Error(await res.text());
-      const data = await res.json();
-      setConfigs(data.configs || []);
+      const [activePage, draftPage, archivedPage] = await Promise.all([
+        listConfigs({ status: "active", limit: 1 }),
+        listConfigs({ status: "draft", limit: PAGE_SIZE, offset: draftOffset }),
+        listConfigs({ status: "archived", limit: PAGE_SIZE, offset: archivedOffset }),
+      ]);
+      setActive(activePage.configs[0] || null);
+      setDrafts(draftPage.configs || []);
+      setArchived(archivedPage.configs || []);
+      setDraftTotal(draftPage.total || 0);
+      setArchivedTotal(archivedPage.total || 0);
+      if (draftPage.configs.length === 0 && draftPage.total > 0 && draftOffset >= draftPage.total) {
+        setDraftOffset(Math.floor((draftPage.total - 1) / PAGE_SIZE) * PAGE_SIZE);
+      }
+      if (archivedPage.configs.length === 0 && archivedPage.total > 0 && archivedOffset >= archivedPage.total) {
+        setArchivedOffset(Math.floor((archivedPage.total - 1) / PAGE_SIZE) * PAGE_SIZE);
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -40,7 +54,7 @@ export function ConfigsPage({ store, onEdit }: { store: ConfigStore; onEdit: (id
     const name = (await dialogs.prompt({
       title: "新建配置",
       message: "为这份配置设置一个便于识别的名称。",
-      initialValue: `config-${configs.length + 1}`,
+      initialValue: `config-${draftTotal + archivedTotal + (active ? 1 : 0) + 1}`,
       placeholder: "例如 production",
       confirmLabel: "创建配置",
       icon: "plus",
@@ -176,7 +190,8 @@ export function ConfigsPage({ store, onEdit }: { store: ConfigStore; onEdit: (id
     try {
       const res = await fetch(`/api/v1/configs/${id}`, { method: "DELETE" });
       if (!res.ok) throw new Error(await res.text());
-      await loadConfigs();
+      if (drafts.length === 1 && draftOffset > 0) setDraftOffset((offset) => offset - PAGE_SIZE);
+      else await loadConfigs();
       store.setMessage("配置已删除");
     } catch (e) {
       store.setMessage(e instanceof Error ? e.message : String(e));
@@ -215,10 +230,6 @@ export function ConfigsPage({ store, onEdit }: { store: ConfigStore; onEdit: (id
       store.setMessage(e instanceof Error ? e.message : String(e));
     }
   }
-
-  const active = configs.find((c) => c.status === "active");
-  const drafts = configs.filter((c) => c.status === "draft");
-  const archived = configs.filter((c) => c.status === "archived");
 
   function renderConfigCard(cfg: ConfigRecord) {
     return (
@@ -271,13 +282,13 @@ export function ConfigsPage({ store, onEdit }: { store: ConfigStore; onEdit: (id
         <StatCard label="历史版本" value={archived.length} />
       </div>
 
-      {configs.length === 0 ? (
+      {!active && draftTotal === 0 && archivedTotal === 0 ? (
         <Empty text="暂无配置，点击右上角创建" action={<button className="btn primary" onClick={createConfig}>创建第一个配置</button>} />
       ) : (
         <div className="config-groups">
           {active && <ConfigGroup label="当前生效" detail="正在运行的版本"><div className="card-list">{renderConfigCard(active)}</div></ConfigGroup>}
-          {drafts.length > 0 && <ConfigGroup label="草稿" detail="保存后可继续编辑，发布后进入运行版本"><div className="card-list">{drafts.map(renderConfigCard)}</div></ConfigGroup>}
-          {archived.length > 0 && <ConfigGroup label="历史版本" detail="保留每次发布，可直接回滚"><div className="card-list">{archived.map(renderConfigCard)}</div></ConfigGroup>}
+          {draftTotal > 0 && <ConfigGroup label="草稿" detail={`共 ${draftTotal} 条，独立分页`}><div className="card-list">{drafts.map(renderConfigCard)}</div><PageControls total={draftTotal} offset={draftOffset} onOffsetChange={setDraftOffset} /></ConfigGroup>}
+          {archivedTotal > 0 && <ConfigGroup label="历史版本" detail={`共 ${archivedTotal} 条，独立分页，可直接回滚`}><div className="card-list">{archived.map(renderConfigCard)}</div><PageControls total={archivedTotal} offset={archivedOffset} onOffsetChange={setArchivedOffset} /></ConfigGroup>}
         </div>
       )}
       {dialogs.dialog}
@@ -287,4 +298,11 @@ export function ConfigsPage({ store, onEdit }: { store: ConfigStore; onEdit: (id
 
 function ConfigGroup({ label, detail, children }: { label: string; detail: string; children: React.ReactNode }) {
   return <section className="config-group"><div className="config-group-head"><div><span>{label}</span><small>{detail}</small></div></div>{children}</section>;
+}
+
+function PageControls({ total, offset, onOffsetChange }: { total: number; offset: number; onOffsetChange: (offset: number) => void }) {
+  if (total <= PAGE_SIZE) return null;
+  const first = offset + 1;
+  const last = Math.min(offset + PAGE_SIZE, total);
+  return <div className="config-page-controls"><small>{first}-{last} / {total}</small><div><button type="button" className="btn small" disabled={offset === 0} onClick={() => onOffsetChange(Math.max(0, offset - PAGE_SIZE))} title="上一页">←</button><button type="button" className="btn small" disabled={offset + PAGE_SIZE >= total} onClick={() => onOffsetChange(offset + PAGE_SIZE)} title="下一页">→</button></div></div>;
 }

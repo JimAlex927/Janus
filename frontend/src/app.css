@@ -471,6 +471,9 @@ input:focus, select:focus, textarea:focus { outline: 2px solid #c7d0ff; border-c
 .config-group-head { display: flex; align-items: baseline; justify-content: space-between; border-bottom: 1px solid #dce5df; padding-bottom: 8px; }
 .config-group-head span { color: #173c40; font-size: 14px; font-weight: 700; }
 .config-group-head small { margin-left: 10px; color: #78908a; font-size: 11px; }
+.config-page-controls { display: flex; align-items: center; justify-content: flex-end; gap: 10px; color: #78908a; }
+.config-page-controls > div { display: flex; gap: 6px; }
+.config-page-controls .btn { min-width: 32px; padding-inline: 8px; }
 .config-card { background: #fff; border: 1px solid #e9ecf3; border-radius: 12px; padding: 16px; display: grid; gap: 12px; }
 .config-card.active { border-color: #6ee7b7; }
 .config-card-header { display: grid; gap: 4px; }

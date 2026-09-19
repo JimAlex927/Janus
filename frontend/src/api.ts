@@ -100,8 +100,21 @@ export interface StoredConfig {
   updated_at: string;
 }
 
-export function listConfigs(): Promise<{ configs: ConfigRecord[] }> {
-  return request("/api/v1/configs");
+export interface ConfigPage {
+  configs: ConfigRecord[];
+  total: number;
+  status?: "draft" | "active" | "archived";
+  limit?: number;
+  offset?: number;
+}
+
+export function listConfigs(options?: { status?: "draft" | "active" | "archived"; limit?: number; offset?: number }): Promise<ConfigPage> {
+  const query = new URLSearchParams();
+  if (options?.status) query.set("status", options.status);
+  if (options?.limit != null) query.set("limit", String(options.limit));
+  if (options?.offset != null) query.set("offset", String(options.offset));
+  const suffix = query.size > 0 ? `?${query}` : "";
+  return request(`/api/v1/configs${suffix}`);
 }
 
 export function createConfig(name: string, from?: string, content?: JanusConfig): Promise<{ id: number }> {

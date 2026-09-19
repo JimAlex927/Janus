@@ -197,6 +197,43 @@ func TestStorePublishMakesSingleActive(t *testing.T) {
 	}
 }
 
+func TestStoreListPageSeparatesStatusAndOffsets(t *testing.T) {
+	s := openTestStore(t)
+	first, _ := s.Create("first", testConfig("first"))
+	second, _ := s.Create("second", testConfig("second"))
+	third, _ := s.Create("third", testConfig("third"))
+	draft, _ := s.Create("draft", testConfig("draft"))
+	if err := s.Publish(first.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Publish(second.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Publish(third.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	history, total, err := s.ListPage("archived", 1, 0)
+	if err != nil || total != 2 || len(history) != 1 {
+		t.Fatalf("history page = %#v, total=%d, err=%v", history, total, err)
+	}
+	secondPage, total, err := s.ListPage("archived", 1, 1)
+	if err != nil || total != 2 || len(secondPage) != 1 || secondPage[0].ID == history[0].ID {
+		t.Fatalf("second history page = %#v, total=%d, err=%v", secondPage, total, err)
+	}
+	drafts, total, err := s.ListPage("draft", 12, 0)
+	if err != nil || total != 1 || len(drafts) != 1 || drafts[0].ID != draft.ID {
+		t.Fatalf("draft page = %#v, total=%d, err=%v", drafts, total, err)
+	}
+	active, total, err := s.ListPage("active", 1, 0)
+	if err != nil || total != 1 || len(active) != 1 || active[0].ID != third.ID {
+		t.Fatalf("active page = %#v, total=%d, err=%v", active, total, err)
+	}
+	if _, _, err := s.ListPage("unknown", 1, 0); err == nil {
+		t.Fatal("unknown status was accepted")
+	}
+}
+
 func TestStoreReconcileActivePromotesMatchingHistory(t *testing.T) {
 	s := openTestStore(t)
 	first := testConfig("first")

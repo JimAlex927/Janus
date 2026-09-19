@@ -19,7 +19,7 @@ import (
 // This file implements the named-configuration library API backed by the
 // SQLite store:
 //
-//	GET    /api/v1/configs               list drafts (light records)
+//	GET    /api/v1/configs               list light records; status pages accept limit/offset
 //	POST   /api/v1/configs               create a draft from blank/active/named source
 //	GET    /api/v1/configs/{id}          fetch a draft with content and canvas layout
 //	PUT    /api/v1/configs/{id}          save a draft (name/content/layout)
@@ -131,7 +131,42 @@ func (h *Handler) listConfigs(w http.ResponseWriter, r *http.Request) {
 	if !h.requireLibrary(w) {
 		return
 	}
-	records, err := h.library.List()
+	status := r.URL.Query().Get("status")
+	if status == "" {
+		records, err := h.library.List()
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		views := make([]configRecordView, 0, len(records))
+		for _, record := range records {
+			views = append(views, toRecordView(record))
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"configs": views, "total": len(views)})
+		return
+	}
+	if status != "active" && status != "draft" && status != "archived" {
+		http.Error(w, "invalid configuration status", http.StatusBadRequest)
+		return
+	}
+	limit, offset := 12, 0
+	if value := r.URL.Query().Get("limit"); value != "" {
+		parsed, err := strconv.Atoi(value)
+		if err != nil || parsed < 1 || parsed > 100 {
+			http.Error(w, "limit must be between 1 and 100", http.StatusBadRequest)
+			return
+		}
+		limit = parsed
+	}
+	if value := r.URL.Query().Get("offset"); value != "" {
+		parsed, err := strconv.Atoi(value)
+		if err != nil || parsed < 0 {
+			http.Error(w, "offset must be a non-negative integer", http.StatusBadRequest)
+			return
+		}
+		offset = parsed
+	}
+	records, total, err := h.library.ListPage(status, limit, offset)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -140,7 +175,7 @@ func (h *Handler) listConfigs(w http.ResponseWriter, r *http.Request) {
 	for _, record := range records {
 		views = append(views, toRecordView(record))
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"configs": views})
+	writeJSON(w, http.StatusOK, map[string]any{"configs": views, "status": status, "total": total, "limit": limit, "offset": offset})
 }
 
 func (h *Handler) createConfig(w http.ResponseWriter, r *http.Request) {
