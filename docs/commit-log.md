@@ -17,6 +17,11 @@ Scope:
 
 Verification: affected Store/Admin tests and their race checks pass.
 
+The subsequent Linux release gate at `4a69e23` also passed module verification,
+two full test rounds, a 20-second configuration fuzz smoke, race, vet and the
+static Linux build. The artifact checksum was
+`79b6bb495284920326a34158b000fcdbfb7fc7d29cf1a90684c10e072cb179e4`.
+
 ## 2026-09-19 — Persist configuration drafts atomically
 
 Commit message: `fix(admin): atomically persist draft layout`
