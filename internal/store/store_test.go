@@ -56,6 +56,55 @@ func TestStoreUpdatePersistsContent(t *testing.T) {
 	}
 }
 
+func TestStoreUpdateWithLayoutIsAtomicAndRequiresObject(t *testing.T) {
+	s := openTestStore(t)
+	record, err := s.Create("initial", testConfig("before"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.UpdateWithLayout(record.ID, "changed", testConfig("after"), "[]"); err == nil {
+		t.Fatal("array layout should be rejected")
+	}
+	got, err := s.Get(record.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Name != "initial" || got.Content.Routes[0].Name != "before" {
+		t.Fatalf("invalid layout partially updated record: %+v", got)
+	}
+	layout, err := s.Layout(record.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if layout != "{}" {
+		t.Fatalf("layout after rejected update = %q, want {}", layout)
+	}
+
+	if err := s.UpdateWithLayout(record.ID, "changed", testConfig("after"), `{"route":{"x":12}}`); err != nil {
+		t.Fatal(err)
+	}
+	got, err = s.Get(record.ID)
+	if err != nil || got.Name != "changed" || got.Content.Routes[0].Name != "after" {
+		t.Fatalf("updated record = %+v, %v", got, err)
+	}
+	layout, err = s.Layout(record.ID)
+	if err != nil || layout != `{"route":{"x":12}}` {
+		t.Fatalf("updated layout = %q, %v", layout, err)
+	}
+}
+
+func TestStoreSaveLayoutRejectsNull(t *testing.T) {
+	s := openTestStore(t)
+	record, err := s.Create("initial", testConfig("before"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SaveLayout(record.ID, "null"); err == nil {
+		t.Fatal("null layout should be rejected")
+	}
+}
+
 func TestStorePublishMakesSingleActive(t *testing.T) {
 	s := openTestStore(t)
 	first, _ := s.Create("first", testConfig("a"))

@@ -152,6 +152,15 @@ func TestConfigLibraryCRUD(t *testing.T) {
 		t.Fatalf("invalid save status = %d, want 422", invalid.Code)
 	}
 
+	invalidLayout := f.do(t, http.MethodPut, "/api/v1/configs/1", `{"name":"should-not-stick","layout":[]}`)
+	if invalidLayout.Code != http.StatusBadRequest {
+		t.Fatalf("invalid layout status = %d, want 400", invalidLayout.Code)
+	}
+	unchanged := f.do(t, http.MethodGet, "/api/v1/configs/1", "")
+	if unchanged.Code != http.StatusOK || strings.Contains(unchanged.Body.String(), "should-not-stick") {
+		t.Fatalf("invalid layout partially updated config: %d %s", unchanged.Code, unchanged.Body.String())
+	}
+
 	missing := f.do(t, http.MethodGet, "/api/v1/configs/999", "")
 	if missing.Code != http.StatusNotFound {
 		t.Fatalf("missing get status = %d, want 404", missing.Code)

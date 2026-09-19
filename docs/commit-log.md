@@ -3,6 +3,23 @@
 This document records the purpose, scope, and verification for each Janus
 repository commit. Add a new dated section before every future commit.
 
+## 2026-09-19 — Persist configuration drafts atomically
+
+Commit message: `fix(admin): atomically persist draft layout`
+
+Scope:
+
+- Persist draft content and its canvas layout in one SQLite transaction when
+  the Admin Console saves both fields.
+- Reject `null` and array layouts as well as malformed or oversized JSON, and
+  ensure a rejected layout cannot partially rename or rewrite a draft.
+- Added store and Admin API regression tests for invalid-layout rollback and
+  successful content/layout replacement.
+
+Verification: `go test ./internal/store ./internal/admin` passes outside the
+restricted local socket/cache sandbox; the full `go test -count=2 ./...` suite
+also passes under the same external execution profile.
+
 ## 2026-09-19 — Persist configuration permissions with atomic writes
 
 Commit message: `fix(config): fsync preserved mode before publish`.

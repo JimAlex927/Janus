@@ -288,6 +288,41 @@ func (s *Store) Update(id int64, name string, content config.Config) error {
 	return nil
 }
 
+// UpdateWithLayout replaces a draft's content and canvas sidecar in one
+// transaction. The admin API uses this path so a malformed layout or a
+// storage failure cannot leave the draft half-updated.
+func (s *Store) UpdateWithLayout(id int64, name string, content config.Config, layout string) error {
+	if err := validateLayout(layout); err != nil {
+		return err
+	}
+	raw, err := json.Marshal(content)
+	if err != nil {
+		return err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	now := time.Now().UTC().Format(time.RFC3339)
+	result, err := tx.Exec("UPDATE configs SET name = ?, content = ?, layout = ?, updated_at = ? WHERE id = ?",
+		name, string(raw), layout, now, id)
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return ErrNotFound
+	}
+	return tx.Commit()
+}
+
 func (s *Store) Publish(id int64) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -353,15 +388,11 @@ func (s *Store) Layout(id int64) (string, error) {
 // carry node coordinates, so validation is limited to a size bound and a
 // JSON object shape check.
 func (s *Store) SaveLayout(id int64, layout string) error {
+	if err := validateLayout(layout); err != nil {
+		return err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if len(layout) > 256<<10 {
-		return fmt.Errorf("layout exceeds %d bytes", 256<<10)
-	}
-	var probe map[string]any
-	if err := json.Unmarshal([]byte(layout), &probe); err != nil {
-		return fmt.Errorf("invalid layout JSON: %w", err)
-	}
 	now := time.Now().UTC().Format(time.RFC3339)
 	res, err := s.db.Exec("UPDATE configs SET layout = ?, updated_at = ? WHERE id = ?", layout, now, id)
 	if err != nil {
@@ -373,6 +404,20 @@ func (s *Store) SaveLayout(id int64, layout string) error {
 	}
 	if affected == 0 {
 		return ErrNotFound
+	}
+	return nil
+}
+
+func validateLayout(layout string) error {
+	if len(layout) > 256<<10 {
+		return fmt.Errorf("layout exceeds %d bytes", 256<<10)
+	}
+	var probe map[string]any
+	if err := json.Unmarshal([]byte(layout), &probe); err != nil {
+		return fmt.Errorf("invalid layout JSON: %w", err)
+	}
+	if probe == nil {
+		return errors.New("invalid layout JSON: expected an object")
 	}
 	return nil
 }

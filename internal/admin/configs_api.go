@@ -296,15 +296,14 @@ func (h *Handler) saveConfig(w http.ResponseWriter, r *http.Request, id int64) {
 		}
 		content = parsed
 	}
-	if err := h.library.Update(id, name, content); err != nil {
-		writeLibraryError(w, err)
-		return
-	}
 	if len(input.Layout) > 0 {
-		if err := h.library.SaveLayout(id, string(input.Layout)); err != nil {
+		if err := h.library.UpdateWithLayout(id, name, content, string(input.Layout)); err != nil {
 			writeLibraryError(w, err)
 			return
 		}
+	} else if err := h.library.Update(id, name, content); err != nil {
+		writeLibraryError(w, err)
+		return
 	}
 	updated, err := h.library.Get(id)
 	if err != nil {
