@@ -37,6 +37,8 @@ import { validateLocal } from "./validate";
 import type { JanusConfig, Limen, Middleware, MiddlewareCapability, NacosRegistry, Route, Service } from "./types";
 
 type NodeKind = "limen" | "route" | "service";
+type EditorView = "canvas" | "rules" | "json";
+type RuleSort = "priority" | "name" | "order";
 type NodeData = {
   kind: NodeKind;
   name: string;
@@ -244,6 +246,10 @@ function ConfigEditor({ store, id, onBack, onStatusChange }: { store: ConfigStor
   const [middlewareCatalog, setMiddlewareCatalog] = useState<MiddlewareCapability[]>([]);
   const [regManager, setRegManager] = useState<{ allowSelect: boolean; snapshot: ManagerSnapshot } | null>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [viewMode, setViewMode] = useState<EditorView>("canvas");
+  const [ruleSort, setRuleSort] = useState<RuleSort>("priority");
+  const [jsonText, setJsonText] = useState("");
+  const [jsonError, setJsonError] = useState("");
   const [nodes, setNodes, onNodesChangeDefault] = useNodesState<FlowNode>([]);
   const [edges, setEdges, onEdgesChangeDefault] = useEdgesState<Edge>([]);
   const { screenToFlowPosition } = useReactFlow();
@@ -270,6 +276,7 @@ function ConfigEditor({ store, id, onBack, onStatusChange }: { store: ConfigStor
         setMeta({ name: record.name, status: record.status });
         setMiddlewareCatalog(capabilities.middlewares);
         setDraft(record.content);
+        setJsonText(JSON.stringify(record.content, null, 2));
         setSaved(JSON.stringify(record.content));
         setSavedLayout(JSON.stringify(record.layout?.nodes || {}));
         setNodes(buildNodes(record.content, record.layout?.nodes));
@@ -854,6 +861,44 @@ function ConfigEditor({ store, id, onBack, onStatusChange }: { store: ConfigStor
   return Object.fromEntries(nodes.map((n) => [n.id, { x: Math.round(n.position.x), y: Math.round(n.position.y) }]));
 }
 
+  function switchView(next: EditorView) {
+    if (viewMode === "json" && draft && jsonText.trim() !== JSON.stringify(draft, null, 2)) {
+      if (!window.confirm("JSON 有未应用的修改，切换视图会丢失这些修改。继续吗？")) return;
+    }
+    if (next === "json" && draft) setJsonText(JSON.stringify(draft, null, 2));
+    setJsonError("");
+    setViewMode(next);
+  }
+
+  function applyJson() {
+    try {
+      const parsed = JSON.parse(jsonText) as JanusConfig;
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("根节点必须是 JSON 对象。");
+      if (!Array.isArray(parsed.routes)) throw new Error("配置必须包含 routes 数组。");
+      const next = cloneConfig(parsed);
+      draftRef.current = next;
+      setDraft(next);
+      setNodes(buildNodes(next));
+      setEdges(deriveEdges(next));
+      setJsonText(JSON.stringify(next, null, 2));
+      setJsonError("");
+      store.setMessage("JSON 已应用到草稿，请保存或发布以继续。");
+    } catch (error) {
+      setJsonError(error instanceof Error ? error.message : "JSON 解析失败。");
+    }
+  }
+
+  function reorderRoute(name: string, direction: -1 | 1) {
+    mutate((prev) => {
+      const routes = [...(prev.routes || [])];
+      const index = routes.findIndex((route) => route.name === name);
+      const nextIndex = index + direction;
+      if (index < 0 || nextIndex < 0 || nextIndex >= routes.length) return prev;
+      [routes[index], routes[nextIndex]] = [routes[nextIndex], routes[index]];
+      return { ...prev, routes };
+    });
+  }
+
 /** 洋葱栈的核心：中间件包裹的是动作，而不一定是 Service。 */
 function routeCoreLabel(route: Route): string {
   if (route.action?.redirect) return `↗ Redirect → ${route.action.redirect.location || ""}`;
@@ -973,6 +1018,15 @@ function translateWarning(warning: string): string {
 
   if (loading || !draft) return <Empty text="正在加载配置…" />;
 
+  const routes = [...(draft.routes || [])];
+  const visibleRoutes = routes
+    .map((route, index) => ({ route, index }))
+    .sort((a, b) => {
+      if (ruleSort === "name") return a.route.name.localeCompare(b.route.name);
+      if (ruleSort === "order") return a.index - b.index;
+      return (b.route.priority || 0) - (a.route.priority || 0) || a.index - b.index;
+    });
+
   return (
     <section className="editor-shell editor-page">
       <div className="editor-topbar">
@@ -983,6 +1037,13 @@ function translateWarning(warning: string): string {
           <strong>{meta?.name}</strong>
           <Badge text={meta?.status || ""} variant={meta?.status === "active" ? "success" : "warn"} />
           <span className={`draft-state ${dirty ? "dirty" : ""}`}>{dirty ? "未保存" : "已保存"}</span>
+        </div>
+        <div className="editor-view-switcher" role="tablist" aria-label="配置视图">
+          {([ ["canvas", "画布"], ["rules", "规则"], ["json", "JSON"] ] as const).map(([mode, label]) => (
+            <button key={mode} type="button" role="tab" aria-selected={viewMode === mode} className={viewMode === mode ? "active" : ""} onClick={() => switchView(mode)}>
+              {label}
+            </button>
+          ))}
         </div>
         <div className="header-actions">
           <button type="button" className="btn ghost" disabled={busy} onClick={validate}>校验</button>
@@ -996,7 +1057,7 @@ function translateWarning(warning: string): string {
           )}
         </div>
       </div>
-      <div className="editor-body">
+      {viewMode === "canvas" && <div className="editor-body">
         <aside className="palette">
           <div className="palette-head"><h3>节点</h3><span>拖入画布或点击添加</span></div>
           {(["route", "service"] as const).map((kind) => (
@@ -1045,7 +1106,62 @@ function translateWarning(warning: string): string {
             <MiniMap position="bottom-left" nodeColor={(n) => KIND_META[(n.data as NodeData)?.kind || "route"].color} />
           </ReactFlow>
         </div>
-      </div>
+      </div>}
+      {viewMode === "rules" && (
+        <section className="rules-mode" aria-label="路由规则列表">
+          <div className="rules-mode-head">
+            <div>
+              <span className="overview-section-label">ROUTE RULES</span>
+              <h2>路由规则</h2>
+              <p>按优先级快速检查匹配、策略与转发目标；点击编辑进入完整规则抽屉。</p>
+            </div>
+            <label className="rules-sort">排序
+              <select value={ruleSort} onChange={(event) => setRuleSort(event.target.value as RuleSort)}>
+                <option value="priority">优先级</option>
+                <option value="name">名称</option>
+                <option value="order">配置顺序</option>
+              </select>
+            </label>
+          </div>
+          <div className="rules-list">
+            {visibleRoutes.length === 0 ? <Empty text="还没有路由规则。请切换到画布添加 Route。" /> : visibleRoutes.map(({ route, index }) => (
+              <article className="rule-row" key={route.name}>
+                <div className="rule-order">{String(index + 1).padStart(2, "0")}</div>
+                <div className="rule-main">
+                  <div className="rule-title"><strong>{route.name}</strong><span>priority {route.priority || 0}</span></div>
+                  <code>{routeMatchLabel(route)}</code>
+                  <div className="rule-meta"><span>{routeActionLabel(route)}</span><span>{(route.middlewares || []).length} middleware</span><span>{route.limen || "未绑定入口"}</span></div>
+                </div>
+                <div className="rule-actions">
+                  <button type="button" className="btn small" onClick={() => openEditor(nodeId("route", route.name))}>编辑</button>
+                  <button type="button" className="btn small" onClick={() => openRouteMiddleware(route.name)}>中间件</button>
+                  {ruleSort === "order" && <>
+                    <button type="button" className="btn small icon-text" disabled={index === 0} onClick={() => reorderRoute(route.name, -1)} aria-label="上移">↑</button>
+                    <button type="button" className="btn small icon-text" disabled={index === routes.length - 1} onClick={() => reorderRoute(route.name, 1)} aria-label="下移">↓</button>
+                  </>}
+                </div>
+              </article>
+            ))}
+          </div>
+        </section>
+      )}
+      {viewMode === "json" && (
+        <section className="json-mode" aria-label="JSON 配置编辑器">
+          <div className="json-mode-head">
+            <div>
+              <span className="overview-section-label">RAW CONFIGURATION</span>
+              <h2>JSON 编辑</h2>
+              <p>直接编辑完整配置。应用前会检查 JSON 语法；保存和发布仍会执行完整配置校验。</p>
+            </div>
+            <div className="json-mode-actions">
+              <button type="button" className="btn ghost" onClick={() => draft && setJsonText(JSON.stringify(draft, null, 2))}>还原草稿</button>
+              <button type="button" className="btn primary" onClick={applyJson}>应用 JSON</button>
+            </div>
+          </div>
+          <textarea className="json-editor config-json-editor" value={jsonText} onChange={(event) => { setJsonText(event.target.value); setJsonError(""); }} spellCheck={false} aria-label="JSON 配置内容" />
+          {jsonError && <p className="json-mode-error" role="alert">{jsonError}</p>}
+        </section>
+      )}
       {editing?.kind === "route" && (
         <RouteEditor
           draft={draft}
