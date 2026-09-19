@@ -45,6 +45,8 @@ export function ConfigsPage({ store, onEdit }: { store: ConfigStore; onEdit: (id
       confirmLabel: "创建配置",
       icon: "plus",
       context: "CREATE",
+      inputLabel: "配置名称",
+      inputHint: "建议使用环境或用途命名，便于后续发布和回滚。",
     }))?.trim();
     if (!name) return;
     try {
@@ -92,6 +94,8 @@ export function ConfigsPage({ store, onEdit }: { store: ConfigStore; onEdit: (id
       confirmLabel: "创建副本",
       icon: "copy",
       context: "DUPLICATE",
+      inputLabel: "副本名称",
+      inputHint: "副本会保留完整配置和凭据，创建后将打开新的草稿。",
     }))?.trim();
     if (!next) return;
     try {
@@ -136,6 +140,8 @@ export function ConfigsPage({ store, onEdit }: { store: ConfigStore; onEdit: (id
         confirmLabel: "导入配置",
         icon: "upload",
         context: "IMPORT",
+        inputLabel: "配置名称",
+        inputHint: "脱敏凭据不会恢复，导入后请在编辑器中重新填写。",
       }))?.trim();
       if (!name) return;
       const res = await fetch("/api/v1/configs", {

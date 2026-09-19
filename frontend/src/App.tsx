@@ -5,6 +5,7 @@ import { ConfigsPage } from "./Configs";
 import { Overview } from "./Overview";
 import { PelicanRide } from "./PelicanRide";
 import { SettingsPage } from "./Settings";
+import { Toast } from "./ui";
 import { useConfig } from "./useConfig";
 
 type Page = "overview" | "configs" | "settings";
@@ -103,12 +104,7 @@ export function App() {
           <Navigation page={page} onNavigate={navigate} />
         </nav>
         {store.message && (
-          <div className="toast">
-            {store.message}
-            <button type="button" onClick={() => store.setMessage("")} aria-label="关闭提示">
-              ×
-            </button>
-          </div>
+          <Toast message={store.message} onClose={() => store.setMessage("")} />
         )}
         {page === "overview" && <Overview store={store} />}
         {page === "configs" &&

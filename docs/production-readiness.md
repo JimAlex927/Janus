@@ -6,6 +6,13 @@ for production.
 The target Linux VM is being prepared by the operator. Windows tests and Linux
 cross-compilation do not satisfy Linux execution or deployment gates.
 
+The release toolchain is pinned to Go 1.25.14 in CI. The module's `go 1.25.13`
+directive is the minimum compatibility floor, not the release toolchain
+selection. The local development host currently runs Go 1.26.5; its
+`govulncheck` result must not be used as release evidence because that patch
+line has seven standard-library findings fixed in Go 1.26.6. Release approval
+requires the pinned Go 1.25.14 CI scan to complete successfully.
+
 ## Evidence and remaining work
 
 | Gate | Candidate evidence | Still required |
@@ -18,6 +25,26 @@ cross-compilation do not satisfy Linux execution or deployment gates.
 | Deployment | Native systemd unit and runbook; local Debian container smoke | Install as non-root on VM, readiness, restart, ports, CA roots and resource caps |
 | Capacity | Configuration limits exist | Agree workload, measure overload and 24h soak |
 | Canary | Not started | Name non-core business, traffic split, baseline and rollback target; qualify first |
+
+## Current repository verification replay: 2026-09-19
+
+The current working tree, including the refreshed embedded Admin Console,
+passed the following local checks:
+
+| Check | Result | Scope note |
+| --- | --- | --- |
+| Frontend build | pass | `npm run build` in `frontend` |
+| Embedded UI parity | pass | `./scripts/verify-embedded-ui.sh` |
+| Admin package tests | pass | `go test ./internal/admin/...` |
+| Linux release gate | pass | `JANUS_FUZZ_TIME=20s JANUS_LINUX_ARTIFACT=/private/tmp/janus-linux-amd64 ./scripts/verify-linux.sh` |
+| Linux artifact | `sha256: 317c6872a0fa99e937ff3478c05c154e7752a45f11777ed346220d6e8785e975` | Static `linux/amd64`, built by the gate |
+| Vulnerability scan | open | Local Go 1.26.5 reports seven standard-library findings; do not release from this toolchain |
+
+The release gate was run with a 20-second fuzz smoke because the local machine
+occasionally pauses the configuration fuzz workers for several seconds. It
+passed full tests, fuzz, race, vet, module verification, optional unit syntax
+checks, and the static Linux build. This remains development-host evidence; it
+does not close the real Linux VM, systemd, capacity, soak, or canary gates.
 
 ## Workload must be agreed before the load run
 

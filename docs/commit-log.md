@@ -3,6 +3,30 @@
 This document records the purpose, scope, and verification for each Janus
 repository commit. Add a new dated section before every future commit.
 
+## 2026-09-19 — Polish Admin Console action feedback and release toolchain
+
+Commit message: `fix(console): polish action dialogs and pin patched toolchain`.
+
+Scope:
+
+- Reworked the shared prompt/confirmation surfaces used by configuration copy,
+  import, create, publish, delete and editor-leave actions with explicit field
+  labels, contextual helper text, consistent overlays, responsive behavior and
+  accessible names.
+- Replaced the console's plain message banner with a designed status toast that
+  distinguishes success, warning and error messages.
+- Rebuilt and synchronized the Go-embedded Admin Console bundle, and added the
+  current embedded asset parity to the readiness evidence.
+- Pinned the Linux CI release gate to Go 1.25.14, while retaining the module's
+  Go 1.25.13 compatibility floor.
+
+Verification: `npm run build`, `./scripts/verify-embedded-ui.sh`,
+`go test ./internal/admin/...`, `go mod verify`, and
+`JANUS_FUZZ_TIME=20s JANUS_LINUX_ARTIFACT=/private/tmp/janus-linux-amd64
+./scripts/verify-linux.sh` pass. The local Go 1.26.5 `govulncheck` run still
+reports seven standard-library findings fixed in Go 1.26.6; release approval
+requires the pinned Go 1.25.14 CI scan and real Linux deployment evidence.
+
 ## 2026-09-19 — Upgrade the Nacos gRPC dependency
 
 Commit message: `fix(deps): upgrade grpc security baseline`.

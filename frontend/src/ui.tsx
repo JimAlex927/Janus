@@ -47,6 +47,8 @@ type ConfirmDialogOptions = {
 type PromptDialogOptions = ConfirmDialogOptions & {
   initialValue?: string;
   placeholder?: string;
+  inputLabel?: string;
+  inputHint?: string;
 };
 
 type DialogRequest =
@@ -134,16 +136,17 @@ function Dialog({
           </div>
           {isPrompt && (
             <label className="decision-dialog-field">
-              <span>名称</span>
+              <span>{request.inputLabel || "名称"}</span>
               <input
                 ref={inputRef}
                 className="decision-dialog-input"
                 value={value}
                 placeholder={request.placeholder}
                 onChange={(event) => setValue(event.target.value)}
-                aria-label="输入内容"
+                aria-label={request.inputLabel || "名称"}
                 autoComplete="off"
               />
+              {request.inputHint && <small>{request.inputHint}</small>}
             </label>
           )}
           <div className="decision-dialog-foot">
@@ -154,6 +157,22 @@ function Dialog({
           </div>
         </form>
       </div>
+    </div>
+  );
+}
+
+export function Toast({ message, onClose }: { message: string; onClose: () => void }) {
+  const tone = /失败|错误|未通过|不可用|冲突|拒绝|不存在/.test(message)
+    ? "error"
+    : /注意|警告|未保存|重启|脱敏|丢失/.test(message)
+      ? "warning"
+      : "success";
+  const mark = tone === "error" ? "!" : tone === "warning" ? "!" : "✓";
+  return (
+    <div className={`toast toast-${tone}`} role="status" aria-live="polite">
+      <span className="toast-mark" aria-hidden="true">{mark}</span>
+      <span className="toast-message">{message}</span>
+      <button type="button" className="toast-close" onClick={onClose} aria-label="关闭提示">×</button>
     </div>
   );
 }

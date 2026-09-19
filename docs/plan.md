@@ -400,7 +400,7 @@ remain mandatory before release. Track evidence in
 The repository now defines a pinned Ubuntu CI job for the release gates: full
 tests, the race detector, vet, a fixed-version vulnerability scan, and a
 static Linux build. The reusable GitHub Actions are pinned to immutable release
-commits, and the job uses patched Go 1.25.13. A real CI run is still
+commits, and the job uses patched Go 1.25.14. A real CI run is still
 required before treating those checks as release evidence. Add Linux
 signal/socket tests, malformed framing, ambiguous paths, middleware composition,
 and repeated failed/successful reload coverage. A configuration-parser fuzz
