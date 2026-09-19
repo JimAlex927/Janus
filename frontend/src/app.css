@@ -665,6 +665,10 @@ input:focus, select:focus, textarea:focus { outline: 2px solid #c7d0ff; border-c
 .config-library-hero .btn.ghost:hover:not(:disabled) { background: #255158; border-color: #8dc1b4; }
 .config-library-hero .btn.primary { background: #e3a35f; border-color: #e3a35f; color: #173c40; }
 .config-library-hero .btn.primary:hover:not(:disabled) { background: #efb878; border-color: #efb878; }
+.config-query-controls { display: flex; flex-wrap: wrap; align-items: end; gap: 10px 14px; padding: 14px 16px; border-top: 1px solid #dce5df; border-bottom: 1px solid #dce5df; background: #f8fbf7; }
+.config-query-controls label { display: grid; gap: 5px; color: #6b8a83; font-size: 10px; font-weight: 750; }
+.config-query-controls input, .config-query-controls select { min-width: 142px; border: 1px solid #cbd8d1; border-radius: 4px; background: #fff; color: #315953; padding: 7px 8px; font: inherit; font-size: 11px; }
+.config-query-controls input:focus, .config-query-controls select:focus { border-color: #4c9b8c; outline: 2px solid #4c9b8c33; }
 .config-summary-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); border-top: 1px solid #dce5df; border-bottom: 1px solid #dce5df; gap: 0; background: #f2f5f0; }
 .config-summary-grid .stat-card { border: 0; border-right: 1px solid #dce5df; border-radius: 0; background: transparent; padding: 18px 22px; }
 .config-summary-grid .stat-card:last-child { border-right: 0; }
@@ -826,6 +830,8 @@ input:focus, select:focus, textarea:focus { outline: 2px solid #c7d0ff; border-c
   .settings-hero { display: grid; gap: 25px; padding: 22px 20px; }
   .settings-hero-state { min-width: 0; padding: 12px 0 0; border-top: 1px solid #6b9990; border-left: 0; }
   .config-library-hero .toolbar-actions { justify-content: flex-start; }
+  .config-query-controls { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .config-query-controls input, .config-query-controls select { min-width: 0; width: 100%; }
   .config-summary-grid { grid-template-columns: 1fr; }
   .config-summary-grid .stat-card { border-right: 0; border-bottom: 1px solid #dce5df; }
   .config-summary-grid .stat-card:last-child { border-bottom: 0; }

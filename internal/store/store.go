@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"sync"
 	"time"
 
@@ -116,28 +117,74 @@ type ConfigRecord struct {
 	UpdatedAt time.Time     `json:"updated_at"`
 }
 
-// ListPage returns one status-filtered page and the full count for that
-// status. The active record is queried through the same API with a limit of
-// one; drafts and archived records can advance independently in the console.
+// ConfigListOptions controls one status-filtered page. Time bounds use the
+// same RFC3339 representation stored in the database.
+type ConfigListOptions struct {
+	Limit         int
+	Offset        int
+	CreatedAtFrom string
+	CreatedAtTo   string
+	UpdatedAtFrom string
+	UpdatedAtTo   string
+	SortBy        string
+	SortOrder     string
+}
+
+// ListPage returns one status-filtered page using the historical default
+// ordering. Callers that need filters or custom ordering should use
+// ListPageWithOptions.
 func (s *Store) ListPage(status string, limit, offset int) ([]ConfigRecord, int, error) {
+	return s.ListPageWithOptions(status, ConfigListOptions{Limit: limit, Offset: offset})
+}
+
+// ListPageWithOptions returns one status-filtered page and the full count for
+// that status after applying time filters. SortBy and SortOrder are strictly
+// whitelisted before being interpolated into the SQL statement.
+func (s *Store) ListPageWithOptions(status string, options ConfigListOptions) ([]ConfigRecord, int, error) {
 	if status != "active" && status != "draft" && status != "archived" {
 		return nil, 0, fmt.Errorf("invalid configuration status %q", status)
 	}
-	if limit <= 0 || limit > 100 || offset < 0 {
+	if options.Limit <= 0 || options.Limit > 100 || options.Offset < 0 {
 		return nil, 0, fmt.Errorf("invalid configuration page")
+	}
+	sortColumn := "updated_at"
+	if options.SortBy == "createdAt" || options.SortBy == "created_at" {
+		sortColumn = "created_at"
+	} else if options.SortBy != "" && options.SortBy != "updatedAt" && options.SortBy != "updated_at" {
+		return nil, 0, fmt.Errorf("invalid configuration sort field %q", options.SortBy)
+	}
+	sortDirection := "DESC"
+	if options.SortOrder == "asc" {
+		sortDirection = "ASC"
+	} else if options.SortOrder != "" && options.SortOrder != "desc" {
+		return nil, 0, fmt.Errorf("invalid configuration sort order %q", options.SortOrder)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	where := []string{"status = ?"}
+	args := []any{status}
+	for _, bound := range []struct{ column, operator, value string }{
+		{"created_at", ">=", options.CreatedAtFrom}, {"created_at", "<=", options.CreatedAtTo},
+		{"updated_at", ">=", options.UpdatedAtFrom}, {"updated_at", "<=", options.UpdatedAtTo},
+	} {
+		if bound.value != "" {
+			where = append(where, bound.column+" "+bound.operator+" ?")
+			args = append(args, bound.value)
+		}
+	}
+	whereSQL := strings.Join(where, " AND ")
 	var total int
-	if err := s.db.QueryRow("SELECT COUNT(*) FROM configs WHERE status = ?", status).Scan(&total); err != nil {
+	if err := s.db.QueryRow("SELECT COUNT(*) FROM configs WHERE "+whereSQL, args...).Scan(&total); err != nil {
 		return nil, 0, err
 	}
-	rows, err := s.db.Query("SELECT id, name, content, status, created_at, updated_at FROM configs WHERE status = ? ORDER BY updated_at DESC, id DESC LIMIT ? OFFSET ?", status, limit, offset)
+	query := fmt.Sprintf("SELECT id, name, content, status, created_at, updated_at FROM configs WHERE %s ORDER BY %s %s, id %s LIMIT ? OFFSET ?", whereSQL, sortColumn, sortDirection, sortDirection)
+	args = append(args, options.Limit, options.Offset)
+	rows, err := s.db.Query(query, args...)
 	if err != nil {
 		return nil, 0, err
 	}
 	defer rows.Close()
-	result := make([]ConfigRecord, 0, limit)
+	result := make([]ConfigRecord, 0, options.Limit)
 	for rows.Next() {
 		var record ConfigRecord
 		var raw, created, updated string

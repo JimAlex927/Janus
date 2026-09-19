@@ -110,15 +110,32 @@ export interface ConfigPage {
   configs: ConfigRecord[];
   total: number;
   status?: "draft" | "active" | "archived";
-  limit?: number;
-  offset?: number;
+  pageNum?: number;
+  pageSize?: number;
+  sortBy?: "createdAt" | "updatedAt";
+  sortOrder?: "asc" | "desc";
 }
 
-export function listConfigs(options?: { status?: "draft" | "active" | "archived"; limit?: number; offset?: number }): Promise<ConfigPage> {
+export function listConfigs(options?: {
+  status?: "draft" | "active" | "archived";
+  pageNum?: number;
+  pageSize?: number;
+  sortBy?: "createdAt" | "updatedAt";
+  sortOrder?: "asc" | "desc";
+  createdAtFrom?: string;
+  createdAtTo?: string;
+  updatedAtFrom?: string;
+  updatedAtTo?: string;
+}): Promise<ConfigPage> {
   const query = new URLSearchParams();
   if (options?.status) query.set("status", options.status);
-  if (options?.limit != null) query.set("limit", String(options.limit));
-  if (options?.offset != null) query.set("offset", String(options.offset));
+  if (options?.pageNum != null) query.set("pageNum", String(options.pageNum));
+  if (options?.pageSize != null) query.set("pageSize", String(options.pageSize));
+  if (options?.sortBy) query.set("sortBy", options.sortBy);
+  if (options?.sortOrder) query.set("sortOrder", options.sortOrder);
+  for (const key of ["createdAtFrom", "createdAtTo", "updatedAtFrom", "updatedAtTo"] as const) {
+    if (options?.[key]) query.set(key, options[key]!);
+  }
   const suffix = query.size > 0 ? `?${query}` : "";
   return request(`/api/v1/configs${suffix}`);
 }

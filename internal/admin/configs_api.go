@@ -19,7 +19,7 @@ import (
 // This file implements the named-configuration library API backed by the
 // SQLite store:
 //
-//	GET    /api/v1/configs               list light records; status pages accept limit/offset
+//	GET    /api/v1/configs               list light records; status pages accept pageNum/pageSize and time filters
 //	POST   /api/v1/configs               create a draft from blank/active/named source
 //	GET    /api/v1/configs/{id}          fetch a draft with content and canvas layout
 //	PUT    /api/v1/configs/{id}          save a draft (name/content/layout)
@@ -149,24 +149,17 @@ func (h *Handler) listConfigs(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid configuration status", http.StatusBadRequest)
 		return
 	}
-	limit, offset := 12, 0
-	if value := r.URL.Query().Get("limit"); value != "" {
-		parsed, err := strconv.Atoi(value)
-		if err != nil || parsed < 1 || parsed > 100 {
-			http.Error(w, "limit must be between 1 and 100", http.StatusBadRequest)
-			return
-		}
-		limit = parsed
+	pageNum, pageSize, offset, err := configPageQuery(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
 	}
-	if value := r.URL.Query().Get("offset"); value != "" {
-		parsed, err := strconv.Atoi(value)
-		if err != nil || parsed < 0 {
-			http.Error(w, "offset must be a non-negative integer", http.StatusBadRequest)
-			return
-		}
-		offset = parsed
+	options, err := configListOptions(r, pageSize, offset)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
 	}
-	records, total, err := h.library.ListPage(status, limit, offset)
+	records, total, err := h.library.ListPageWithOptions(status, options)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -175,7 +168,88 @@ func (h *Handler) listConfigs(w http.ResponseWriter, r *http.Request) {
 	for _, record := range records {
 		views = append(views, toRecordView(record))
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"configs": views, "status": status, "total": total, "limit": limit, "offset": offset})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"configs": views, "status": status, "total": total,
+		"pageNum": pageNum, "pageSize": pageSize,
+		"sortBy": options.SortBy, "sortOrder": options.SortOrder,
+	})
+}
+
+func configPageQuery(r *http.Request) (pageNum, pageSize, offset int, err error) {
+	query := r.URL.Query()
+	pageNum, pageSize = 1, 12
+	if value := query.Get("pageNum"); value != "" {
+		pageNum, err = strconv.Atoi(value)
+		if err != nil || pageNum < 1 {
+			return 0, 0, 0, errors.New("pageNum must be a positive integer")
+		}
+	}
+	if value := query.Get("pageSize"); value != "" {
+		pageSize, err = strconv.Atoi(value)
+		if err != nil || pageSize < 1 || pageSize > 100 {
+			return 0, 0, 0, errors.New("pageSize must be between 1 and 100")
+		}
+	}
+	// Keep accepting the previous cursor form for existing clients.
+	if query.Get("pageNum") == "" && query.Get("offset") != "" {
+		legacyOffset, parseErr := strconv.Atoi(query.Get("offset"))
+		if parseErr != nil || legacyOffset < 0 {
+			return 0, 0, 0, errors.New("offset must be a non-negative integer")
+		}
+		if query.Get("pageSize") == "" && query.Get("limit") != "" {
+			pageSize, parseErr = strconv.Atoi(query.Get("limit"))
+			if parseErr != nil || pageSize < 1 || pageSize > 100 {
+				return 0, 0, 0, errors.New("limit must be between 1 and 100")
+			}
+		}
+		pageNum = legacyOffset/pageSize + 1
+	} else if query.Get("pageNum") == "" && query.Get("limit") != "" {
+		pageSize, err = strconv.Atoi(query.Get("limit"))
+		if err != nil || pageSize < 1 || pageSize > 100 {
+			return 0, 0, 0, errors.New("limit must be between 1 and 100")
+		}
+	}
+	maxInt := int(^uint(0) >> 1)
+	if pageNum-1 > maxInt/pageSize {
+		return 0, 0, 0, errors.New("pageNum is too large")
+	}
+	offset = (pageNum - 1) * pageSize
+	return pageNum, pageSize, offset, nil
+}
+
+func configListOptions(r *http.Request, pageSize, offset int) (store.ConfigListOptions, error) {
+	query := r.URL.Query()
+	options := store.ConfigListOptions{Limit: pageSize, Offset: offset, SortBy: "updatedAt", SortOrder: "desc"}
+	if value := query.Get("sortBy"); value != "" {
+		if value != "createdAt" && value != "updatedAt" {
+			return options, errors.New("sortBy must be createdAt or updatedAt")
+		}
+		options.SortBy = value
+	}
+	if value := query.Get("sortOrder"); value != "" {
+		if value != "asc" && value != "desc" {
+			return options, errors.New("sortOrder must be asc or desc")
+		}
+		options.SortOrder = value
+	}
+	for _, item := range []struct {
+		name   string
+		target *string
+	}{
+		{"createdAtFrom", &options.CreatedAtFrom}, {"createdAtTo", &options.CreatedAtTo},
+		{"updatedAtFrom", &options.UpdatedAtFrom}, {"updatedAtTo", &options.UpdatedAtTo},
+	} {
+		value := query.Get(item.name)
+		if value == "" {
+			continue
+		}
+		parsed, err := time.Parse(time.RFC3339, value)
+		if err != nil {
+			return options, fmt.Errorf("%s must be RFC3339", item.name)
+		}
+		*item.target = parsed.UTC().Format(time.RFC3339Nano)
+	}
+	return options, nil
 }
 
 func (h *Handler) createConfig(w http.ResponseWriter, r *http.Request) {

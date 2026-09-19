@@ -19,7 +19,7 @@ export function Overview({ store }: { store: ConfigStore }) {
     let alive = true;
     const sample = async () => {
       try {
-        const [m, d, c] = await Promise.all([getMetrics(), getDiscovery().catch(() => null), listConfigs({ status: "active", limit: 1 }).catch(() => null)]);
+        const [m, d, c] = await Promise.all([getMetrics(), getDiscovery().catch(() => null), listConfigs({ status: "active", pageNum: 1, pageSize: 1 }).catch(() => null)]);
         if (!alive) return;
         const failed = m.failed_requests ?? m.errors;
         const now = Date.now();

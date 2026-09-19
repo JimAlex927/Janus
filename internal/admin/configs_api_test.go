@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"golang.org/x/crypto/bcrypt"
 	"janus/internal/config"
@@ -180,17 +182,38 @@ func TestConfigLibraryListsIndependentStatusPages(t *testing.T) {
 			t.Fatalf("create %s = %d %s", name, created.Code, created.Body.String())
 		}
 	}
-	page := f.do(t, http.MethodGet, "/api/v1/configs?status=draft&limit=2&offset=0", "")
-	if page.Code != http.StatusOK || !strings.Contains(page.Body.String(), `"total":3`) || strings.Count(page.Body.String(), `"status":"draft"`) != 3 {
+	page := f.do(t, http.MethodGet, "/api/v1/configs?status=draft&pageNum=1&pageSize=2", "")
+	if page.Code != http.StatusOK || !strings.Contains(page.Body.String(), `"total":3`) || !strings.Contains(page.Body.String(), `"pageNum":1`) || strings.Count(page.Body.String(), `"status":"draft"`) != 3 {
 		t.Fatalf("draft page = %d %s", page.Code, page.Body.String())
 	}
-	next := f.do(t, http.MethodGet, "/api/v1/configs?status=draft&limit=2&offset=2", "")
-	if next.Code != http.StatusOK || !strings.Contains(next.Body.String(), `"offset":2`) || strings.Count(next.Body.String(), `"status":"draft"`) != 2 {
+	next := f.do(t, http.MethodGet, "/api/v1/configs?status=draft&pageNum=2&pageSize=2", "")
+	if next.Code != http.StatusOK || !strings.Contains(next.Body.String(), `"pageNum":2`) || strings.Count(next.Body.String(), `"status":"draft"`) != 2 {
 		t.Fatalf("second draft page = %d %s", next.Code, next.Body.String())
 	}
 	invalid := f.do(t, http.MethodGet, "/api/v1/configs?status=all", "")
 	if invalid.Code != http.StatusBadRequest {
 		t.Fatalf("invalid status = %d %s", invalid.Code, invalid.Body.String())
+	}
+}
+
+func TestConfigLibrarySupportsTimeFiltersAndOrdering(t *testing.T) {
+	f := newLibraryFixture(t)
+	for _, name := range []string{"first", "second"} {
+		created := f.do(t, http.MethodPost, "/api/v1/configs", `{"name":"`+name+`"}`)
+		if created.Code != http.StatusCreated {
+			t.Fatalf("create %s = %d %s", name, created.Code, created.Body.String())
+		}
+	}
+	from := time.Now().Add(-time.Minute).UTC().Format(time.RFC3339)
+	to := time.Now().Add(time.Minute).UTC().Format(time.RFC3339)
+	path := "/api/v1/configs?status=draft&pageNum=1&pageSize=1&createdAtFrom=" + url.QueryEscape(from) + "&createdAtTo=" + url.QueryEscape(to) + "&sortBy=createdAt&sortOrder=asc"
+	page := f.do(t, http.MethodGet, path, "")
+	if page.Code != http.StatusOK || !strings.Contains(page.Body.String(), `"total":2`) || !strings.Contains(page.Body.String(), `"pageSize":1`) || !strings.Contains(page.Body.String(), `"sortBy":"createdAt"`) {
+		t.Fatalf("filtered page = %d %s", page.Code, page.Body.String())
+	}
+	invalid := f.do(t, http.MethodGet, "/api/v1/configs?status=draft&pageNum=1&pageSize=1&sortBy=name", "")
+	if invalid.Code != http.StatusBadRequest {
+		t.Fatalf("invalid sort = %d %s", invalid.Code, invalid.Body.String())
 	}
 }
 

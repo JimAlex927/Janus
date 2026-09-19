@@ -11,43 +11,65 @@ export function ConfigsPage({ store, onEdit }: { store: ConfigStore; onEdit: (id
   const [archived, setArchived] = useState<ConfigRecord[]>([]);
   const [draftTotal, setDraftTotal] = useState(0);
   const [archivedTotal, setArchivedTotal] = useState(0);
-  const [draftOffset, setDraftOffset] = useState(0);
-  const [archivedOffset, setArchivedOffset] = useState(0);
+  const [draftPageNum, setDraftPageNum] = useState(1);
+  const [archivedPageNum, setArchivedPageNum] = useState(1);
+  const [createdAtFrom, setCreatedAtFrom] = useState("");
+  const [createdAtTo, setCreatedAtTo] = useState("");
+  const [updatedAtFrom, setUpdatedAtFrom] = useState("");
+  const [updatedAtTo, setUpdatedAtTo] = useState("");
+  const [sortBy, setSortBy] = useState<"createdAt" | "updatedAt">("updatedAt");
+  const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const dialogs = useDialogController();
 
   useEffect(() => {
     loadConfigs().catch(() => undefined);
-    // Each status owns its own page cursor.
+    // Each status owns its own page number.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [draftOffset, archivedOffset]);
+  }, [draftPageNum, archivedPageNum, createdAtFrom, createdAtTo, updatedAtFrom, updatedAtTo, sortBy, sortOrder]);
 
   async function loadConfigs() {
     setLoading(true);
     setError("");
     try {
       const [activePage, draftPage, archivedPage] = await Promise.all([
-        listConfigs({ status: "active", limit: 1 }),
-        listConfigs({ status: "draft", limit: PAGE_SIZE, offset: draftOffset }),
-        listConfigs({ status: "archived", limit: PAGE_SIZE, offset: archivedOffset }),
+        listConfigs({ status: "active", pageNum: 1, pageSize: 1 }),
+        listConfigs({ status: "draft", pageNum: draftPageNum, pageSize: PAGE_SIZE, ...queryFilters() }),
+        listConfigs({ status: "archived", pageNum: archivedPageNum, pageSize: PAGE_SIZE, ...queryFilters() }),
       ]);
       setActive(activePage.configs[0] || null);
       setDrafts(draftPage.configs || []);
       setArchived(archivedPage.configs || []);
       setDraftTotal(draftPage.total || 0);
       setArchivedTotal(archivedPage.total || 0);
-      if (draftPage.configs.length === 0 && draftPage.total > 0 && draftOffset >= draftPage.total) {
-        setDraftOffset(Math.floor((draftPage.total - 1) / PAGE_SIZE) * PAGE_SIZE);
+      if (draftPage.configs.length === 0 && draftPage.total > 0 && draftPageNum > Math.ceil(draftPage.total / PAGE_SIZE)) {
+        setDraftPageNum(Math.ceil(draftPage.total / PAGE_SIZE));
       }
-      if (archivedPage.configs.length === 0 && archivedPage.total > 0 && archivedOffset >= archivedPage.total) {
-        setArchivedOffset(Math.floor((archivedPage.total - 1) / PAGE_SIZE) * PAGE_SIZE);
+      if (archivedPage.configs.length === 0 && archivedPage.total > 0 && archivedPageNum > Math.ceil(archivedPage.total / PAGE_SIZE)) {
+        setArchivedPageNum(Math.ceil(archivedPage.total / PAGE_SIZE));
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setLoading(false);
     }
+  }
+
+  function queryFilters() {
+    return {
+      sortBy,
+      sortOrder,
+      createdAtFrom: toApiTime(createdAtFrom),
+      createdAtTo: toApiTime(createdAtTo),
+      updatedAtFrom: toApiTime(updatedAtFrom),
+      updatedAtTo: toApiTime(updatedAtTo),
+    };
+  }
+
+  function resetQueryPage() {
+    setDraftPageNum(1);
+    setArchivedPageNum(1);
   }
 
   async function createConfig() {
@@ -190,7 +212,7 @@ export function ConfigsPage({ store, onEdit }: { store: ConfigStore; onEdit: (id
     try {
       const res = await fetch(apiPath(`/api/v1/configs/${id}`), { method: "DELETE" });
       if (!res.ok) throw new Error(await res.text());
-      if (drafts.length === 1 && draftOffset > 0) setDraftOffset((offset) => offset - PAGE_SIZE);
+      if (drafts.length === 1 && draftPageNum > 1) setDraftPageNum((page) => page - 1);
       else await loadConfigs();
       store.setMessage("配置已删除");
     } catch (e) {
@@ -276,10 +298,19 @@ export function ConfigsPage({ store, onEdit }: { store: ConfigStore; onEdit: (id
         <input ref={fileInput} type="file" accept=".json,application/json" hidden onChange={importConfig} />
       </div>
 
+      <div className="config-query-controls">
+        <label>排序字段<select value={sortBy} onChange={(event) => { setSortBy(event.target.value as "createdAt" | "updatedAt"); resetQueryPage(); }}><option value="updatedAt">修改时间</option><option value="createdAt">创建时间</option></select></label>
+        <label>顺序<select value={sortOrder} onChange={(event) => { setSortOrder(event.target.value as "asc" | "desc"); resetQueryPage(); }}><option value="desc">倒序</option><option value="asc">正序</option></select></label>
+        <label>创建时间起<input type="datetime-local" value={createdAtFrom} onChange={(event) => { setCreatedAtFrom(event.target.value); resetQueryPage(); }} /></label>
+        <label>创建时间止<input type="datetime-local" value={createdAtTo} onChange={(event) => { setCreatedAtTo(event.target.value); resetQueryPage(); }} /></label>
+        <label>修改时间起<input type="datetime-local" value={updatedAtFrom} onChange={(event) => { setUpdatedAtFrom(event.target.value); resetQueryPage(); }} /></label>
+        <label>修改时间止<input type="datetime-local" value={updatedAtTo} onChange={(event) => { setUpdatedAtTo(event.target.value); resetQueryPage(); }} /></label>
+      </div>
+
       <div className="stat-grid config-summary-grid">
         <StatCard label="生效中" value={active ? 1 : 0} sub={active?.name} />
-        <StatCard label="草稿" value={drafts.length} />
-        <StatCard label="历史版本" value={archived.length} />
+        <StatCard label="草稿" value={draftTotal} />
+        <StatCard label="历史版本" value={archivedTotal} />
       </div>
 
       {!active && draftTotal === 0 && archivedTotal === 0 ? (
@@ -287,8 +318,8 @@ export function ConfigsPage({ store, onEdit }: { store: ConfigStore; onEdit: (id
       ) : (
         <div className="config-groups">
           {active && <ConfigGroup label="当前生效" detail="正在运行的版本"><div className="card-list">{renderConfigCard(active)}</div></ConfigGroup>}
-          {draftTotal > 0 && <ConfigGroup label="草稿" detail={`共 ${draftTotal} 条，独立分页`}><div className="card-list">{drafts.map(renderConfigCard)}</div><PageControls total={draftTotal} offset={draftOffset} onOffsetChange={setDraftOffset} /></ConfigGroup>}
-          {archivedTotal > 0 && <ConfigGroup label="历史版本" detail={`共 ${archivedTotal} 条，独立分页，可直接回滚`}><div className="card-list">{archived.map(renderConfigCard)}</div><PageControls total={archivedTotal} offset={archivedOffset} onOffsetChange={setArchivedOffset} /></ConfigGroup>}
+          {draftTotal > 0 && <ConfigGroup label="草稿" detail={`共 ${draftTotal} 条，独立分页`}><div className="card-list">{drafts.map(renderConfigCard)}</div><PageControls total={draftTotal} pageNum={draftPageNum} onPageChange={setDraftPageNum} /></ConfigGroup>}
+          {archivedTotal > 0 && <ConfigGroup label="历史版本" detail={`共 ${archivedTotal} 条，独立分页，可直接回滚`}><div className="card-list">{archived.map(renderConfigCard)}</div><PageControls total={archivedTotal} pageNum={archivedPageNum} onPageChange={setArchivedPageNum} /></ConfigGroup>}
         </div>
       )}
       {dialogs.dialog}
@@ -300,9 +331,14 @@ function ConfigGroup({ label, detail, children }: { label: string; detail: strin
   return <section className="config-group"><div className="config-group-head"><div><span>{label}</span><small>{detail}</small></div></div>{children}</section>;
 }
 
-function PageControls({ total, offset, onOffsetChange }: { total: number; offset: number; onOffsetChange: (offset: number) => void }) {
+function PageControls({ total, pageNum, onPageChange }: { total: number; pageNum: number; onPageChange: (pageNum: number) => void }) {
   if (total <= PAGE_SIZE) return null;
-  const first = offset + 1;
-  const last = Math.min(offset + PAGE_SIZE, total);
-  return <div className="config-page-controls"><small>{first}-{last} / {total}</small><div><button type="button" className="btn small" disabled={offset === 0} onClick={() => onOffsetChange(Math.max(0, offset - PAGE_SIZE))} title="上一页">←</button><button type="button" className="btn small" disabled={offset + PAGE_SIZE >= total} onClick={() => onOffsetChange(offset + PAGE_SIZE)} title="下一页">→</button></div></div>;
+  const first = (pageNum - 1) * PAGE_SIZE + 1;
+  const last = Math.min(pageNum * PAGE_SIZE, total);
+  const pageCount = Math.ceil(total / PAGE_SIZE);
+  return <div className="config-page-controls"><small>{first}-{last} / {total} · 第 {pageNum}/{pageCount} 页</small><div><button type="button" className="btn small" disabled={pageNum === 1} onClick={() => onPageChange(Math.max(1, pageNum - 1))} title="上一页">←</button><button type="button" className="btn small" disabled={pageNum >= pageCount} onClick={() => onPageChange(Math.min(pageCount, pageNum + 1))} title="下一页">→</button></div></div>;
+}
+
+function toApiTime(value: string): string | undefined {
+  return value ? new Date(value).toISOString() : undefined;
 }
