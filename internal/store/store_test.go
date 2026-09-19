@@ -10,7 +10,7 @@ import (
 
 func testConfig(name string) config.Config {
 	return config.Config{
-		Limens:  map[string]config.LimenConfig{"default": {Address: "127.0.0.1:8080", Protocols: []string{"http1"}}},
+		Limens:   map[string]config.LimenConfig{"default": {Address: "127.0.0.1:8080", Protocols: []string{"http1"}}},
 		Services: map[string]config.Service{"example": {Upstreams: []string{"http://127.0.0.1:9000"}}},
 		Routes:   []config.Route{{Name: name, Limen: "default", PathPrefix: "/"}},
 	}
@@ -88,6 +88,81 @@ func TestStorePublishMakesSingleActive(t *testing.T) {
 		if item.ID == second.ID && item.Status != "active" {
 			t.Fatalf("new active status = %q, want active", item.Status)
 		}
+	}
+}
+
+func TestStoreReconcileActivePromotesMatchingHistory(t *testing.T) {
+	s := openTestStore(t)
+	first := testConfig("first")
+	firstRecord, err := s.Create("first", first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Publish(firstRecord.ID); err != nil {
+		t.Fatal(err)
+	}
+	second := testConfig("second")
+	secondRecord, err := s.Create("second", second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	matched, err := s.ReconcileActive(second)
+	if err != nil || !matched {
+		t.Fatalf("reconcile = %v, %v", matched, err)
+	}
+	active, err := s.Active()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if active == nil || active.ID != secondRecord.ID || active.Status != "active" {
+		t.Fatalf("active after reconcile = %#v", active)
+	}
+}
+
+func TestStoreReconcileActiveLeavesUnknownFileUnchanged(t *testing.T) {
+	s := openTestStore(t)
+	first := testConfig("first")
+	record, err := s.Create("first", first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Publish(record.ID); err != nil {
+		t.Fatal(err)
+	}
+	matched, err := s.ReconcileActive(testConfig("untracked"))
+	if err != nil || matched {
+		t.Fatalf("unknown reconcile = %v, %v", matched, err)
+	}
+	active, err := s.Active()
+	if err != nil || active == nil || active.ID != record.ID {
+		t.Fatalf("active after unknown reconcile = %#v, %v", active, err)
+	}
+}
+
+func TestStoreReconcileActiveKeepsMatchingActiveDuplicate(t *testing.T) {
+	s := openTestStore(t)
+	content := testConfig("same")
+	active, err := s.Create("active", content)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Publish(active.ID); err != nil {
+		t.Fatal(err)
+	}
+	duplicate, err := s.Create("duplicate", content)
+	if err != nil {
+		t.Fatal(err)
+	}
+	matched, err := s.ReconcileActive(content)
+	if err != nil || !matched {
+		t.Fatalf("duplicate reconcile = %v, %v", matched, err)
+	}
+	got, err := s.Active()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got == nil || got.ID != active.ID || got.ID == duplicate.ID {
+		t.Fatalf("active duplicate reconciliation selected %#v, want id %d", got, active.ID)
 	}
 }
 

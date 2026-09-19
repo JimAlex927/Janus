@@ -336,6 +336,13 @@ func openConfigLibrary(dbPath string, startup config.Config, logger *zap.Logger)
 		} else if err := library.Publish(record.ID); err != nil {
 			logger.Warn("configuration library seed failed", zap.Error(err))
 		}
+	} else {
+		matched, err := library.ReconcileActive(startup)
+		if err != nil {
+			logger.Warn("configuration library reconciliation failed", zap.Error(err))
+		} else if !matched {
+			logger.Warn("configuration library active record does not match startup file")
+		}
 	}
 	return library
 }

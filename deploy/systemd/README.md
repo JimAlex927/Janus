@@ -79,6 +79,11 @@ startup configuration, stop traffic to the new instance, restore the previous
 binary/configuration, and restart it; retain the old artifact checksum so the
 rollback is reproducible.
 
+The admin configuration library also keeps archived versions. After a process
+crash during a publish, startup reconciles the `active` marker to an exact
+matching historical file when one exists; inspect the journal for an
+unrecognized-file warning before choosing an archived version to publish.
+
 ## Current qualification boundary
 
 This artifact is syntax-checked and cross-compiled by the repository's release

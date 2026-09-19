@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sync"
 	"time"
 
@@ -174,6 +175,77 @@ func (s *Store) Active() (*ConfigRecord, error) {
 		return nil, err
 	}
 	return s.getLocked(id)
+}
+
+// ReconcileActive repairs the library marker after a crash in the narrow
+// window between configuration-file publication and the status transaction.
+// It only promotes an existing record whose normalized content matches the
+// running startup snapshot; an unknown file is reported to the caller rather
+// than silently creating a new history entry.
+func (s *Store) ReconcileActive(content config.Config) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	target := content.WithDefaults()
+	var activeID int64
+	var activeRaw string
+	err := s.db.QueryRow("SELECT id, content FROM configs WHERE status = 'active' LIMIT 1").Scan(&activeID, &activeRaw)
+	if err == nil {
+		var active config.Config
+		if err := json.Unmarshal([]byte(activeRaw), &active); err != nil {
+			return false, fmt.Errorf("decode active config %d: %w", activeID, err)
+		}
+		if reflect.DeepEqual(active.WithDefaults(), target) {
+			return true, nil
+		}
+	} else if err != sql.ErrNoRows {
+		return false, err
+	}
+	rows, err := s.db.Query("SELECT id, content FROM configs ORDER BY id DESC")
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+	matchID := int64(0)
+	for rows.Next() {
+		var id int64
+		var raw string
+		if err := rows.Scan(&id, &raw); err != nil {
+			return false, err
+		}
+		var candidate config.Config
+		if err := json.Unmarshal([]byte(raw), &candidate); err != nil {
+			return false, fmt.Errorf("decode config %d: %w", id, err)
+		}
+		if reflect.DeepEqual(candidate.WithDefaults(), target) {
+			matchID = id
+			break
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return false, err
+	}
+	if err := rows.Close(); err != nil {
+		return false, err
+	}
+	if matchID == 0 {
+		return false, nil
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	now := time.Now().UTC().Format(time.RFC3339)
+	if _, err := tx.Exec("UPDATE configs SET status = 'archived', updated_at = ? WHERE status = 'active'", now); err != nil {
+		return false, err
+	}
+	if _, err := tx.Exec("UPDATE configs SET status = 'active', updated_at = ? WHERE id = ?", now, matchID); err != nil {
+		return false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func (s *Store) Create(name string, content config.Config) (*ConfigRecord, error) {

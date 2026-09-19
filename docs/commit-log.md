@@ -3,6 +3,26 @@
 This document records the purpose, scope, and verification for each Janus
 repository commit. Add a new dated section before every future commit.
 
+## 2026-09-19 — Reconcile the configuration library after publish crashes
+
+Commit message: `fix(admin): reconcile active configuration on startup`.
+
+Scope:
+
+- Added a content-matched startup reconciliation for the SQLite configuration
+  library, repairing the active marker after a crash between atomic file
+  replacement and the library status transaction.
+- Unknown startup files are left untouched and produce an explicit warning;
+  no untracked configuration is silently inserted into rollback history.
+- Added store regression tests for matching-history promotion and unknown-file
+  preservation.
+
+Verification: `go test ./internal/store ./cmd/janus -count=1`, the focused
+HTTP/3 SSE regression (`-count=20`), and
+`JANUS_FUZZ_TIME=1s ./scripts/verify-linux.sh` passed locally; the latter
+completed module verification, repeated tests, config fuzz, race, vet, and a
+Linux amd64 static build with SHA-256 output.
+
 ## 2026-09-19 — Confine static routes after symlink resolution
 
 Commit message: `fix(gateway): confine static symlink resolution`.

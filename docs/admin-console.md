@@ -57,6 +57,12 @@ The API also remains compatible with direct atomic edits of the JSON file. The
 file reloader recognizes a snapshot already published by the console and does
 not build a duplicate generation.
 
+On startup, the configuration library reconciles its `active` marker against
+the loaded configuration file when an exact historical record exists. This
+covers a process crash between file publication and the SQLite status update;
+an unrecognized file is served normally but produces an explicit warning so an
+operator can decide whether to import or roll back it.
+
 ## Console 页面
 
 控制台只有三个模块：`概览`、`Config`、`全局设置`。

@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"crypto/tls"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -50,7 +51,17 @@ func TestSSEProxyTimeoutReleasesBackendAndAdmission(t *testing.T) {
 			limiter := middleware.NewLimiter(1)
 			finished := make(chan struct{})
 			admitted := middleware.Admission(limiter)(g)
-			h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { defer close(finished); admitted.ServeHTTP(w, r) })
+			h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				// HTTP/3 binds its socket before the server goroutine has finished
+				// installing the QUIC listener. Probe that boundary explicitly so the
+				// SSE assertion below is not coupled to the first goroutine schedule.
+				if version == "http3" && r.URL.Path == "/_janus_test_ready" {
+					w.WriteHeader(http.StatusNoContent)
+					return
+				}
+				defer close(finished)
+				admitted.ServeHTTP(w, r)
+			})
 			cert, key, roots := writeTestCertificate(t)
 			protocols := []string{version}
 			if version == "http3" {
@@ -86,6 +97,9 @@ func TestSSEProxyTimeoutReleasesBackendAndAdmission(t *testing.T) {
 			served := make(chan error, 1)
 			go func() { served <- l.Serve(ln) }()
 			defer func() { l.Close(); <-served }()
+			if version == "http3" {
+				waitForHTTP3Ready(t, address, transport)
+			}
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
 			req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://"+address, nil)
@@ -127,4 +141,36 @@ func TestSSEProxyTimeoutReleasesBackendAndAdmission(t *testing.T) {
 			limiter.Release()
 		})
 	}
+}
+
+// waitForHTTP3Ready separates QUIC listener installation from the streaming
+// scenario. A short per-attempt deadline prevents quic-go's handshake retry
+// budget from turning a scheduling race into a long, opaque test timeout.
+func waitForHTTP3Ready(t *testing.T, address string, transport http.RoundTripper) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	var lastErr error
+	for time.Now().Before(deadline) {
+		ctx, cancel := context.WithTimeout(context.Background(), 250*time.Millisecond)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://"+address+"/_janus_test_ready", nil)
+		if err == nil {
+			resp, requestErr := (&http.Client{Transport: transport}).Do(req)
+			if requestErr == nil {
+				_ = resp.Body.Close()
+				cancel()
+				if resp.ProtoMajor == 3 && resp.StatusCode == http.StatusNoContent {
+					return
+				}
+				lastErr = fmt.Errorf("ready response=%s %d", resp.Proto, resp.StatusCode)
+			} else {
+				lastErr = requestErr
+				cancel()
+			}
+		} else {
+			lastErr = err
+			cancel()
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	t.Fatalf("HTTP/3 server did not become ready: %v", lastErr)
 }
