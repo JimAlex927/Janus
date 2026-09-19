@@ -44,7 +44,8 @@ to the active file (`janus-configs.db`). Exactly one record is `active`;
 publishing another record archives the previous one. A publish request
 normalizes the draft to the active startup-owned sections (settings and
 limens), validates and builds a new Runtime generation, persists the active
-file with an atomic rename, and only then activates that generation. If
+file with an atomic rename and containing-directory sync, and only then
+activates that generation. If
 persistence fails, the candidate is released without ever receiving traffic.
 Both direct and library-based publishes carry the Runtime revision, so a stale
 console cannot overwrite a configuration that another operator has already

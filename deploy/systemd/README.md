@@ -62,8 +62,9 @@ same drain budget.
 ## Rollout and rollback
 
 For a route/service or certificate-only update, validate a new file first and
-replace the live file with an atomic rename on the same filesystem. The file
-reloader keeps the last valid generation when the new file is malformed or
+replace the live file with an atomic rename on the same filesystem. Janus also
+flushes the containing directory after the rename so the replacement survives
+a power loss once the publish returns successfully. The file reloader keeps the last valid generation when the new file is malformed or
 incomplete. Keep at least one previous configuration and certificate pair until
 the new generation and readiness probe have been observed.
 

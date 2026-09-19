@@ -3,6 +3,20 @@
 This document records the purpose, scope, and verification for each Janus
 repository commit. Add a new dated section before every future commit.
 
+## 2026-09-19 — Flush configuration directory metadata after publish
+
+Commit message: `fix(config): sync directory after atomic publish`.
+
+Scope:
+
+- Kept the existing temp-file `fsync` and atomic rename path.
+- Flushed the containing directory after the rename so a successful publish
+  also persists the directory entry across a crash or power loss.
+- Documented the durability boundary for operators performing rollback.
+
+Verification: `go test ./cmd/janus ./internal/store -count=1` and the full
+Linux release gate passed locally.
+
 ## 2026-09-19 — Reconcile the configuration library after publish crashes
 
 Commit message: `fix(admin): reconcile active configuration on startup`.

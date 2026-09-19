@@ -388,5 +388,21 @@ func writeConfigAtomically(path string, c config.Config) error {
 	if info, statErr := os.Stat(path); statErr == nil {
 		_ = os.Chmod(tempName, info.Mode().Perm())
 	}
-	return os.Rename(tempName, path)
+	if err := os.Rename(tempName, path); err != nil {
+		return err
+	}
+	// The file's contents are durable after temp.Sync, but the rename itself
+	// is only durable once the containing directory metadata is flushed too.
+	directoryFile, err := os.Open(directory)
+	if err != nil {
+		return fmt.Errorf("open configuration directory for sync: %w", err)
+	}
+	if err := directoryFile.Sync(); err != nil {
+		_ = directoryFile.Close()
+		return fmt.Errorf("sync configuration directory: %w", err)
+	}
+	if err := directoryFile.Close(); err != nil {
+		return fmt.Errorf("close configuration directory: %w", err)
+	}
+	return nil
 }
