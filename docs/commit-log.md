@@ -3,6 +3,23 @@
 This document records the purpose, scope, and verification for each Janus
 repository commit. Add a new dated section before every future commit.
 
+## 2026-09-19 — Upgrade the Nacos gRPC dependency
+
+Commit message: `fix(deps): upgrade grpc security baseline`.
+
+Scope:
+
+- Upgraded the Nacos-transitive `google.golang.org/grpc` dependency from
+  `v1.67.3` to `v1.83.1`, with matching protobuf and genproto updates.
+- Removed the known reachable gRPC advisories reported by `govulncheck` while
+  preserving the existing Nacos adapter API.
+
+Verification: `go test ./... -count=1` and `go mod verify` pass locally. A
+local `govulncheck` run under Go 1.26.5 reports only standard-library fixes
+available in Go 1.26.6; the repository CI remains pinned to Go 1.25.13 and
+must retain a patched toolchain before release. Go 1.26.6 could not be
+downloaded in the current network environment.
+
 ## 2026-09-19 — Gate embedded frontend drift in CI
 
 Commit message: `ci(console): verify embedded frontend assets`.
