@@ -160,6 +160,100 @@ input:focus, select:focus, textarea:focus { outline: 2px solid #c7d0ff; border-c
   .login-form-pane { width: auto; border-left: 0; border-top: 1px solid #233f4320; }
   .pelican-pane { min-height: 52vh; }
 }
+
+/* product login */
+.login-page {
+  min-height: 100svh;
+  display: grid;
+  grid-template-columns: minmax(0, 1.18fr) minmax(390px, 0.82fr);
+  background: #f2f5f0;
+  color: #173c40;
+}
+.login-brand-panel {
+  min-height: 100svh;
+  position: relative;
+  overflow: hidden;
+  background: #12363a;
+  color: #f8faf4;
+}
+.login-brand-head {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 34px 42px;
+  animation: login-rise .55s ease-out both;
+}
+.login-mark { background: #e3a35f; color: #173c40; border-radius: 10px; }
+.login-brand-head strong { display: block; font-size: 17px; letter-spacing: .04em; }
+.login-brand-head small { display: block; margin-top: 3px; color: #a9c3bd; font-size: 9px; letter-spacing: .16em; }
+.login-intro {
+  position: relative;
+  z-index: 2;
+  max-width: 510px;
+  padding: 10vh 42px 0;
+  animation: login-rise .65s .08s ease-out both;
+}
+.login-kicker { color: #6fc1ad; font-size: 10px; font-weight: 800; letter-spacing: .2em; }
+.login-intro h1 { margin: 17px 0 16px; color: #f8faf4; font-size: clamp(42px, 5vw, 70px); font-weight: 650; letter-spacing: -.045em; line-height: .98; }
+.login-intro h1 em { color: #e6b16c; font-style: normal; }
+.login-intro p { max-width: 330px; margin: 0; color: #adc4be; font-size: 14px; line-height: 1.7; }
+.login-brand-panel .pelican-pane { position: absolute; inset: 38% 0 42px; z-index: 1; min-height: 0; padding: 0; opacity: .96; }
+.login-brand-panel .pelican-scene { width: 100%; height: 100%; }
+.login-brand-panel .pelican-controls { display: none; }
+.login-brand-foot { position: absolute; z-index: 3; bottom: 32px; left: 42px; display: flex; align-items: center; gap: 9px; color: #789c95; font-size: 9px; letter-spacing: .16em; }
+.login-brand-foot span { width: 24px; height: 1px; background: #6fc1ad; }
+.login-form-panel { display: flex; align-items: center; justify-content: center; padding: 48px 8vw; background: #f2f5f0; }
+.login-form-wrap { width: min(100%, 360px); }
+.login-mobile-brand { display: none; }
+.login-form { display: grid; gap: 28px; animation: login-rise .6s .16s ease-out both; }
+.login-form-heading { display: grid; gap: 9px; }
+.login-form-heading .login-kicker { color: #568d82; }
+.login-form-heading h2 { margin: 8px 0 0; color: #173c40; font-size: 30px; font-weight: 650; letter-spacing: -.035em; }
+.login-form-heading p { margin: 0; color: #71827f; font-size: 13px; }
+.login-fields { display: grid; gap: 17px; }
+.login-field { display: grid; gap: 8px; color: #315953; font-size: 12px; font-weight: 700; }
+.login-field input { min-height: 48px; border: 1px solid #cbd8d1; border-radius: 8px; background: #fff; color: #173c40; padding: 12px 13px; font-size: 14px; transition: border-color .18s, box-shadow .18s; }
+.login-field input::placeholder { color: #a4b1ae; }
+.login-field input:focus { outline: none; border-color: #4c9b8c; box-shadow: 0 0 0 3px #4c9b8c1c; }
+.password-field { position: relative; }
+.password-field input { padding-right: 66px; }
+.password-toggle { position: absolute; top: 50%; right: 10px; transform: translateY(-50%); border: 0; background: transparent; color: #4d887d; cursor: pointer; font-size: 11px; font-weight: 700; padding: 8px 5px; }
+.password-toggle:hover { color: #173c40; }
+.login-submit { min-height: 49px; display: flex; align-items: center; justify-content: space-between; border: 1px solid #173c40; border-radius: 8px; background: #173c40; color: #f8faf4; padding: 0 16px 0 18px; cursor: pointer; font-size: 13px; font-weight: 700; transition: background .18s, transform .18s, border-color .18s; }
+.login-submit b { color: #e6b16c; font-size: 21px; font-weight: 400; line-height: 1; }
+.login-submit:hover:not(:disabled) { background: #22545a; border-color: #22545a; transform: translateY(-1px); }
+.login-submit:disabled { cursor: wait; opacity: .6; }
+.login-error { border-left: 2px solid #c95c4b; color: #a74638; font-size: 12px; line-height: 1.5; padding: 2px 0 2px 11px; }
+.login-form-foot { color: #8b9b97; font-size: 11px; line-height: 1.5; }
+.login-lock { display: inline-block; margin-right: 6px; color: #5ba18f; font-size: 8px; vertical-align: 1px; }
+@keyframes login-rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+@media (max-width: 920px) {
+  .login-page { display: block; }
+  .login-brand-panel { min-height: 450px; }
+  .login-brand-head { padding: 24px 24px; }
+  .login-intro { padding: 30px 24px 0; }
+  .login-intro h1 { margin: 13px 0 11px; font-size: 45px; }
+  .login-intro p { font-size: 12px; }
+  .login-brand-panel .pelican-pane { inset: 59% 0 12px; }
+  .login-brand-foot { display: none; }
+  .login-form-panel { min-height: 500px; padding: 48px 24px 56px; }
+}
+@media (max-width: 460px) {
+  .login-brand-panel { min-height: 430px; }
+  .login-brand-head { padding: 20px 20px; }
+  .login-intro { padding: 20px 20px 0; }
+  .login-intro h1 { font-size: 38px; }
+  .login-intro p { max-width: 240px; }
+  .login-brand-panel .pelican-pane { inset: 59% 0 2px; }
+  .login-form-panel { padding: 36px 22px 44px; }
+  .login-mobile-brand { display: flex; align-items: center; gap: 9px; margin-bottom: 46px; color: #173c40; font-size: 16px; }
+  .login-mobile-brand .brand-mark { width: 30px; height: 30px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .login-brand-head, .login-intro, .login-form { animation: none; }
+}
 @media (prefers-reduced-motion: reduce) {
   .pelican-cloud-a, .pelican-cloud-b, .pelican-bird, .pelican-scarf-tip, .pelican-breeze { animation: none; }
 }
