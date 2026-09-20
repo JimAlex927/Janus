@@ -150,6 +150,63 @@ func TestStaticDirectoryListing(t *testing.T) {
 	}
 }
 
+func TestStaticDirectoryListingPreservesStripPrefixOnRedirect(t *testing.T) {
+	root := t.TempDir()
+	nested := filepath.Join(root, "nested")
+	if err := os.Mkdir(nested, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(nested, "child.txt"), []byte("child"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	g, err := New(config.Config{
+		Listen: "127.0.0.1:8080",
+		Middlewares: map[string]config.Middleware{
+			"strip-test": {
+				Scope:       config.MiddlewareScopeRoute,
+				StripPrefix: &config.StripPrefixSettings{Prefix: "/test"},
+			},
+		},
+		Routes: []config.Route{{
+			Name:        "files",
+			PathPrefix:  "/test",
+			Middlewares: []string{"strip-test"},
+			Action: &config.RouteAction{Static: &config.StaticAction{
+				Root:             root,
+				DirectoryListing: true,
+			}},
+		}},
+	}, zap.NewNop())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer g.Close()
+
+	response := httptest.NewRecorder()
+	g.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "http://gateway/test", nil))
+	if response.Code != http.StatusMovedPermanently || response.Header().Get("Location") != "/test/" {
+		t.Fatalf("mount root redirect = %d %q, want 301 /test/", response.Code, response.Header().Get("Location"))
+	}
+
+	response = httptest.NewRecorder()
+	g.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "http://gateway/test/", nil))
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "nested") {
+		t.Fatalf("mount root directory listing = %d %q", response.Code, response.Body.String())
+	}
+
+	response = httptest.NewRecorder()
+	g.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "http://gateway/test/nested", nil))
+	if response.Code != http.StatusMovedPermanently || response.Header().Get("Location") != "/test/nested/" {
+		t.Fatalf("directory redirect = %d %q, want 301 /test/nested/", response.Code, response.Header().Get("Location"))
+	}
+
+	response = httptest.NewRecorder()
+	g.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "http://gateway/test/nested/", nil))
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "child.txt") {
+		t.Fatalf("redirected directory listing = %d %q", response.Code, response.Body.String())
+	}
+}
+
 func TestStaticAssetPathAllowsFilesystemRoot(t *testing.T) {
 	asset, ok := staticAssetPath(string(filepath.Separator), httptest.NewRequest(http.MethodGet, "http://gateway/etc/hosts", nil).URL)
 	if !ok || asset != filepath.Join(string(filepath.Separator), "etc", "hosts") {
