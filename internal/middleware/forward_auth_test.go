@@ -51,3 +51,47 @@ func TestForwardAuthReturnsDenialResponse(t *testing.T) {
 		t.Fatalf("called=%v code=%d body=%q", called, response.Code, response.Body.String())
 	}
 }
+
+func TestForwardAuthClearsUnverifiedIdentityHeaders(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		headers []string
+		pattern string
+	}{
+		{name: "explicit", headers: []string{"X-User", "X-Role"}},
+		{name: "regex", pattern: "^X-(User|Role)$"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+				return &http.Response{StatusCode: http.StatusNoContent, Header: http.Header{"X-User": {"alice"}}, Body: io.NopCloser(strings.NewReader(""))}, nil
+			})}
+			mw, err := ForwardAuth(ForwardAuthOptions{Address: "https://auth.example/check", AuthResponseHeaders: tc.headers, AuthResponseHeadersRegex: tc.pattern, Client: client})
+			if err != nil {
+				t.Fatal(err)
+			}
+			called := false
+			h := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				called = true
+				if got := r.Header.Get("X-User"); got != "alice" {
+					t.Errorf("verified user = %q", got)
+				}
+				if got := r.Header.Get("X-Role"); got != "" {
+					t.Errorf("unverified role reached backend: %q", got)
+				}
+				if got := r.Header.Get("X-Trace"); got != "trace" {
+					t.Errorf("unselected header = %q", got)
+				}
+				w.WriteHeader(http.StatusNoContent)
+			}))
+			r := httptest.NewRequest(http.MethodGet, "/", nil)
+			r.Header.Set("X-User", "mallory")
+			r.Header.Set("X-Role", "admin")
+			r.Header.Set("X-Trace", "trace")
+			response := httptest.NewRecorder()
+			h.ServeHTTP(response, r)
+			if !called || response.Code != http.StatusNoContent {
+				t.Fatalf("called=%v status=%d", called, response.Code)
+			}
+		})
+	}
+}

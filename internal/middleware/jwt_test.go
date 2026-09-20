@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/rsa"
 	"encoding/base64"
@@ -178,7 +179,7 @@ func TestJWTLoadsRSAJWKS(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := verifier.verify(raw); err != nil {
+	if _, err := verifier.verify(context.Background(), raw); err != nil {
 		t.Fatal(err)
 	}
 }

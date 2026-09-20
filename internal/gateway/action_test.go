@@ -183,8 +183,10 @@ func TestStaticDirectoryListingPreservesStripPrefixOnRedirect(t *testing.T) {
 	defer g.Close()
 
 	response := httptest.NewRecorder()
-	g.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "http://gateway/test", nil))
-	if response.Code != http.StatusMovedPermanently || response.Header().Get("Location") != "/test/" {
+	request := httptest.NewRequest(http.MethodGet, "http://gateway/test", nil)
+	g.ServeHTTP(response, request)
+	location, locationErr := request.URL.Parse(response.Header().Get("Location"))
+	if response.Code != http.StatusMovedPermanently || locationErr != nil || location.String() != "http://gateway/test/" {
 		t.Fatalf("mount root redirect = %d %q, want 301 /test/", response.Code, response.Header().Get("Location"))
 	}
 
@@ -195,8 +197,10 @@ func TestStaticDirectoryListingPreservesStripPrefixOnRedirect(t *testing.T) {
 	}
 
 	response = httptest.NewRecorder()
-	g.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "http://gateway/test/nested", nil))
-	if response.Code != http.StatusMovedPermanently || response.Header().Get("Location") != "/test/nested/" {
+	request = httptest.NewRequest(http.MethodGet, "http://gateway/test/nested", nil)
+	g.ServeHTTP(response, request)
+	location, locationErr = request.URL.Parse(response.Header().Get("Location"))
+	if response.Code != http.StatusMovedPermanently || locationErr != nil || location.String() != "http://gateway/test/nested/" {
 		t.Fatalf("directory redirect = %d %q, want 301 /test/nested/", response.Code, response.Header().Get("Location"))
 	}
 

@@ -28,10 +28,12 @@ import (
 )
 
 const (
-	maxJWTTokenBytes = 16 << 10
-	maxJWKSBytes     = 1 << 20
-	jwtKeyTTL        = 5 * time.Minute
-	jwtStaleTTL      = 15 * time.Minute
+	maxJWTTokenBytes  = 16 << 10
+	maxJWKSBytes      = 1 << 20
+	jwtKeyTTL         = 5 * time.Minute
+	jwtStaleTTL       = 15 * time.Minute
+	jwtRefreshTimeout = 5 * time.Second
+	jwtRefreshBackoff = 5 * time.Second
 )
 
 // JWTOptions describes an immutable JWT authentication policy. Exactly one key
@@ -72,6 +74,14 @@ type jwtVerifier struct {
 	keys       map[string]jwkKey
 	fetchedAt  time.Time
 	staleUntil time.Time
+	retryAfter time.Time
+	lastError  error
+	refreshing *jwtRefresh
+}
+
+type jwtRefresh struct {
+	done chan struct{}
+	err  error // published before closing done
 }
 
 // JWT constructs a verifier once per routing generation. JWKS retrieval is
@@ -90,7 +100,7 @@ func JWT(options JWTOptions) (Middleware, error) {
 				rejectJWT(w)
 				return
 			}
-			claims, err := v.verify(tokenString)
+			claims, err := v.verify(r.Context(), tokenString)
 			if err != nil {
 				telemetry.MarkError(r.Context(), "jwt_unauthorized")
 				rejectJWT(w)
@@ -202,8 +212,11 @@ func newJWTVerifier(options JWTOptions) (*jwtVerifier, error) {
 		}
 	}
 	v := &jwtVerifier{opts: options, client: &http.Client{
-		Timeout: 5 * time.Second,
+		Timeout: jwtRefreshTimeout,
 		CheckRedirect: func(request *http.Request, via []*http.Request) error {
+			if len(via) >= 10 {
+				return errors.New("too many jwks redirects")
+			}
 			if request.URL.Scheme != "https" {
 				return errors.New("jwks redirect must remain HTTPS")
 			}
@@ -266,7 +279,7 @@ func supportedJWTAlgorithm(algorithm string) bool {
 	}
 }
 
-func (v *jwtVerifier) verify(raw string) (map[string]any, error) {
+func (v *jwtVerifier) verify(ctx context.Context, raw string) (map[string]any, error) {
 	parts := strings.Split(raw, ".")
 	if len(parts) != 3 || len(parts[0]) == 0 || len(parts[1]) == 0 || len(parts[2]) == 0 {
 		return nil, errors.New("invalid jwt compact form")
@@ -301,7 +314,7 @@ func (v *jwtVerifier) verify(raw string) (map[string]any, error) {
 		if token.Method.Alg() != header.Algorithm {
 			return nil, errors.New("jwt algorithm mismatch")
 		}
-		return v.key(header.KeyID, header.Algorithm)
+		return v.key(ctx, header.KeyID, header.Algorithm)
 	}, parserOptions...)
 	if err != nil || token == nil || !token.Valid {
 		return nil, errors.New("jwt verification failed")
@@ -326,19 +339,22 @@ func valueString(value any) string {
 	return fmt.Sprint(value)
 }
 
-func (v *jwtVerifier) key(kid, algorithm string) (any, error) {
+func (v *jwtVerifier) key(ctx context.Context, kid, algorithm string) (any, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if v.staticKey != nil {
 		if !keyMatchesAlgorithm(v.staticKey, algorithm) {
 			return nil, errors.New("jwt key type does not match algorithm")
 		}
 		return v.staticKey, nil
 	}
-	if err := v.refresh(false); err != nil {
+	if err := v.refresh(ctx, false); err != nil {
 		return nil, err
 	}
 	key, ok := v.cachedKey(kid, algorithm)
 	if !ok {
-		if err := v.refresh(true); err != nil {
+		if err := v.refresh(ctx, true); err != nil {
 			return nil, err
 		}
 		key, ok = v.cachedKey(kid, algorithm)
@@ -355,6 +371,9 @@ func (v *jwtVerifier) key(kid, algorithm string) (any, error) {
 func (v *jwtVerifier) cachedKey(kid, algorithm string) (jwkKey, bool) {
 	v.cacheMu.Lock()
 	defer v.cacheMu.Unlock()
+	if !time.Now().Before(v.staleUntil) {
+		return jwkKey{}, false
+	}
 	key, ok := v.keys[kid]
 	if !ok && kid == "" && len(v.keys) == 1 {
 		for _, candidate := range v.keys {
@@ -408,48 +427,88 @@ type jwkKey struct {
 	algorithm string
 }
 
-func (v *jwtVerifier) refresh(force bool) error {
+func (v *jwtVerifier) refresh(ctx context.Context, force bool) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	v.cacheMu.Lock()
+	now := time.Now()
+	if len(v.keys) > 0 && ((!force && now.Before(v.fetchedAt.Add(jwtKeyTTL))) ||
+		(force && now.Before(v.fetchedAt.Add(30*time.Second)))) {
+		v.cacheMu.Unlock()
+		return nil
+	}
+	if now.Before(v.retryAfter) {
+		err := v.refreshErrorLocked(now, v.lastError)
+		v.cacheMu.Unlock()
+		return err
+	}
+	call := v.refreshing
+	if call == nil {
+		call = &jwtRefresh{done: make(chan struct{})}
+		v.refreshing = call
+		// A caller's cancellation must not cancel the refresh for other waiters.
+		// At most one bounded network operation exists per verifier.
+		go v.fetchAndPublish(call)
+	}
+	v.cacheMu.Unlock()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-call.done:
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		return call.err
+	}
+}
+
+// Called with cacheMu held. Failure does not extend the stale-key deadline.
+func (v *jwtVerifier) refreshErrorLocked(now time.Time, err error) error {
+	if len(v.keys) > 0 && now.Before(v.staleUntil) {
+		return nil
+	}
+	return err
+}
+
+func (v *jwtVerifier) fetchAndPublish(call *jwtRefresh) {
+	ctx, cancel := context.WithTimeout(context.Background(), jwtRefreshTimeout)
+	defer cancel()
+	keys, err := v.fetchKeys(ctx)
 	v.cacheMu.Lock()
 	defer v.cacheMu.Unlock()
 	now := time.Now()
-	if !force && len(v.keys) > 0 && now.Before(v.fetchedAt.Add(jwtKeyTTL)) {
-		return nil
+	if err == nil {
+		v.keys, v.fetchedAt, v.staleUntil = keys, now, now.Add(jwtStaleTTL)
+		v.lastError, v.retryAfter = nil, time.Time{}
+	} else {
+		v.lastError, v.retryAfter = err, now.Add(jwtRefreshBackoff)
+		call.err = v.refreshErrorLocked(now, err)
 	}
-	if force && len(v.keys) > 0 && now.Sub(v.fetchedAt) < 30*time.Second {
-		return nil
-	}
-	request, err := http.NewRequest(http.MethodGet, v.opts.JWKSURL, nil)
+	v.refreshing = nil
+	close(call.done)
+}
+
+func (v *jwtVerifier) fetchKeys(ctx context.Context) (map[string]jwkKey, error) {
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, v.opts.JWKSURL, nil)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	response, err := v.client.Do(request)
 	if err != nil {
-		if len(v.keys) > 0 && now.Before(v.staleUntil) {
-			return nil
-		}
-		return err
+		return nil, err
 	}
 	defer response.Body.Close()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		if len(v.keys) > 0 && now.Before(v.staleUntil) {
-			return nil
-		}
-		return fmt.Errorf("jwks endpoint returned status %d", response.StatusCode)
+		return nil, fmt.Errorf("jwks endpoint returned status %d", response.StatusCode)
 	}
-	limited := io.LimitReader(response.Body, maxJWKSBytes+1)
-	data, err := io.ReadAll(limited)
+	data, err := io.ReadAll(io.LimitReader(response.Body, maxJWKSBytes+1))
 	if err != nil || len(data) > maxJWKSBytes || hasDuplicateJSONKeys(data) {
-		if len(v.keys) > 0 && now.Before(v.staleUntil) {
-			return nil
-		}
-		return errors.New("invalid jwks response")
+		return nil, errors.New("invalid jwks response")
 	}
 	var document jwkDocument
 	if err := json.Unmarshal(data, &document); err != nil || len(document.Keys) == 0 {
-		if len(v.keys) > 0 && now.Before(v.staleUntil) {
-			return nil
-		}
-		return errors.New("invalid jwks response")
+		return nil, errors.New("invalid jwks response")
 	}
 	keys := make(map[string]jwkKey, len(document.Keys))
 	for _, item := range document.Keys {
@@ -461,18 +520,14 @@ func (v *jwtVerifier) refresh(force bool) error {
 			continue
 		}
 		if _, exists := keys[item.Kid]; exists {
-			return errors.New("jwks contains duplicate key ids")
+			return nil, errors.New("jwks contains duplicate key ids")
 		}
 		keys[item.Kid] = jwkKey{key: key, algorithm: item.Alg}
 	}
 	if len(keys) == 0 {
-		if len(v.keys) > 0 && now.Before(v.staleUntil) {
-			return nil
-		}
-		return errors.New("jwks contains no usable signing keys")
+		return nil, errors.New("jwks contains no usable signing keys")
 	}
-	v.keys, v.fetchedAt, v.staleUntil = keys, now, now.Add(jwtStaleTTL)
-	return nil
+	return keys, nil
 }
 
 func parseJWK(item jwk) (any, error) {

@@ -6,7 +6,7 @@ const admin = { target: "http://127.0.0.1:9090", changeOrigin: false };
 function consoleBase(value?: string): string {
   if (!value) return "/";
   const trimmed = value.trim();
-  if (!/^\/[A-Za-z0-9._/-]*$/.test(trimmed) || trimmed.includes("//")) {
+  if (!/^\/[A-Za-z0-9._/-]*$/.test(trimmed) || trimmed.includes("//") || trimmed.split("/").some(part => part === "." || part === "..")) {
     throw new Error("JANUS_UI_BASE_URL must be empty or an absolute URL path, such as /janus");
   }
   return trimmed === "/" ? "/" : `${trimmed.replace(/\/+$/, "")}/`;
@@ -14,12 +14,12 @@ function consoleBase(value?: string): string {
 
 // Development only: the production console is served by Janus itself. Keeping
 // these paths same-origin in Vite avoids a separate CORS/authentication mode.
-export default defineConfig(({ mode }) => {
+export default defineConfig(({ mode, command }) => {
   const base = consoleBase(loadEnv(mode, process.cwd(), "").JANUS_UI_BASE_URL);
   const proxyBase = base === "/" ? "" : base.slice(0, -1);
   const apiPrefix = `${proxyBase}/api`;
   return {
-    base,
+    base: command === "build" ? "./" : base,
     plugins: [react()],
     build: {
       rollupOptions: {

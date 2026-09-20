@@ -1,6 +1,8 @@
 import { ApiError, type ConfigSnapshot, type JanusConfig, type MetricsSummary, type MiddlewareCapability, type NacosRegistry } from "./types";
 
-const consoleBase = import.meta.env.BASE_URL === "/" ? "" : import.meta.env.BASE_URL.replace(/\/$/, "");
+// Janus supplies <base href=".../"> at runtime. The same bundle can therefore
+// serve any mount without compiling API/EventSource URLs into the JavaScript.
+const consoleBase = new URL(".", document.baseURI).pathname.replace(/\/$/, "");
 
 export function apiPath(path: string): string {
   return `${consoleBase}${path}`;

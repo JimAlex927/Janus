@@ -47,3 +47,46 @@ func TestCompressNegotiationAndSkip(t *testing.T) {
 		t.Fatalf("q=0 was compressed: %v %q", rr.Header(), rr.Body.String())
 	}
 }
+
+func TestCompressExplicitGzipExclusionOverridesWildcard(t *testing.T) {
+	for _, value := range []string{"gzip;q=0, *;q=1", "*;q=1, gzip;q=0"} {
+		t.Run(value, func(t *testing.T) {
+			h := Compress(CompressOptions{})(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_, _ = io.WriteString(w, "hello")
+			}))
+			r := httptest.NewRequest(http.MethodGet, "/", nil)
+			r.Header.Set("Accept-Encoding", value)
+			w := httptest.NewRecorder()
+			h.ServeHTTP(w, r)
+			if w.Header().Get("Content-Encoding") != "" || w.Body.String() != "hello" {
+				t.Fatalf("explicitly forbidden gzip used: headers=%v body=%q", w.Header(), w.Body.String())
+			}
+		})
+	}
+}
+
+func TestGzipNegotiationAcrossHeaderValues(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		values []string
+		want   bool
+	}{
+		{"absent", nil, false},
+		{"wildcard", []string{"*;q=0.5"}, true},
+		{"explicit allows", []string{"*;q=0", "gzip;q=0.5"}, true},
+		{"explicit forbids", []string{"*;q=1", "gzip;q=0"}, false},
+		{"explicit forbids reversed", []string{"gzip;q=0", "*;q=1"}, false},
+		{"other coding", []string{"br"}, false},
+		{"invalid quality", []string{"gzip;q=invalid", "*"}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := httptest.NewRequest(http.MethodGet, "/", nil)
+			for _, value := range tc.values {
+				r.Header.Add("Accept-Encoding", value)
+			}
+			if got := acceptsGzip(r); got != tc.want {
+				t.Fatalf("acceptsGzip(%v) = %v, want %v", tc.values, got, tc.want)
+			}
+		})
+	}
+}

@@ -6,12 +6,14 @@ for production.
 The target Linux VM is being prepared by the operator. Windows tests and Linux
 cross-compilation do not satisfy Linux execution or deployment gates.
 
-The release toolchain is pinned to Go 1.25.14 in CI. The module's `go 1.25.13`
-directive is the minimum compatibility floor, not the release toolchain
-selection. The local development host currently runs Go 1.26.5; its
-`govulncheck` result must not be used as release evidence because that patch
-line has seven standard-library findings fixed in Go 1.26.6. Release approval
-requires the pinned Go 1.25.14 CI scan to complete successfully.
+As of 2026-09-20, CI and the module's recommended toolchain select Go 1.26.8.
+The `go 1.25.13` directive remains the compatibility floor, not the release
+toolchain selection. A fresh scan on the system Go 1.26.5 confirmed seven
+reachable standard-library findings fixed in Go 1.26.6. Go 1.26.8 is the latest
+patch in the supported 1.26 line at this review, according to the
+[official release history](https://go.dev/doc/devel/release). Local use of the
+downloaded toolchain does not replace the system Go installation. Release
+approval still requires the pinned Linux CI scan and deployment gates.
 
 ## Candidate support boundary
 

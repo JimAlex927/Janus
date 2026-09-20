@@ -2,6 +2,8 @@ module janus
 
 go 1.25.13
 
+toolchain go1.26.8
+
 require (
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/nacos-group/nacos-sdk-go/v2 v2.3.5

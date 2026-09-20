@@ -93,3 +93,31 @@ func TestMetricsSummaryClassifiesResponseFamilies(t *testing.T) {
 		}
 	}
 }
+
+func TestMetricsSummaryCountsEachRequestOnceAcrossAdmissionScopes(t *testing.T) {
+	m := NewMetrics()
+	// One request holds a permit at each of these nested admission gates.
+	m.AddInFlight("global", "", 1)
+	m.AddInFlight("route", "api", 1)
+	m.AddInFlight("service", "orders", 1)
+	if got := m.Summary().InFlight; got != 1 {
+		t.Fatalf("in-flight requests = %d, want 1", got)
+	}
+	// Scoped metrics remain independently available to operators.
+	output := string(m.Render(nil))
+	for _, expected := range []string{
+		`janus_in_flight_requests{scope="global",service=""} 1`,
+		`janus_in_flight_requests{scope="route",service="api"} 1`,
+		`janus_in_flight_requests{scope="service",service="orders"} 1`,
+	} {
+		if !strings.Contains(output, expected) {
+			t.Fatalf("missing scope gauge: %s", expected)
+		}
+	}
+	m.AddInFlight("service", "orders", -1)
+	m.AddInFlight("route", "api", -1)
+	m.AddInFlight("global", "", -1)
+	if got := m.Summary().InFlight; got != 0 {
+		t.Fatalf("after release = %d, want 0", got)
+	}
+}

@@ -26,10 +26,24 @@ console API requires the configured session when credentials are present.
 
 The console can be mounted below a path when it shares a host with other
 applications. Build with `JANUS_UI_BASE_URL=/janus ./scripts/build-app.sh` (or
-set the same environment variable before the PowerShell build). The generated
-assets, browser API requests, event stream and embedded Admin handler all use
-`/janus/`; `/livez`, `/readyz` and `/metrics` remain at the admin listener
-root. Leave `JANUS_UI_BASE_URL` empty for the default root deployment.
+set the same environment variable before the PowerShell build). Go sets the
+mount in a runtime HTML `<base>` element; production JS/CSS references are
+relative and API/EventSource URLs use `document.baseURI`. A single frontend
+bundle therefore works at `/`, `/janus/`, or a nested prefix. HTML is served
+with `Cache-Control: no-store`. `/livez`, `/readyz` and `/metrics` remain at
+the admin listener root. Leave `JANUS_UI_BASE_URL` empty for the default root
+deployment. The Go `Options.UIBaseURL` value `/` explicitly overrides a compiled
+prefix; the empty value inherits it. Dot/empty segments are not supported.
+
+A reverse proxy must preserve this prefix. Do not combine a `/janus`-mounted
+admin binary with a proxy that strips `/janus` before forwarding. The local
+example configuration is deployment-specific and is not rewritten by builds.
+
+The admin SSE endpoint replaces the server's whole-response write deadline
+with a five-second budget for each event/heartbeat write and flush. A healthy
+idle stream can therefore outlive `server.write_timeout`; a failed write or
+flush terminates the handler and releases its subscription. This is the
+private console event stream, not a change to gateway route stream budgets.
 
 Generate a replacement hash without putting the password in shell history:
 
@@ -141,13 +155,18 @@ cp frontend/dist/assets/* internal/admin/ui/assets/
 ```
 
 CI runs the same build and comparison before the Go release gate. The tracked
-`internal/admin/ui` files are the release source of truth for `go:embed`; a
-successful frontend build alone does not update them.
+`internal/admin/ui` files are used by ordinary `go build` and `go test`; a
+successful frontend build alone does not update them. The release scripts
+instead build fresh assets and copy Go source into a temporary directory,
+assemble the embed there, and remove that temporary tree after building.
+Neither a root nor a prefixed release build modifies the tracked embed.
+The shell and PowerShell launchers share `scripts/build-app.mjs` and emit an
+adjacent JSON manifest recording inputs and hashes.
 
 The Vite development server proxies `/api`, `/livez`, `/readyz`, and `/metrics`
-to the local Admin listener at `127.0.0.1:9090`. A release build is copied to `internal/admin/ui/` before
-`go build` so the Go `embed` package has the same UI that was reviewed in the
-frontend build. The typed API client, config model helpers, request simulator,
+to the local Admin listener at `127.0.0.1:9090`. A prefixed Vite dev server strips
+its own prefix when proxying to a root-mounted local admin. Production does not
+use this development proxy. The typed API client, config model helpers, request simulator,
 node canvas editor, and per-resource drawer editors are kept in separate
 modules.
 

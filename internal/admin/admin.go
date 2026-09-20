@@ -103,7 +103,7 @@ func NewHandlerWithOptions(options Options) http.Handler {
 		options.State = NewState()
 	}
 	baseURL := normalizeUIBaseURL(options.UIBaseURL)
-	if baseURL == "" {
+	if strings.TrimSpace(options.UIBaseURL) == "" {
 		baseURL = normalizeUIBaseURL(uiBaseURL)
 	}
 	cookiePath := "/"
@@ -150,6 +150,11 @@ func normalizeUIBaseURL(value string) string {
 		return ""
 	}
 	value = strings.TrimRight(value, "/")
+	for _, segment := range strings.Split(value, "/") {
+		if segment == "." || segment == ".." {
+			return ""
+		}
+	}
 	if value == "" {
 		return ""
 	}
@@ -208,6 +213,10 @@ func (h *Handler) ui(w http.ResponseWriter, r *http.Request) {
 	}
 	if strings.HasSuffix(path, ".html") {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-store")
+		// cookiePath is the validated, slash-terminated console mount. Insert
+		// before any resource references so assets and API URLs share one base.
+		data = []byte(strings.Replace(string(data), "<head>", `<head><base href="`+h.cookiePath+`">`, 1))
 	}
 	if strings.HasSuffix(path, ".js") {
 		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
@@ -425,15 +434,35 @@ func (h *Handler) events(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
-	flusher, ok := w.(http.Flusher)
+	_, ok := w.(http.Flusher)
 	if !ok {
 		http.Error(w, "streaming unavailable", 500)
 		return
 	}
 	ch, cancel := h.subscribe()
 	defer cancel()
-	_, _ = fmt.Fprintf(w, "event: ready\ndata: {\"revision\":%d}\n\n", h.revisionValue())
-	flusher.Flush()
+	controller := http.NewResponseController(w)
+	writeEvent := func(message string) error {
+		// The server's WriteTimeout is a whole-response deadline, unsuitable
+		// for a persistent event stream. Bound each write/flush instead, and
+		// clear the deadline between events. Slow readers still cannot pin us.
+		if err := controller.SetWriteDeadline(time.Now().Add(5 * time.Second)); err != nil && !errors.Is(err, http.ErrNotSupported) {
+			return err
+		}
+		if _, err := io.WriteString(w, message); err != nil {
+			return err
+		}
+		if err := controller.Flush(); err != nil {
+			return err
+		}
+		if err := controller.SetWriteDeadline(time.Time{}); err != nil && !errors.Is(err, http.ErrNotSupported) {
+			return err
+		}
+		return nil
+	}
+	if err := writeEvent(fmt.Sprintf("event: ready\ndata: {\"revision\":%d}\n\n", h.revisionValue())); err != nil {
+		return
+	}
 	ticker := time.NewTicker(15 * time.Second)
 	defer ticker.Stop()
 	for {
@@ -445,11 +474,13 @@ func (h *Handler) events(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			data, _ := json.Marshal(event)
-			_, _ = fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event.Type, data)
-			flusher.Flush()
+			if err := writeEvent(fmt.Sprintf("event: %s\ndata: %s\n\n", event.Type, data)); err != nil {
+				return
+			}
 		case <-ticker.C:
-			_, _ = io.WriteString(w, ": keep-alive\n\n")
-			flusher.Flush()
+			if err := writeEvent(": keep-alive\n\n"); err != nil {
+				return
+			}
 		}
 	}
 }

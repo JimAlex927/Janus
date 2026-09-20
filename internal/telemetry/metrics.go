@@ -120,9 +120,9 @@ func (m *Metrics) Summary() Summary {
 	for _, count := range m.requests {
 		summary.Requests += count
 	}
-	for _, count := range m.inFlight {
-		summary.InFlight += count
-	}
+	// Route and service gauges count permits nested inside global admission.
+	// Summing scopes would count the same request two or three times.
+	summary.InFlight = m.inFlight[inFlightMetricKey{scope: "global"}]
 	return summary
 }
 

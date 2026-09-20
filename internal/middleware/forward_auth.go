@@ -222,6 +222,17 @@ func copyAuthHeader(destination, source http.Header, name string) {
 }
 
 func copyAuthResponseHeaders(destination, source http.Header, allowed map[string]struct{}, pattern *regexp.Regexp) {
+	// Selected headers belong to the authentication service. Remove client
+	// values even when the successful auth response omits a selected header.
+	for name := range destination {
+		_, selected := allowed[http.CanonicalHeaderKey(name)]
+		if pattern != nil && pattern.MatchString(name) {
+			selected = true
+		}
+		if selected && validForwardAuthHeader(name) {
+			delete(destination, name)
+		}
+	}
 	for name, values := range source {
 		canonical := http.CanonicalHeaderKey(name)
 		_, selected := allowed[canonical]

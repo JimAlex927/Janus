@@ -124,6 +124,7 @@ func (w *compressResponseWriter) close() {
 func (w *compressResponseWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
 
 func acceptsGzip(r *http.Request) bool {
+	var gzipListed, gzipAllowed, wildcardAllowed bool
 	for _, value := range r.Header.Values("Accept-Encoding") {
 		for _, part := range strings.Split(value, ",") {
 			pieces := strings.Split(strings.TrimSpace(part), ";")
@@ -146,12 +147,19 @@ func acceptsGzip(r *http.Request) bool {
 					}
 				}
 			}
-			if quality > 0 {
-				return true
+			if coding == "gzip" {
+				gzipListed = true
+				gzipAllowed = quality > 0
+			} else {
+				wildcardAllowed = quality > 0
 			}
 		}
 	}
-	return false
+	// A wildcard only applies to codings that were not explicitly listed.
+	if gzipListed {
+		return gzipAllowed
+	}
+	return wildcardAllowed
 }
 
 func isUpgrade(r *http.Request) bool {

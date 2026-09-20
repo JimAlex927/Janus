@@ -51,8 +51,8 @@ go vet ./...
 go build -o bin/janus ./cmd/janus
 ```
 
-To build the Admin Console, refresh the tracked `go:embed` assets, and compile
-a small static Janus executable in one step:
+To build the Admin Console and compile a small static Janus executable in an
+isolated temporary source tree (without rewriting tracked `go:embed` assets):
 
 ```sh
 ./scripts/build-app.sh
@@ -66,6 +66,13 @@ dependency install. The build uses `CGO_ENABLED=0`, `-trimpath`, and stripped
 linker metadata (`-s -w -buildid=`). `JANUS_UPX=1` enables optional UPX
 compression when `upx` is installed.
 
+Each build writes `<output>.manifest.json` with commit/dirty state, toolchain,
+target, UI mount, linker flags, UI hashes and the binary SHA-256. These are
+build provenance records, not a claim that a dirty tree is release-qualified.
+The release CI pins Go 1.26.8; `go.mod` recommends the same toolchain. For an
+exact local match use `GOTOOLCHAIN=go1.26.8 ./scripts/build-app.sh`. Go 1.26.5
+failed the 2026-09-20 vulnerability scan and must not be used for release.
+
 On Windows, run the equivalent PowerShell 7 script from the repository root:
 
 ```powershell
@@ -77,9 +84,14 @@ It produces `bin\janus.exe` by default and accepts the same
 environment variables.
 
 Set `JANUS_UI_BASE_URL=/janus` before either build command to mount the Admin
-Console below `/janus/`. The built console uses that prefix for assets, API
-requests and events, and the resulting Janus binary serves the same prefix.
-Leave it empty for the default root deployment.
+Console below `/janus/`. The Go handler supplies the mount in the HTML base;
+the same portable frontend assets resolve API requests and events at that
+mount. Leave it empty for the default root deployment. Reverse proxies must
+preserve the configured mount path, not strip it.
+
+Run `node scripts/smoke-console.mjs bin/janus /janus` (or `/` for the default)
+to check the actual binary's resources, login, cookie path, API, SSE and logout
+using temporary local configuration and a disposable test account.
 
 The Linux release gate is reproducible from a checked-out commit:
 

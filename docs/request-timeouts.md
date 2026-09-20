@@ -2,6 +2,8 @@
 
 本文以当前实现为准，说明 Janus 从接收连接到执行 Route action 的完整链路，以及 HTTP、静态文件、SSE、WebSocket 分别受哪些参数控制。
 
+如果需要先理解 Listener、TLS handshake、HTTP Keep-Alive、Runtime generation 和后端连接池之间的关系，见 [Janus 请求栈、Keep-Alive、TLS 与配置热更新](./request-stack-keepalive-reload.md)。
+
 相关实现主要位于：
 
 - `internal/limen/limen.go`
@@ -123,7 +125,104 @@ SSE 是普通 HTTP response 的流式写入形式，可以运行在项目支持�
 
 分类依据是请求方法和 Header，不是 Route action。`static` action 通常属于普通 HTTP，但它不会因为 action 类型自动获得独立的超时策略；如果要让文件下载拥有更长时间，应在该 Route 上覆盖参数。
 
-## 完整时序图
+## HTTP 与 SSE 到底在哪里分流
+
+SSE 并没有在 Listener、TLS 或 `http.Server` 层切换成另一种服务器。对于这些层来说，普通 HTTP 和 SSE 都只是一个 `http.Request`；差异直到 Router 查看请求方法和 Header 时才出现。
+
+代码没有生成一个永久保存的“请求类型”字段供后续所有层读取，而是在两个位置使用同一组判断函数：
+
+1. Router 的 `requestFacts` 先调用 `IsWebSocketRequest` / `WantsSSE`，得到 `Facts.Protocol = http | sse | websocket`，供 `Protocol(...)` Route 规则选择 Route；
+2. Route 选定后，`Timeout`、`StreamTimeout`、`ClearStreamingWriteDeadline` 再调用相同函数，决定当前 middleware 是执行控制逻辑还是直接 `next.ServeHTTP`。
+
+因此图里的“分支”只是 handler 行为分支，不是 TCP 连接分支，也不是另开一个 SSE Server：
+
+```mermaid
+flowchart TD
+    A[已有连接或新连接上的字节] --> B[HTTP Server 解析出一个 http.Request]
+    B --> C[Runtime 全局链]
+    C --> D[dispatch 获取当前 generation]
+    D --> E[Router.requestFacts]
+
+    E --> W{经典 HTTP/1 WebSocket Upgrade?}
+    W -- 是 --> WP[Protocol = websocket]
+    W -- 否 --> S{GET 且 Accept 包含 text/event-stream?}
+    S -- 是 --> SP[Protocol = sse]
+    S -- 否 --> HP[Protocol = http]
+
+    WP --> RM[结合 Limen / Host / Path / Method / Protocol 匹配 Route]
+    SP --> RM
+    HP --> RM
+    RM --> RH[进入同一套 Route 固定内置链]
+
+    RH --> WT[WriteTimeout 先设置当前响应写 deadline]
+    WT --> T{Timeout 再判断请求类型}
+    T -- 普通 HTTP --> TC[创建 maximum_duration Context]
+    T -- SSE 或 WebSocket --> TB[不创建普通请求 timer，直接放行]
+
+    TC --> ST{StreamTimeout 再判断请求类型}
+    TB --> ST
+    ST -- 普通 HTTP --> SB[不创建流 timer，直接放行]
+    ST -- SSE 或 WebSocket --> SC[创建 max_duration / idle_timeout 控制]
+
+    SB --> CL{ClearStreamingWriteDeadline}
+    SC --> CL
+    CL -- 普通 HTTP --> H[保持有限写 deadline]
+    CL -- SSE 或 WebSocket --> L[清除有限写 deadline]
+    H --> X[Route middleware 和 Action]
+    L --> X
+```
+
+这里还有一个容易混淆的配置效果：如果 Route 写了 ``Protocol(`sse`)``，只有带正确 SSE 请求特征的请求才能匹配它；不带 `Accept: text/event-stream` 的同路径请求会被视为 `http`，需要另一个匹配普通 HTTP 的 Route，否则返回 404。Route 没写 `Protocol(...)` 时，它可以同时匹配普通 HTTP、SSE 和经典 WebSocket，后面的内置 middleware 仍会按请求实际特征选择各自行为。
+
+## 完整执行流程图
+
+下面的第 1–9 步是共同路径。第 10 步只做一次概念上的请求类型判断，然后进入三条**互斥**分支；HTTP 分支结束后不会继续进入 SSE，SSE 结束后也不会继续进入 WebSocket。代码中各 middleware 会独立重复相同判断，但执行效果等价于这张图。
+
+```mermaid
+flowchart TD
+    N1["1. Client 在新连接或 keep-alive 连接上发送请求"]
+    N2["2. Limen 接收数据；仅新 TLS 连接执行 handshake"]
+    N3["3. HTTP Server 解析 Header / Body，生成 http.Request"]
+    N4["4. 调用稳定的 Runtime.ServeHTTP"]
+    N5["5. Observe 记录请求状态"]
+    N6["6. RejectUnsupportedProtocols 检查协议"]
+    N7["7. Global Admission 获取全局许可"]
+    N8["8. dispatch acquire 当前 active generation"]
+    N9["9. Router 用请求特征形成 Protocol Fact并匹配 Route；进入 Route Admission和WriteTimeout"]
+    N10{"10. Route 内置链按相同请求特征三选一"}
+
+    N1 --> N2 --> N3 --> N4 --> N5 --> N6 --> N7 --> N8 --> N9 --> N10
+
+    N10 -- "普通 HTTP / static" --> H1["HTTP-A. Timeout 创建 maximum_duration Context"]
+    H1 --> H2["HTTP-B. StreamTimeout 直接放行"]
+    H2 --> H3["HTTP-C. Clear 不处理，保留有限写 deadline"]
+    H3 --> H4["HTTP-D. Route middleware → Action / Service → 可选 ReverseProxy"]
+    H4 --> H5["HTTP-E. 写完普通响应或文件"]
+
+    N10 -- "SSE" --> S1["SSE-A. Timeout 直接放行"]
+    S1 --> S2["SSE-B. StreamTimeout 创建 Context、max timer、idle timer"]
+    S2 --> S3["SSE-C. Clear 清除有限写 deadline"]
+    S3 --> S4["SSE-D. Route middleware → Action / Service → 可选 ReverseProxy"]
+    S4 --> S5["SSE-E. 提交 event-stream；每次 Write / Flush 重置 idle timer"]
+    S5 --> S6["SSE-F. handler 返回、客户端断开或 max / idle 超时后结束"]
+
+    N10 -- "经典 HTTP/1 WebSocket" --> W1["WS-A. Timeout 直接放行"]
+    W1 --> W2["WS-B. StreamTimeout 创建 Context、max timer、idle timer"]
+    W2 --> W3["WS-C. Clear 清除有限写 deadline"]
+    W3 --> W4["WS-D. Route / Service 执行 Upgrade 并 Hijack 连接"]
+    W4 --> W5["WS-E. 每次成功 Read / Write 重置 idle timer"]
+    W5 --> W6["WS-F. 对端关闭或 max / idle 超时后结束"]
+
+    H5 --> Z1["共同收尾：handler 返回"]
+    S6 --> Z1
+    W6 --> Z1
+    Z1 --> Z2["释放 Route Admission → release generation → 释放 Global Admission"]
+    Z2 --> Z3["HTTP keep-alive 可等待下一请求；SSE / WebSocket 本次流已结束"]
+```
+
+### 补充时序图
+
+下面保留时序图视角，便于观察 Client、Server、Runtime、Router 和 handler 之间的调用方向。`alt / else` 表示三条互斥路径；Mermaid 的自动编号会跨分支继续增加，但不表示 HTTP 分支结束后还会进入 SSE 或 WebSocket 分支。
 
 ```mermaid
 sequenceDiagram
@@ -136,27 +235,34 @@ sequenceDiagram
     participant H as Route Middleware / Action
     participant W as Response / Connection
 
-    C->>L: 建立连接并发送请求
-    Note over L: TCP: read_timeout + read_header_timeout<br/>连接空闲: server.idle_timeout
+    C->>L: 新建连接，或在 keep-alive 连接上发送一个新请求
+    Note over L: TLS 仅在新连接上握手<br/>HTTP Server 每个请求都重新解析 Header/Body
+    Note over L: TCP: read_timeout + read_header_timeout<br/>等待下一个请求: server.idle_timeout
     L->>G: ServeHTTP
     G->>G: Observe + 协议检查
     G->>G: 全局 Admission(request.max_in_flight)
-    G->>R: 匹配 Route
+    G->>R: dispatch 获取当前 generation
+    R->>R: requestFacts 判断 websocket / sse / http
+    R->>R: 结合 Limen、Host、Path、Method、Protocol 匹配 Route
     R->>B: 进入当前 Route 固定内置链
     B->>B: Route Admission(有效 max_in_flight)
     B->>W: WriteTimeout 设置有效写 deadline
 
     alt 普通 HTTP / 静态文件
-        B->>B: Timeout 创建 maximum_duration Context
-        B->>H: StreamTimeout 与 Clear 直接放行
+        B->>B: Timeout 再次判断为普通 HTTP
+        B->>B: 创建 maximum_duration Context
+        B->>B: StreamTimeout 判断为普通 HTTP，并直接放行
+        B->>H: Clear 不清除写 deadline，进入 handler
         H->>W: 写普通响应或文件
         W-->>C: HTTP response
         Note over B,W: maximum_duration 到期会取消 Context<br/>write_timeout 到期会使底层写入失败
     else SSE
-        B->>B: Timeout 直接放行
-        B->>B: StreamTimeout 创建 Context、max timer、idle timer
+        B->>B: Timeout 再次识别 SSE，并直接放行
+        B->>B: StreamTimeout 识别 SSE
+        B->>B: 创建可取消 Context、max timer、idle timer
         B->>W: Clear 清除当前响应写 deadline
         B->>H: 执行 handler
+        H->>W: 提交 Content-Type: text/event-stream
         loop 每次 Write 或 Flush 活动
             H->>W: 写入 SSE event
             W-->>B: 重置 idle timer
@@ -176,7 +282,7 @@ sequenceDiagram
     end
 
     B->>G: 释放 Route Admission
-    G->>G: 释放全局 Admission
+    G->>G: release generation，并释放全局 Admission
 ```
 
 ## 普通 HTTP 和静态文件

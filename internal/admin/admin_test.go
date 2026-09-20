@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"regexp"
 	"strings"
 	"testing"
@@ -12,6 +13,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 	"janus/internal/config"
 	"janus/internal/discovery"
+	janusruntime "janus/internal/runtime"
 	"janus/internal/telemetry"
 )
 
@@ -48,55 +50,124 @@ func TestHealthEndpointsFollowState(t *testing.T) {
 }
 
 func TestEmbeddedConsoleIsServed(t *testing.T) {
-	h := NewHandler(NewState())
-	w := httptest.NewRecorder()
-	h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/", nil))
-	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "Janus Console") {
-		t.Fatalf("console response = %d %q", w.Code, w.Body.String())
-	}
-	assets := regexp.MustCompile(`(?:src|href)="(/assets/[^"]+)"`).FindAllStringSubmatch(w.Body.String(), -1)
-	if len(assets) == 0 {
-		t.Fatal("console HTML does not reference any assets")
-	}
-	for _, match := range assets {
-		asset := httptest.NewRecorder()
-		h.ServeHTTP(asset, httptest.NewRequest(http.MethodGet, match[1], nil))
-		if asset.Code != http.StatusOK || asset.Body.Len() == 0 {
-			t.Fatalf("embedded asset %s = status %d, length %d", match[1], asset.Code, asset.Body.Len())
-		}
-	}
+	testConsoleMount(t, "/")
 }
 
 func TestEmbeddedConsoleCanMountBelowBuildBaseURL(t *testing.T) {
+	for _, base := range []string{"/janus", "/ops/janus/"} {
+		t.Run(base, func(t *testing.T) { testConsoleMount(t, base) })
+	}
+}
+
+func testConsoleMount(t *testing.T, base string) {
+	t.Helper()
+	hash, err := bcrypt.GenerateFromPassword([]byte("secret"), bcrypt.MinCost)
+	if err != nil {
+		t.Fatal(err)
+	}
 	h := NewHandlerWithOptions(Options{
-		State: NewState(), UIBaseURL: "/janus",
+		State: NewState(), UIBaseURL: base,
+		Subscribe: func() (<-chan janusruntime.Event, func()) {
+			ch := make(chan janusruntime.Event)
+			close(ch)
+			return ch, func() {}
+		},
 		Current: func() config.Config {
-			return config.Config{Settings: config.Settings{Admin: config.AdminSettings{Username: "admin", PasswordHash: "configured"}}}
+			return config.Config{Settings: config.Settings{Admin: config.AdminSettings{Username: "admin", PasswordHash: string(hash)}}}
 		},
 	})
-	redirect := httptest.NewRecorder()
-	h.ServeHTTP(redirect, httptest.NewRequest(http.MethodGet, "/janus", nil))
-	if redirect.Code != http.StatusTemporaryRedirect || redirect.Header().Get("Location") != "/janus/" {
-		t.Fatalf("base redirect = %d %q", redirect.Code, redirect.Header().Get("Location"))
+	mount := strings.TrimRight(base, "/") + "/"
+	if mount != "/" {
+		redirect := httptest.NewRecorder()
+		h.ServeHTTP(redirect, httptest.NewRequest(http.MethodGet, strings.TrimRight(base, "/"), nil))
+		if redirect.Code != http.StatusTemporaryRedirect || redirect.Header().Get("Location") != mount {
+			t.Fatalf("base redirect = %d %q", redirect.Code, redirect.Header().Get("Location"))
+		}
 	}
-	page := httptest.NewRecorder()
-	h.ServeHTTP(page, httptest.NewRequest(http.MethodGet, "/janus/", nil))
-	if page.Code != http.StatusOK || !strings.Contains(page.Body.String(), "Janus Console") {
-		t.Fatalf("prefixed console = %d %q", page.Code, page.Body.String())
+	for _, pagePath := range []string{mount, mount + "index.html"} {
+		page := httptest.NewRecorder()
+		pageURL, _ := url.Parse("http://console.test" + pagePath)
+		h.ServeHTTP(page, httptest.NewRequest(http.MethodGet, pageURL.String(), nil))
+		if page.Code != http.StatusOK || page.Header().Get("Cache-Control") != "no-store" {
+			t.Fatalf("console = %d %q", page.Code, page.Body.String())
+		}
+		baseTag := regexp.MustCompile(`<base href="([^"]+)">`).FindStringSubmatch(page.Body.String())
+		if len(baseTag) != 2 || baseTag[1] != mount {
+			t.Fatalf("base tag = %v", baseTag)
+		}
+		baseRef, _ := url.Parse(baseTag[1])
+		documentBase := pageURL.ResolveReference(baseRef)
+		assets := regexp.MustCompile(`(?:src|href)="([^"]*assets/[^"]+)"`).FindAllStringSubmatch(page.Body.String(), -1)
+		if len(assets) < 2 {
+			t.Fatal("console is missing JS/CSS references")
+		}
+		for _, match := range assets {
+			ref, err := url.Parse(match[1])
+			if err != nil {
+				t.Fatal(err)
+			}
+			// Browser URL resolution; never manually prepend the expected mount.
+			assetURL := documentBase.ResolveReference(ref)
+			asset := httptest.NewRecorder()
+			h.ServeHTTP(asset, httptest.NewRequest(http.MethodGet, assetURL.String(), nil))
+			if asset.Code != http.StatusOK || asset.Body.Len() == 0 {
+				t.Fatalf("asset %s = %d, length %d", assetURL, asset.Code, asset.Body.Len())
+			}
+		}
 	}
-	assetPath := regexp.MustCompile(`(?:src|href)="(/assets/[^"]+)"`).FindStringSubmatch(page.Body.String())
-	if len(assetPath) != 2 {
-		t.Fatal("console HTML does not reference an asset")
+	for _, endpoint := range []string{"config", "events"} {
+		api := httptest.NewRecorder()
+		h.ServeHTTP(api, httptest.NewRequest(http.MethodGet, mount+"api/v1/"+endpoint, nil))
+		if api.Code != http.StatusUnauthorized {
+			t.Fatalf("%s = %d, want 401", endpoint, api.Code)
+		}
 	}
-	asset := httptest.NewRecorder()
-	h.ServeHTTP(asset, httptest.NewRequest(http.MethodGet, "/janus"+assetPath[1], nil))
-	if asset.Code != http.StatusOK || asset.Body.Len() == 0 {
-		t.Fatalf("prefixed asset = %d, length %d", asset.Code, asset.Body.Len())
+	login := httptest.NewRecorder()
+	h.ServeHTTP(login, httptest.NewRequest(http.MethodPost, mount+"api/v1/auth/login", strings.NewReader(`{"username":"admin","password":"secret"}`)))
+	cookies := login.Result().Cookies()
+	if login.Code != http.StatusOK || len(cookies) != 1 || cookies[0].Path != mount {
+		t.Fatalf("login = %d, cookies %v", login.Code, cookies)
 	}
 	api := httptest.NewRecorder()
-	h.ServeHTTP(api, httptest.NewRequest(http.MethodGet, "/janus/api/v1/config", nil))
+	req := httptest.NewRequest(http.MethodGet, mount+"api/v1/config", nil)
+	req.AddCookie(cookies[0])
+	h.ServeHTTP(api, req)
+	if api.Code != http.StatusOK {
+		t.Fatalf("authenticated config = %d", api.Code)
+	}
+	events := httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, mount+"api/v1/events", nil)
+	req.AddCookie(cookies[0])
+	h.ServeHTTP(events, req)
+	if events.Header().Get("Content-Type") != "text/event-stream" || !strings.Contains(events.Body.String(), "event: ready") {
+		t.Fatalf("mounted events = %d %q", events.Code, events.Body.String())
+	}
+	logout := httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, mount+"api/v1/auth/logout", nil)
+	req.AddCookie(cookies[0])
+	h.ServeHTTP(logout, req)
+	cleared := logout.Result().Cookies()
+	if len(cleared) != 1 || cleared[0].Path != mount || cleared[0].MaxAge >= 0 {
+		t.Fatalf("logout did not clear mounted cookie: %v", cleared)
+	}
+	api = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, mount+"api/v1/config", nil)
+	req.AddCookie(cookies[0])
+	h.ServeHTTP(api, req)
 	if api.Code != http.StatusUnauthorized {
-		t.Fatalf("prefixed API = %d, want 401", api.Code)
+		t.Fatalf("logged-out config = %d", api.Code)
+	}
+}
+
+func TestExplicitRootOverridesCompiledConsoleMount(t *testing.T) {
+	previous := uiBaseURL
+	uiBaseURL = "/compiled"
+	t.Cleanup(func() { uiBaseURL = previous })
+	testConsoleMount(t, "/")
+	page := httptest.NewRecorder()
+	NewHandler(NewState()).ServeHTTP(page, httptest.NewRequest(http.MethodGet, "/compiled/", nil))
+	if page.Code != http.StatusOK || !strings.Contains(page.Body.String(), `<base href="/compiled/">`) {
+		t.Fatalf("compiled default = %d %q", page.Code, page.Body.String())
 	}
 }
 
