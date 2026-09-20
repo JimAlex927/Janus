@@ -585,6 +585,12 @@ func (h *Handler) saveSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	merged := h.current()
+	// The admin console deliberately receives a redacted password_hash. Keep
+	// the active bcrypt hash when saving unrelated global settings, otherwise a
+	// normal settings edit would leave username configured without its hash.
+	if settings.Admin.PasswordHash == "" {
+		settings.Admin.PasswordHash = merged.Settings.Admin.PasswordHash
+	}
 	merged.Settings = settings
 	merged = merged.WithDefaults()
 	if err := merged.Validate(); err != nil {

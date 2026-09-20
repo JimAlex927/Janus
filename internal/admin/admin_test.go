@@ -184,6 +184,51 @@ func TestAdminLoginProtectsConfigurationPublishing(t *testing.T) {
 	}
 }
 
+func TestSaveSettingsInheritsRedactedAdminPasswordHash(t *testing.T) {
+	hash, err := bcrypt.GenerateFromPassword([]byte("secret"), bcrypt.MinCost)
+	if err != nil {
+		t.Fatal(err)
+	}
+	current := config.Config{
+		Version: config.CurrentConfigVersion,
+		Limens: map[string]config.LimenConfig{
+			"public": {Address: "127.0.0.1:8080", Protocols: []string{config.ProtocolHTTP1}},
+		},
+		Settings: config.Settings{Admin: config.AdminSettings{
+			Address: "127.0.0.1:9090", Username: "admin", PasswordHash: string(hash),
+		}},
+		Routes: []config.Route{{
+			Name:   "health",
+			Match:  "Path(`/healthz`)",
+			Action: &config.RouteAction{Respond: &config.RespondAction{Status: http.StatusOK}},
+		}},
+	}
+	var saved config.Config
+	h := NewHandlerWithOptions(Options{
+		State: NewState(), Current: func() config.Config { return current },
+		SaveActive: func(candidate config.Config) error {
+			saved = candidate
+			return nil
+		},
+	})
+	login := httptest.NewRecorder()
+	h.ServeHTTP(login, httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", bytes.NewBufferString(`{"Username":"admin","Password":"secret"}`)))
+	if login.Code != http.StatusOK {
+		t.Fatalf("login status = %d", login.Code)
+	}
+
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/config/settings", bytes.NewBufferString(`{"request":{"maximum_duration":"45s"},"admin":{"address":"127.0.0.1:9090","username":"admin"}}`))
+	request.AddCookie(login.Result().Cookies()[0])
+	response := httptest.NewRecorder()
+	h.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("save settings status = %d, body = %q", response.Code, response.Body.String())
+	}
+	if saved.Settings.Admin.PasswordHash != current.Settings.Admin.PasswordHash {
+		t.Fatalf("saved admin password hash = %q, want active hash", saved.Settings.Admin.PasswordHash)
+	}
+}
+
 func TestDiscoveryEndpointRequiresAuthAndReturnsLocalSnapshot(t *testing.T) {
 	hash, err := bcrypt.GenerateFromPassword([]byte("secret"), bcrypt.MinCost)
 	if err != nil {
