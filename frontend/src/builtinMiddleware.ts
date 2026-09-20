@@ -8,7 +8,6 @@ export type BuiltinMiddlewareView = {
   scope: "全局" | "Route";
   overridden?: boolean;
   editable?: boolean;
-  active?: boolean;
   appliesTo: BuiltinRequestKind[];
 };
 
@@ -60,7 +59,8 @@ export function globalBuiltinMiddlewareViews(config: JanusConfig): BuiltinMiddle
 export function routeBuiltinMiddlewareViews(config: JanusConfig, route: Route): BuiltinMiddlewareView[] {
   const overrides = route.builtin_middleware_overrides;
   const maximumDuration = overrides?.timeout?.maximum_duration || settingValue(config.settings, "request", "maximum_duration");
-  const maxInFlight = overrides?.admission?.max_in_flight;
+  const maxInFlight = overrides?.admission?.max_in_flight ?? Number(settingValue(config.settings, "request", "max_in_flight", "1024"));
+  const admissionOverridden = overrides?.admission?.max_in_flight !== undefined;
   const streamMax = overrides?.stream_timeout?.max_duration || settingValue(config.settings, "stream", "max_duration");
   const streamIdle = overrides?.stream_timeout?.idle_timeout || settingValue(config.settings, "stream", "idle_timeout");
   const writeTimeout = overrides?.write_timeout?.timeout || settingValue(config.settings, "server", "write_timeout");
@@ -70,11 +70,10 @@ export function routeBuiltinMiddlewareViews(config: JanusConfig, route: Route): 
   result.push(
     {
       name: "Admission",
-      detail: maxInFlight === undefined ? "未启用 Route 独立并发限制" : `Route 并发 max_in_flight=${maxInFlight}`,
+      detail: `Route 并发 max_in_flight=${maxInFlight}${admissionOverridden ? "" : "（继承全局）"}`,
       scope: "Route",
-      overridden: maxInFlight !== undefined,
+      overridden: admissionOverridden,
       editable: true,
-      active: maxInFlight !== undefined,
       appliesTo: allRequestKinds,
     },
     { name: "WriteTimeout", detail: `timeout=${writeTimeout}`, scope: "Route", overridden: Boolean(overrides?.write_timeout?.timeout), editable: true, appliesTo: ["http"] },

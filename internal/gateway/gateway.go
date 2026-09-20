@@ -190,14 +190,12 @@ func NewWithDiscovery(c config.Config, logger *zap.Logger, transport http.RoundT
 		routeHandler := middleware.Chain(actionHandler, routeMiddlewares...)
 		parameters := r.EffectiveBuiltinMiddlewareParameters(c.Settings)
 		builtins := make([]middleware.Middleware, 0, 5)
-		if limit, overridden := r.RouteMaxInFlight(); overridden {
-			routeLimiter := serviceLimiters[RouteLimiterKey(r.Name)]
-			if routeLimiter == nil {
-				routeLimiter = middleware.NewLimiter(limit)
-			}
-			builtins = append(builtins, middleware.Admission(routeLimiter))
+		routeLimiter := serviceLimiters[RouteLimiterKey(r.Name)]
+		if routeLimiter == nil {
+			routeLimiter = middleware.NewLimiter(parameters.MaxInFlight)
 		}
 		builtins = append(builtins,
+			middleware.Admission(routeLimiter),
 			middleware.WriteTimeout(parameters.WriteTimeout),
 			middleware.Timeout(parameters.MaximumDuration),
 			middleware.StreamTimeout(parameters.StreamMax, parameters.StreamIdle),

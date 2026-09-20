@@ -258,7 +258,7 @@ export function RouteEditor({ draft, value, isNew, onChange, onConfirm, onCancel
           <input value={builtinOverrides?.timeout?.maximum_duration || ""} placeholder="继承全局" onChange={(e) => setBuiltinOverride("timeout", "maximum_duration", e.target.value)} />
         </Field>
         <Field label="Admission · max_in_flight" hint={`全局总上限 ${globalSetting(draft, "request", "max_in_flight", "1024")}`}>
-          <input type="number" min={1} value={builtinOverrides?.admission?.max_in_flight ?? ""} placeholder="不增加 Route 限制" onChange={(e) => setBuiltinOverride("admission", "max_in_flight", e.target.value, true)} />
+          <input type="number" min={1} value={builtinOverrides?.admission?.max_in_flight ?? ""} placeholder="继承全局" onChange={(e) => setBuiltinOverride("admission", "max_in_flight", e.target.value, true)} />
         </Field>
         <Field label="StreamTimeout · max_duration" hint={`全局 ${globalSetting(draft, "stream", "max_duration", "1h")}`}>
           <input value={builtinOverrides?.stream_timeout?.max_duration || ""} placeholder="继承全局" onChange={(e) => setBuiltinOverride("stream_timeout", "max_duration", e.target.value)} />

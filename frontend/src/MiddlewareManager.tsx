@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   clearBuiltinMiddlewareOverride,
   setBuiltinMiddlewareOverride,
@@ -43,8 +43,8 @@ function builtinKey(builtin: BuiltinMiddlewareView, index: number): string {
   return `${builtin.scope}:${builtin.name}:${index}`;
 }
 
-/** 洋葱栈视图：flow[0] 在最外层，依次包裹，最内层是 Service / 上游。 */
-function StackView({
+/** 扁平执行链：从上到下表示请求方向，响应按相反方向返回。 */
+function PipelineView({
   flow,
   builtinFlow,
   instances,
@@ -69,59 +69,61 @@ function StackView({
   onSelect: (name: string) => void;
   onSelectBuiltin: (key: string) => void;
 }) {
-  let inner: ReactNode = <div className="mw-stack-core">{coreLabel}</div>;
-  for (let index = flow.length - 1; index >= 0; index--) {
-    const name = flow[index];
-    const def = instances[name];
-    const compatible = isFlowCompatible(def, scope, catalog);
-    inner = (
-      <div
-        key={`${name}-${index}`}
-        className={`mw-stack-layer ${chainSel === name ? "selected" : ""} ${compatible ? "" : "warn"}`}
-        style={{ borderColor: kindColor(def, catalog) }}
-      >
-        <button
-          type="button"
-          className="mw-stack-head"
-          title={`${name} · ${instanceLabel(def, catalog)}${compatible ? "" : "（已不兼容，请移除）"}`}
-          onClick={() => onSelect(name)}
-        >
-          <em className="mw-stack-badge" style={{ background: kindColor(def, catalog) }}>{index + 1}</em>
-          <strong>{name}</strong>
-          <small className={compatible ? "" : "error-text"}>{instanceLabel(def, catalog)}</small>
-        </button>
-        <div className="mw-stack-inner">{inner}</div>
-      </div>
-    );
-  }
-  for (let index = builtinFlow.length - 1; index >= 0; index--) {
-    const builtin = builtinFlow[index];
-    const key = builtinKey(builtin, index);
-    const effective = builtin.active !== false && builtin.appliesTo.includes(requestKind);
-    const stateLabel = effective ? "当前生效" : "当前旁路";
-    inner = (
-      <div
-        key={key}
-        className={`mw-stack-layer builtin ${builtin.overridden ? "overridden" : ""} ${effective ? "effective" : "bypass"} ${builtin.editable ? "editable" : ""} ${builtinSel === key ? "selected" : ""}`}
-      >
-        <button
-          type="button"
-          className={`mw-stack-head ${builtin.editable ? "" : "readonly"}`}
-          title={`${builtin.name} · ${builtin.detail} · ${builtin.editable ? "参数可修改，内置层不可移除" : "内置层不可移除"}`}
-          onClick={() => builtin.editable && onSelectBuiltin(key)}
-          aria-disabled={!builtin.editable}
-        >
-          <em className="mw-stack-badge">内</em>
-          <strong>{builtin.name}</strong>
-          <small>内置 · {builtin.scope}{builtin.editable ? " · 参数可修改" : ""}{builtin.overridden ? " · Route 覆盖" : ""}</small>
-          <em className={`mw-stack-state ${effective ? "active" : "bypass"}`}>{stateLabel}</em>
-        </button>
-        <small className="mw-stack-builtin-detail">{builtin.detail}</small>
-        <div className="mw-stack-inner">{inner}</div>
-      </div>
-    );
-  }
-  return <div className="mw-stack">{inner}</div>;
+  return (
+    <div className="mw-pipeline">
+      <div className="mw-pipeline-end request"><span>请求进入</span><small>{requestKind === "http" ? "普通 HTTP" : requestKind === "sse" ? "SSE" : "WebSocket"}</small></div>
+      {builtinFlow.map((builtin, index) => {
+        const key = builtinKey(builtin, index);
+        const applies = builtin.appliesTo.includes(requestKind);
+        const state = applies ? "effective" : "protocol-inactive";
+        const stateLabel = applies ? "已启用 · 当前协议生效" : "已启用 · 当前协议不生效";
+        const previousScope = index > 0 ? builtinFlow[index - 1].scope : undefined;
+        return (
+          <div className="mw-pipeline-entry" key={key}>
+            {(index === 0 || previousScope !== builtin.scope) && <div className="mw-pipeline-phase">{builtin.scope}内置层</div>}
+            <button
+              type="button"
+              className={`mw-pipeline-row builtin ${state} ${builtin.overridden ? "overridden" : ""} ${builtin.editable ? "editable" : "readonly"} ${builtinSel === key ? "selected" : ""}`}
+              title={`${builtin.name} · ${builtin.detail} · ${builtin.editable ? "参数可修改，内置层不可移除" : "内置层不可移除"}`}
+              onClick={() => builtin.editable && onSelectBuiltin(key)}
+              aria-disabled={!builtin.editable}
+            >
+              <span className="mw-pipeline-index">{String(index + 1).padStart(2, "0")}</span>
+              <span className="mw-pipeline-main">
+                <strong>{builtin.name}</strong>
+                <small>{builtin.detail}</small>
+              </span>
+              <span className="mw-pipeline-tags">
+                {builtin.overridden && <em>Route 覆盖</em>}
+                {builtin.editable && <em>参数可修改</em>}
+              </span>
+              <span className={`mw-pipeline-status ${state}`}>{stateLabel}</span>
+            </button>
+          </div>
+        );
+      })}
+      {flow.length > 0 && <div className="mw-pipeline-phase">配置中间件</div>}
+      {flow.map((name, index) => {
+        const def = instances[name];
+        const compatible = isFlowCompatible(def, scope, catalog);
+        return (
+          <button
+            type="button"
+            key={`${name}-${index}`}
+            className={`mw-pipeline-row configured ${chainSel === name ? "selected" : ""} ${compatible ? "" : "warn"}`}
+            title={`${name} · ${instanceLabel(def, catalog)}${compatible ? "" : "（已不兼容，请移除）"}`}
+            onClick={() => onSelect(name)}
+          >
+            <span className="mw-pipeline-index" style={{ background: kindColor(def, catalog) }}>{String(builtinFlow.length + index + 1).padStart(2, "0")}</span>
+            <span className="mw-pipeline-main"><strong>{name}</strong><small>{instanceLabel(def, catalog)}</small></span>
+            <span className={`mw-pipeline-status ${compatible ? "effective" : "invalid"}`}>{compatible ? "已启用" : "配置不兼容"}</span>
+          </button>
+        );
+      })}
+      <div className="mw-pipeline-end action"><span>动作核心</span><strong>{coreLabel}</strong></div>
+      <div className="mw-pipeline-return">响应按相反顺序返回 ↑</div>
+    </div>
+  );
 }
 
 function BuiltinParameterEditor({
@@ -152,7 +154,7 @@ function BuiltinParameterEditor({
           <small className="muted">{builtin.detail}。参数可修改，但这个内置层不能移除或排序。</small>
         </div>
         <button type="button" className="btn small ghost" onClick={() => onChange(clearBuiltinMiddlewareOverride(overrides, group))}>
-          {group === "admission" ? "禁用 Route 限制" : "恢复继承"}
+          恢复继承
         </button>
       </div>
       {group === "timeout" && (
@@ -161,8 +163,8 @@ function BuiltinParameterEditor({
         </Field>
       )}
       {group === "admission" && (
-        <Field label="max_in_flight" hint="所有请求类型；留空表示不增加 Route 独立并发闸门">
-          <input type="number" min={1} value={overrides?.admission?.max_in_flight ?? ""} placeholder="未启用" onChange={(event) => update("admission", "max_in_flight", event.target.value, true)} />
+        <Field label="max_in_flight" hint="所有请求类型；留空继承全局 request.max_in_flight">
+          <input type="number" min={1} value={overrides?.admission?.max_in_flight ?? ""} placeholder="继承全局" onChange={(event) => update("admission", "max_in_flight", event.target.value, true)} />
         </Field>
       )}
       {group === "stream_timeout" && (
@@ -308,20 +310,20 @@ export function MiddlewareManagerModal({
           <div className="mw-tab-panel">
             {tab === "flow" && (
               <div className="mw-flow">
-                <p className="muted">洋葱模型：外层先执行请求逻辑再调内层，响应按相反方向返回。内置层不可移除或排序；带“参数可修改”的内置层可以点击编辑。灰色虚线层表示当前请求类型会旁路。</p>
+                <p className="muted">所有协议进入同一条执行链，请求从上到下、响应按相反顺序返回。内置层不可移除或排序；带“参数可修改”的内置层可以点击编辑。每层会标明对当前协议是否生效。</p>
                 {builtinFlow.length > 0 && (
                   <div className="mw-request-kind" role="group" aria-label="请求类型">
-                    <span>查看实际链路</span>
+                    <span>当前请求协议</span>
                     {([['http', '普通 HTTP'], ['sse', 'SSE'], ['websocket', 'WebSocket']] as [BuiltinRequestKind, string][]).map(([kind, label]) => (
                       <button key={kind} type="button" className={requestKind === kind ? "active" : ""} onClick={() => setRequestKind(kind)}>{label}</button>
                     ))}
                   </div>
                 )}
                 {flow.length === 0 && builtinFlow.length === 0 ? (
-                  <div className="mw-stack-core">直达{coreLabel}（未挂载中间件）</div>
+                  <div className="mw-pipeline-end action"><span>直达动作核心</span><strong>{coreLabel}</strong></div>
                 ) : (
                   <>
-                    <StackView
+                    <PipelineView
                       flow={flow}
                       builtinFlow={builtinFlow}
                       instances={instances}

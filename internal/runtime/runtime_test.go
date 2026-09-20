@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"janus/internal/config"
+	"janus/internal/gateway"
 	"janus/internal/middleware"
 	"janus/internal/telemetry"
 
@@ -645,5 +646,28 @@ func TestRouteAdmissionLimiterIsSharedAcrossGenerations(t *testing.T) {
 	}
 	if firstLimiter == nil || firstLimiter != secondLimiter {
 		t.Fatalf("route limiter was not shared across generations: first=%p second=%p", firstLimiter, secondLimiter)
+	}
+}
+
+func TestRouteAdmissionLimiterInheritsGlobalLimitWithoutOverride(t *testing.T) {
+	c := validRuntimeConfig("route-default")
+	c.Settings.Request.MaxInFlight = 2
+	registry := newServiceLimiterRegistry(telemetry.NewMetrics())
+	limiters, commit, release := registry.acquire(c)
+	defer release()
+	commit()
+
+	limiter := limiters[gateway.RouteLimiterKey("route-default")]
+	if limiter == nil {
+		t.Fatal("route limiter was not created without an override")
+	}
+	if !limiter.Acquire() || !limiter.Acquire() {
+		t.Fatal("route limiter rejected before inherited global limit")
+	}
+	defer limiter.Release()
+	defer limiter.Release()
+	if limiter.Acquire() {
+		limiter.Release()
+		t.Fatal("route limiter did not inherit global max_in_flight=2")
 	}
 }

@@ -347,17 +347,16 @@ http.NewResponseController(w).SetWriteDeadline(time.Time{})
 }
 ```
 
-每个字段都可以单独省略。`timeout`、`stream_timeout` 和 `write_timeout`
-省略时继承对应的全局设置；`admission.max_in_flight` 省略时不增加 Route
-独立并发闸门，但全局 Admission 仍然生效。Route 的 `max_in_flight` 是额外的
-Route 限制，不会替换全局总并发限制，因此不能大于全局
+每个字段都可以单独省略，省略时继承对应的全局设置。Route Admission 始终
+存在；未覆盖 `admission.max_in_flight` 时使用全局值。Route 的
+`max_in_flight` 是额外的 Route 限制，不会替换全局总并发限制，因此不能大于全局
 `request.max_in_flight`。Route 的有效 `write_timeout.timeout`
 必须大于有效 `timeout.maximum_duration`，并且不能超过
 `shutdown.drain_timeout`。
 
 管理画布里的内置层不能删除或调整顺序。带“参数可修改”标记的内置层可以
-直接覆盖当前 Route 的参数；普通 HTTP、SSE、WebSocket 视图会分别标记当前
-实际生效和旁路的层。
+直接覆盖当前 Route 的参数。所有协议经过同一套固定内置层；普通 HTTP、SSE、
+WebSocket 视图只区分“已启用且当前协议生效”和“已启用但当前协议不生效”。
 
 ## 如何实现“API 15 秒、SSE/WebSocket 20 小时、文件下载 24 小时”
 

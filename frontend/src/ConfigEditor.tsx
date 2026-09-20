@@ -202,10 +202,10 @@ function JanusNode({ data, selected }: { data: NodeData; selected?: boolean }) {
               {builtins.map((middleware, index) => (
                 <em
                   key={`builtin-${middleware.scope}-${middleware.name}-${index}`}
-                  className={`flow-section-chip-builtin ${middleware.overridden ? "overridden" : ""} ${middleware.active === false ? "inactive" : ""}`}
+                  className={`flow-section-chip-builtin ${middleware.overridden ? "overridden" : ""}`}
                   title={`${middleware.name}（内置层不可移除${middleware.editable ? "，参数可修改" : ""} · ${middleware.scope}）· ${middleware.detail}`}
                 >
-                  ◆ {middleware.name}{middleware.overridden ? " · 覆盖" : middleware.active === false ? " · 未启用" : ""}
+                  ◆ {middleware.name}{middleware.overridden ? " · 覆盖" : ""}
                 </em>
               ))}
               {configuredMiddlewares.map((middleware, i) => <em key={`${middleware}-${i}`} title={`${middleware}（配置，可编辑）`}>{i + 1}.{middleware}</em>)}

@@ -657,10 +657,7 @@ func (r *serviceLimiterRegistry) acquire(c config.Config) (map[string]*middlewar
 		limiters[name] = acquire(limiterEntryKey{scope: "service", name: name}, limit)
 	}
 	for _, route := range c.Routes {
-		limit, ok := route.RouteMaxInFlight()
-		if !ok {
-			continue
-		}
+		limit := route.EffectiveBuiltinMiddlewareParameters(c.Settings).MaxInFlight
 		limiters[gateway.RouteLimiterKey(route.Name)] = acquire(limiterEntryKey{scope: "route", name: route.Name}, limit)
 	}
 	r.mu.Unlock()
