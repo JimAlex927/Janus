@@ -33,6 +33,12 @@ type Gateway struct {
 	discovered      map[string]*discovery.Lease
 }
 
+const routeLimiterPrefix = "\x00janus-route\x00"
+
+// RouteLimiterKey keeps route-owned admission gates separate from the
+// service limiter namespace while preserving the existing builder API.
+func RouteLimiterKey(name string) string { return routeLimiterPrefix + name }
+
 func New(c config.Config, logger *zap.Logger) (*Gateway, error) {
 	return NewWithTransport(c, logger, nil)
 }
@@ -182,6 +188,22 @@ func NewWithDiscovery(c config.Config, logger *zap.Logger, transport http.RoundT
 			return nil, err
 		}
 		routeHandler := middleware.Chain(actionHandler, routeMiddlewares...)
+		parameters := r.EffectiveBuiltinMiddlewareParameters(c.Settings)
+		builtins := make([]middleware.Middleware, 0, 5)
+		if limit, overridden := r.RouteMaxInFlight(); overridden {
+			routeLimiter := serviceLimiters[RouteLimiterKey(r.Name)]
+			if routeLimiter == nil {
+				routeLimiter = middleware.NewLimiter(limit)
+			}
+			builtins = append(builtins, middleware.Admission(routeLimiter))
+		}
+		builtins = append(builtins,
+			middleware.WriteTimeout(parameters.WriteTimeout),
+			middleware.Timeout(parameters.MaximumDuration),
+			middleware.StreamTimeout(parameters.StreamMax, parameters.StreamIdle),
+			middleware.ClearStreamingWriteDeadline,
+		)
+		routeHandler = middleware.Chain(routeHandler, builtins...)
 		routeHandler = middleware.RouteMetadata(r.Name, serviceName)(routeHandler)
 		routes = append(routes, router.Route{
 			Name:          r.Name,
@@ -210,9 +232,7 @@ func NewWithDiscovery(c config.Config, logger *zap.Logger, transport http.RoundT
 			routeHandler,
 			middleware.Observe(logger),
 			middleware.RejectUnsupportedProtocols,
-			middleware.Timeout(c.Settings.Request.MaximumDuration.Duration()),
-			middleware.StreamTimeout(c.Settings.Stream.MaxDuration.Duration(), c.Settings.Stream.IdleTimeout.Duration()),
-			middleware.ClearStreamingWriteDeadline,
+			middleware.Admission(middleware.NewLimiter(c.Settings.Request.MaxInFlight)),
 		),
 		transport:       ownedTransport,
 		ownedTransport:  ownedTransport,

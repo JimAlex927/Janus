@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
+import { setBuiltinMiddlewareOverride } from "./builtinMiddleware";
 import { limenNames, serviceNames } from "./model";
 import { Drawer, Field } from "./ui";
-import type { JanusConfig, Route } from "./types";
+import type { BuiltinMiddlewareOverrides, JanusConfig, Route } from "./types";
 
 export type MatchRule = { type: "host" | "path" | "pathPrefix" | "pathPattern" | "method" | "protocol" | "header" | "query"; value: string; extra?: string };
 
@@ -49,6 +50,14 @@ function buildMatchExpression(rules: MatchRule[]): string {
   }
   return parts.join(" && ");
 }
+
+function globalSetting(config: JanusConfig, section: string, key: string, fallback: string): string {
+  const group = config.settings?.[section];
+  if (!group || typeof group !== "object") return fallback;
+  const value = (group as Record<string, unknown>)[key];
+  return value === undefined || value === null || value === "" ? fallback : String(value);
+}
+
 export function RouteEditor({ draft, value, isNew, onChange, onConfirm, onCancel, onClose, onDelete, onOpenMiddlewareManager }: {
   draft: JanusConfig; value: Route; isNew: boolean;
   onChange: (value: Route) => void; onConfirm: () => void; onCancel: () => void; onClose: () => void; onDelete?: () => void;
@@ -64,6 +73,10 @@ export function RouteEditor({ draft, value, isNew, onChange, onConfirm, onCancel
     if (!parsedMatch.safe) setShowAdvanced(true);
   }, [parsedMatch.safe]);
   const set = (patch: Partial<Route>) => onChange({ ...value, ...patch });
+
+  function setBuiltinOverride(group: keyof BuiltinMiddlewareOverrides, field: string, raw: string, numeric = false) {
+    set({ builtin_middleware_overrides: setBuiltinMiddlewareOverride(value.builtin_middleware_overrides, group, field, raw, numeric) });
+  }
 
   function setActionType(type: string) {
     if (type === "redirect") set({ action: { redirect: { status: 308, location: "https://example.com" } } });
@@ -230,6 +243,36 @@ export function RouteEditor({ draft, value, isNew, onChange, onConfirm, onCancel
     </div>
   );
 
+  const builtinOverrides = value.builtin_middleware_overrides;
+  const builtinOverrideSection = (
+    <div className="check-group builtin-overrides">
+      <div className="field-label-row">
+        <div>
+          <div className="field-label">内置中间件参数覆盖</div>
+          <small className="muted">内置层固定且不可移除；参数可以覆盖，留空继承全局设置，只影响当前 Route。</small>
+        </div>
+        {builtinOverrides && <button type="button" className="btn small ghost" onClick={() => set({ builtin_middleware_overrides: undefined })}>全部恢复继承</button>}
+      </div>
+      <div className="grid-2">
+        <Field label="Timeout · maximum_duration" hint={`全局 ${globalSetting(draft, "request", "maximum_duration", "30s")}`}>
+          <input value={builtinOverrides?.timeout?.maximum_duration || ""} placeholder="继承全局" onChange={(e) => setBuiltinOverride("timeout", "maximum_duration", e.target.value)} />
+        </Field>
+        <Field label="Admission · max_in_flight" hint={`全局总上限 ${globalSetting(draft, "request", "max_in_flight", "1024")}`}>
+          <input type="number" min={1} value={builtinOverrides?.admission?.max_in_flight ?? ""} placeholder="不增加 Route 限制" onChange={(e) => setBuiltinOverride("admission", "max_in_flight", e.target.value, true)} />
+        </Field>
+        <Field label="StreamTimeout · max_duration" hint={`全局 ${globalSetting(draft, "stream", "max_duration", "1h")}`}>
+          <input value={builtinOverrides?.stream_timeout?.max_duration || ""} placeholder="继承全局" onChange={(e) => setBuiltinOverride("stream_timeout", "max_duration", e.target.value)} />
+        </Field>
+        <Field label="StreamTimeout · idle_timeout" hint={`全局 ${globalSetting(draft, "stream", "idle_timeout", "5m")}`}>
+          <input value={builtinOverrides?.stream_timeout?.idle_timeout || ""} placeholder="继承全局" onChange={(e) => setBuiltinOverride("stream_timeout", "idle_timeout", e.target.value)} />
+        </Field>
+        <Field label="WriteTimeout · timeout" hint={`全局 server.write_timeout ${globalSetting(draft, "server", "write_timeout", "35s")}`}>
+          <input value={builtinOverrides?.write_timeout?.timeout || ""} placeholder="继承全局" onChange={(e) => setBuiltinOverride("write_timeout", "timeout", e.target.value)} />
+        </Field>
+      </div>
+    </div>
+  );
+
   return (
     <Drawer
       title={isNew ? "新建 Route" : `编辑 ${value.name}`}
@@ -252,6 +295,7 @@ export function RouteEditor({ draft, value, isNew, onChange, onConfirm, onCancel
       </Field>
       {matchBuilder}
       {middlewareSection}
+      {builtinOverrideSection}
       {actionFields}
     </Drawer>
   );

@@ -188,14 +188,19 @@ func TestWebSocketStreamTimeoutClosesUpgradedConnection(t *testing.T) {
 	defer backend.Close()
 	settings := config.Settings{
 		Request: config.RequestSettings{MaximumDuration: config.Duration(100 * time.Millisecond)},
-		Stream:  config.StreamSettings{MaxDuration: config.Duration(time.Second), IdleTimeout: config.Duration(50 * time.Millisecond)},
+		Stream:  config.StreamSettings{MaxDuration: config.Duration(time.Second), IdleTimeout: config.Duration(500 * time.Millisecond)},
 		Server:  config.ServerSettings{WriteTimeout: config.Duration(500 * time.Millisecond)},
 	}
 	address, cleanup := startStreamingGateway(t, config.Config{
 		Listen:   "127.0.0.1:8080",
 		Settings: settings,
 		Services: map[string]config.Service{"socket": {Upstreams: []string{backend.URL}}},
-		Routes:   []config.Route{{Name: "socket", Match: "PathPrefix(`/socket`) && Protocol(`websocket`)", Service: "socket"}},
+		Routes: []config.Route{{
+			Name: "socket", Match: "PathPrefix(`/socket`) && Protocol(`websocket`)", Service: "socket",
+			BuiltinMiddlewareOverrides: &config.BuiltinMiddlewareOverrides{
+				StreamTimeout: &config.StreamTimeoutMiddlewareOverride{IdleTimeout: durationPointer(50 * time.Millisecond)},
+			},
+		}},
 	})
 	defer cleanup()
 

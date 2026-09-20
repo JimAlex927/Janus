@@ -11,6 +11,7 @@ import (
 
 	"janus/internal/config"
 	"janus/internal/middleware"
+	"janus/internal/telemetry"
 
 	"go.uber.org/zap"
 )
@@ -618,5 +619,31 @@ func TestRuntimeFailedReplacementDoesNotChangeServiceLimit(t *testing.T) {
 	case <-firstDone:
 	case <-time.After(time.Second):
 		t.Fatal("first service request did not finish")
+	}
+}
+
+func TestRouteAdmissionLimiterIsSharedAcrossGenerations(t *testing.T) {
+	c := validRuntimeConfig("route")
+	limit := 1
+	c.Routes[0].BuiltinMiddlewareOverrides = &config.BuiltinMiddlewareOverrides{
+		Admission: &config.AdmissionMiddlewareOverride{MaxInFlight: &limit},
+	}
+	registry := newServiceLimiterRegistry(telemetry.NewMetrics())
+	first, commitFirst, releaseFirst := registry.acquire(c)
+	defer releaseFirst()
+	commitFirst()
+	second, commitSecond, releaseSecond := registry.acquire(c)
+	defer releaseSecond()
+	commitSecond()
+
+	var firstLimiter, secondLimiter *middleware.Limiter
+	for _, limiter := range first {
+		firstLimiter = limiter
+	}
+	for _, limiter := range second {
+		secondLimiter = limiter
+	}
+	if firstLimiter == nil || firstLimiter != secondLimiter {
+		t.Fatalf("route limiter was not shared across generations: first=%p second=%p", firstLimiter, secondLimiter)
 	}
 }

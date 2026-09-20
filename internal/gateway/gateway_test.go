@@ -59,6 +59,13 @@ func testGatewayWithConfig(t *testing.T, c config.Config) *Gateway {
 	return g
 }
 
+func durationPointer(value time.Duration) *config.Duration {
+	duration := config.Duration(value)
+	return &duration
+}
+
+func intPointer(value int) *int { return &value }
+
 func TestForwardingOverRealConnections(t *testing.T) {
 	type observed struct{ uri, host, body, xff, proto, originalHost, forwarded, realIP, forwardedPort, scheme, hop string }
 	seen := make(chan observed, 1)
@@ -214,6 +221,76 @@ func TestOverallTimeoutCancelsBackend(t *testing.T) {
 	case <-cancelled:
 	case <-time.After(2 * time.Second):
 		t.Fatal("overall timeout did not cancel backend")
+	}
+}
+
+func TestRouteTimeoutOverrideCanExtendGlobalMaximumDuration(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		time.Sleep(100 * time.Millisecond)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer backend.Close()
+	settings := config.DefaultSettings()
+	settings.Request.MaximumDuration = config.Duration(30 * time.Millisecond)
+	settings.Server.WriteTimeout = config.Duration(40 * time.Millisecond)
+	g := testGatewayWithConfig(t, config.Config{
+		Listen:   "127.0.0.1:8080",
+		Settings: settings,
+		Services: map[string]config.Service{"s": {Upstreams: []string{backend.URL}}},
+		Routes: []config.Route{{
+			Name: "api", PathPrefix: "/api", Service: "s",
+			BuiltinMiddlewareOverrides: &config.BuiltinMiddlewareOverrides{
+				Timeout:      &config.TimeoutMiddlewareOverride{MaximumDuration: durationPointer(250 * time.Millisecond)},
+				WriteTimeout: &config.WriteTimeoutMiddlewareOverride{Timeout: durationPointer(300 * time.Millisecond)},
+			},
+		}},
+	})
+	w := httptest.NewRecorder()
+	g.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "http://gateway/api", nil))
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("route extended timeout status = %d, want 204", w.Code)
+	}
+}
+
+func TestRouteAdmissionOverrideLimitsOnlyMatchedRoute(t *testing.T) {
+	started := make(chan struct{}, 1)
+	release := make(chan struct{})
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		started <- struct{}{}
+		<-release
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer backend.Close()
+	g := testGatewayWithConfig(t, config.Config{
+		Listen:   "127.0.0.1:8080",
+		Services: map[string]config.Service{"s": {Upstreams: []string{backend.URL}}},
+		Routes: []config.Route{{
+			Name: "api", PathPrefix: "/api", Service: "s",
+			BuiltinMiddlewareOverrides: &config.BuiltinMiddlewareOverrides{
+				Admission: &config.AdmissionMiddlewareOverride{MaxInFlight: intPointer(1)},
+			},
+		}},
+	})
+	firstDone := make(chan struct{})
+	go func() {
+		g.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "http://gateway/api", nil))
+		close(firstDone)
+	}()
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("first route request did not reach backend")
+	}
+	second := httptest.NewRecorder()
+	g.ServeHTTP(second, httptest.NewRequest(http.MethodGet, "http://gateway/api", nil))
+	if second.Code != http.StatusServiceUnavailable {
+		t.Fatalf("saturated route status = %d, want 503", second.Code)
+	}
+	close(release)
+	select {
+	case <-firstDone:
+	case <-time.After(time.Second):
+		t.Fatal("first route request did not finish")
 	}
 }
 

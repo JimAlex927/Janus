@@ -162,8 +162,10 @@ func NewWithBuilder(c config.Config, logger *zap.Logger, builder Builder) (*Runt
 	r.revision.Store(1)
 	r.events = make(map[chan Event]struct{})
 	// This chain is process-owned and remains stable while generations reload.
-	// Its order preserves the existing behavior: observation wraps protocol
-	// guards, timeout, and active-generation dispatch.
+	// Its order preserves process-wide behavior: observation wraps protocol
+	// guards, global admission, and active-generation dispatch. Request and
+	// stream deadlines run inside the matched route so route overrides can be
+	// resolved before those middleware execute.
 	r.handler = middleware.Chain(
 		/**
 		这里就到了分流的地方了
@@ -181,18 +183,6 @@ func NewWithBuilder(c config.Config, logger *zap.Logger, builder Builder) (*Runt
 		 全局限速器
 		*/
 		middleware.Admission(r.global),
-		/*
-			对于非sse或者websocket到这里设置一个timeout
-		*/
-		middleware.Timeout(c.Settings.Request.MaximumDuration.Duration()),
-		/*
-			sse或者websocket的timeout middleware
-		*/
-		middleware.StreamTimeout(c.Settings.Stream.MaxDuration.Duration(), c.Settings.Stream.IdleTimeout.Duration()),
-		/*
-			检查是否是SSE或者websocket，如果是，就把写入response的时间改成infinite. 关闭只让客户端或者backed进行
-		*/
-		middleware.ClearStreamingWriteDeadline,
 	)
 	return r, nil
 }
@@ -623,8 +613,13 @@ func (g *managedGeneration) DiscoverySnapshot() map[string]discovery.Status {
 
 type serviceLimiterRegistry struct {
 	mu      sync.Mutex
-	entries map[string]*serviceLimiterEntry
+	entries map[limiterEntryKey]*serviceLimiterEntry
 	metrics *telemetry.Metrics
+}
+
+type limiterEntryKey struct {
+	scope string
+	name  string
 }
 
 type serviceLimiterEntry struct {
@@ -633,32 +628,40 @@ type serviceLimiterEntry struct {
 }
 
 func newServiceLimiterRegistry(metrics *telemetry.Metrics) *serviceLimiterRegistry {
-	return &serviceLimiterRegistry{entries: make(map[string]*serviceLimiterEntry), metrics: metrics}
+	return &serviceLimiterRegistry{entries: make(map[limiterEntryKey]*serviceLimiterEntry), metrics: metrics}
 }
 
 func (r *serviceLimiterRegistry) acquire(c config.Config) (map[string]*middleware.Limiter, func(), func()) {
 	r.mu.Lock()
 	limiters := make(map[string]*middleware.Limiter)
-	names := make([]string, 0)
-	limits := make(map[string]int)
+	keys := make([]limiterEntryKey, 0)
+	limits := make(map[limiterEntryKey]int)
+	acquire := func(key limiterEntryKey, limit int) *middleware.Limiter {
+		entry := r.entries[key]
+		if entry == nil {
+			// Acquisition is provisional until the candidate generation commits.
+			entry = &serviceLimiterEntry{limiter: middleware.NewLimiterWithMetrics(limit, r.metrics, key.scope, key.name)}
+			r.entries[key] = entry
+		}
+		entry.refs++
+		limits[key] = limit
+		keys = append(keys, key)
+		return entry.limiter
+	}
 	for name, service := range c.Services {
 		//遍历每个service 如果service中有in_flight的middleware 配置 先得到limit的数量
 		limit, ok := serviceInFlightLimit(c, service)
 		if !ok {
 			continue
 		}
-		//然后去查看limiter注册表中是否已经有了 如果没有就创建限速器
-		entry := r.entries[name]
-		if entry == nil {
-			// Acquire creates an entry provisionally. releaseServices below rolls it
-			// back if generation construction fails before publication.
-			entry = &serviceLimiterEntry{limiter: middleware.NewLimiterWithMetrics(limit, r.metrics, "service", name)}
-			r.entries[name] = entry
+		limiters[name] = acquire(limiterEntryKey{scope: "service", name: name}, limit)
+	}
+	for _, route := range c.Routes {
+		limit, ok := route.RouteMaxInFlight()
+		if !ok {
+			continue
 		}
-		entry.refs++
-		limiters[name] = entry.limiter
-		limits[name] = limit
-		names = append(names, name)
+		limiters[gateway.RouteLimiterKey(route.Name)] = acquire(limiterEntryKey{scope: "route", name: route.Name}, limit)
 	}
 	r.mu.Unlock()
 
@@ -670,8 +673,8 @@ func (r *serviceLimiterRegistry) acquire(c config.Config) (map[string]*middlewar
 			commitOnce.Do(func() {
 				r.mu.Lock()
 				defer r.mu.Unlock()
-				for name, limit := range limits {
-					if entry := r.entries[name]; entry != nil {
+				for key, limit := range limits {
+					if entry := r.entries[key]; entry != nil {
 						//也就是注册表中已经存在了entry。说明现在要么是app第一次启动，要么就是配置更新。如果是配置更新 commit的时候直接更新限速数量
 						entry.limiter.SetLimit(limit)
 					}
@@ -681,14 +684,14 @@ func (r *serviceLimiterRegistry) acquire(c config.Config) (map[string]*middlewar
 			once.Do(func() {
 				r.mu.Lock()
 				defer r.mu.Unlock()
-				for _, name := range names {
-					entry := r.entries[name]
+				for _, key := range keys {
+					entry := r.entries[key]
 					if entry == nil {
 						continue
 					}
 					entry.refs--
 					if entry.refs == 0 {
-						delete(r.entries, name)
+						delete(r.entries, key)
 					}
 				}
 			})

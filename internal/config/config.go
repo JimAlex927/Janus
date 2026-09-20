@@ -321,15 +321,96 @@ func (s HealthCheckSettings) WithDefaults() HealthCheckSettings {
 }
 
 type Route struct {
-	Name        string       `json:"name"`
-	Limen       string       `json:"limen,omitempty"`
-	Match       string       `json:"match,omitempty"`
-	Priority    int          `json:"priority,omitempty"`
-	Host        string       `json:"host,omitempty"`
-	PathPrefix  string       `json:"path_prefix,omitempty"`
-	Service     string       `json:"service,omitempty"`
-	Middlewares []string     `json:"middlewares,omitempty"`
-	Action      *RouteAction `json:"action,omitempty"`
+	Name                       string                      `json:"name"`
+	Limen                      string                      `json:"limen,omitempty"`
+	Match                      string                      `json:"match,omitempty"`
+	Priority                   int                         `json:"priority,omitempty"`
+	Host                       string                      `json:"host,omitempty"`
+	PathPrefix                 string                      `json:"path_prefix,omitempty"`
+	Service                    string                      `json:"service,omitempty"`
+	Middlewares                []string                    `json:"middlewares,omitempty"`
+	BuiltinMiddlewareOverrides *BuiltinMiddlewareOverrides `json:"builtin_middleware_overrides,omitempty"`
+	Action                     *RouteAction                `json:"action,omitempty"`
+}
+
+// BuiltinMiddlewareOverrides changes the parameters of Janus-owned middleware
+// for one matched route. Missing values inherit the corresponding global
+// setting; these definitions are not user middleware instances and therefore
+// never appear in Route.Middlewares.
+type BuiltinMiddlewareOverrides struct {
+	Timeout       *TimeoutMiddlewareOverride       `json:"timeout,omitempty"`
+	Admission     *AdmissionMiddlewareOverride     `json:"admission,omitempty"`
+	StreamTimeout *StreamTimeoutMiddlewareOverride `json:"stream_timeout,omitempty"`
+	WriteTimeout  *WriteTimeoutMiddlewareOverride  `json:"write_timeout,omitempty"`
+}
+
+type TimeoutMiddlewareOverride struct {
+	MaximumDuration *Duration `json:"maximum_duration,omitempty"`
+}
+
+type AdmissionMiddlewareOverride struct {
+	MaxInFlight *int `json:"max_in_flight,omitempty"`
+}
+
+type StreamTimeoutMiddlewareOverride struct {
+	MaxDuration *Duration `json:"max_duration,omitempty"`
+	IdleTimeout *Duration `json:"idle_timeout,omitempty"`
+}
+
+type WriteTimeoutMiddlewareOverride struct {
+	Timeout *Duration `json:"timeout,omitempty"`
+}
+
+// BuiltinMiddlewareParameters is the fully resolved policy used by a route.
+// It contains no optional values: every omitted override has already inherited
+// its global setting.
+type BuiltinMiddlewareParameters struct {
+	MaximumDuration time.Duration
+	MaxInFlight     int
+	StreamMax       time.Duration
+	StreamIdle      time.Duration
+	WriteTimeout    time.Duration
+}
+
+func (r Route) EffectiveBuiltinMiddlewareParameters(settings Settings) BuiltinMiddlewareParameters {
+	settings = settings.WithDefaults()
+	result := BuiltinMiddlewareParameters{
+		MaximumDuration: settings.Request.MaximumDuration.Duration(),
+		MaxInFlight:     settings.Request.MaxInFlight,
+		StreamMax:       settings.Stream.MaxDuration.Duration(),
+		StreamIdle:      settings.Stream.IdleTimeout.Duration(),
+		WriteTimeout:    settings.Server.WriteTimeout.Duration(),
+	}
+	overrides := r.BuiltinMiddlewareOverrides
+	if overrides == nil {
+		return result
+	}
+	if overrides.Timeout != nil && overrides.Timeout.MaximumDuration != nil {
+		result.MaximumDuration = overrides.Timeout.MaximumDuration.Duration()
+	}
+	if overrides.Admission != nil && overrides.Admission.MaxInFlight != nil {
+		result.MaxInFlight = *overrides.Admission.MaxInFlight
+	}
+	if overrides.StreamTimeout != nil {
+		if overrides.StreamTimeout.MaxDuration != nil {
+			result.StreamMax = overrides.StreamTimeout.MaxDuration.Duration()
+		}
+		if overrides.StreamTimeout.IdleTimeout != nil {
+			result.StreamIdle = overrides.StreamTimeout.IdleTimeout.Duration()
+		}
+	}
+	if overrides.WriteTimeout != nil && overrides.WriteTimeout.Timeout != nil {
+		result.WriteTimeout = overrides.WriteTimeout.Timeout.Duration()
+	}
+	return result
+}
+
+func (r Route) RouteMaxInFlight() (int, bool) {
+	if r.BuiltinMiddlewareOverrides == nil || r.BuiltinMiddlewareOverrides.Admission == nil ||
+		r.BuiltinMiddlewareOverrides.Admission.MaxInFlight == nil {
+		return 0, false
+	}
+	return *r.BuiltinMiddlewareOverrides.Admission.MaxInFlight, true
 }
 
 // RouteAction describes what happens after a route matches. Exactly one
@@ -694,6 +775,9 @@ func (c Config) Validate() error {
 				return fmt.Errorf("route %q cannot use middleware %q in route scope", r.Name, middlewareName)
 			}
 		}
+		if err := validateBuiltinMiddlewareOverrides(r, settings); err != nil {
+			return fmt.Errorf("route %q: %w", r.Name, err)
+		}
 		if r.Match != "" {
 			if r.Host != "" || r.PathPrefix != "" {
 				return fmt.Errorf("route %q cannot combine match with host or path_prefix", r.Name)
@@ -844,6 +928,56 @@ func (c Config) Validate() error {
 				return fmt.Errorf("middleware %q rate_limit: %w", name, err)
 			}
 		}
+	}
+	return nil
+}
+
+func validateBuiltinMiddlewareOverrides(route Route, settings Settings) error {
+	overrides := route.BuiltinMiddlewareOverrides
+	if overrides == nil {
+		return nil
+	}
+	if overrides.Timeout != nil && overrides.Timeout.MaximumDuration != nil {
+		if err := validateDuration("builtin_middleware_overrides.timeout.maximum_duration", *overrides.Timeout.MaximumDuration); err != nil {
+			return err
+		}
+	}
+	if overrides.Admission != nil && overrides.Admission.MaxInFlight != nil {
+		value := *overrides.Admission.MaxInFlight
+		if value < 1 || value > MaxGlobalInFlight {
+			return fmt.Errorf("builtin_middleware_overrides.admission.max_in_flight must be between 1 and %d", MaxGlobalInFlight)
+		}
+		if value > settings.Request.MaxInFlight {
+			return fmt.Errorf("builtin_middleware_overrides.admission.max_in_flight must not exceed global request.max_in_flight")
+		}
+	}
+	if overrides.StreamTimeout != nil {
+		if overrides.StreamTimeout.MaxDuration != nil {
+			if err := validateDuration("builtin_middleware_overrides.stream_timeout.max_duration", *overrides.StreamTimeout.MaxDuration); err != nil {
+				return err
+			}
+		}
+		if overrides.StreamTimeout.IdleTimeout != nil {
+			if err := validateDuration("builtin_middleware_overrides.stream_timeout.idle_timeout", *overrides.StreamTimeout.IdleTimeout); err != nil {
+				return err
+			}
+		}
+	}
+	if overrides.WriteTimeout != nil && overrides.WriteTimeout.Timeout != nil {
+		if err := validateDurationBound("builtin_middleware_overrides.write_timeout.timeout", *overrides.WriteTimeout.Timeout, MaxServerWriteTimeout); err != nil {
+			return err
+		}
+	}
+
+	effective := route.EffectiveBuiltinMiddlewareParameters(settings)
+	if effective.StreamIdle > effective.StreamMax {
+		return fmt.Errorf("effective stream_timeout.idle_timeout must not exceed stream_timeout.max_duration")
+	}
+	if effective.WriteTimeout <= effective.MaximumDuration {
+		return fmt.Errorf("effective write_timeout.timeout must exceed timeout.maximum_duration")
+	}
+	if effective.WriteTimeout > settings.Shutdown.DrainTimeout.Duration() {
+		return fmt.Errorf("effective write_timeout.timeout must not exceed shutdown.drain_timeout")
 	}
 	return nil
 }

@@ -29,6 +29,7 @@ import {
   validateConfig,
   type StoredConfig,
 } from "./api";
+import { builtinMiddlewareViews, type BuiltinMiddlewareView } from "./builtinMiddleware";
 import { createMiddlewareDefinition, LimenEditor, ServiceEditor } from "./editors";
 import { cloneConfig, limenNames, routeActionLabel, routeMatchLabel, serviceSubtitle, uniqueName } from "./model";
 import { MiddlewareManagerModal, type MiddlewareScopeFilter } from "./MiddlewareManager";
@@ -49,6 +50,7 @@ type NodeData = {
   detail: string;
   match?: string;
   middlewares?: string[];
+  builtinMiddlewares?: BuiltinMiddlewareView[];
   action?: string;
   onOpen?: () => void;
   onOpenMiddleware?: () => void;
@@ -76,7 +78,7 @@ function parseNodeId(id: string): { kind: NodeKind; name: string } | null {
   return { kind, name: id.slice(index + 1) };
 }
 
-function describe(draft: JanusConfig, kind: NodeKind, name: string): { subtitle: string; detail: string; match?: string; middlewares?: string[]; action?: string } {
+function describe(draft: JanusConfig, kind: NodeKind, name: string): { subtitle: string; detail: string; match?: string; middlewares?: string[]; builtinMiddlewares?: BuiltinMiddlewareView[]; action?: string } {
   if (kind === "limen") {
     const limen = draft.limens?.[name];
     return { subtitle: limen?.address || "未配置地址", detail: (limen?.protocols || []).join(" · ") };
@@ -89,6 +91,7 @@ function describe(draft: JanusConfig, kind: NodeKind, name: string): { subtitle:
       detail: routeActionLabel(route),
       match: route.match || `${route.host || "*"} ${route.path_prefix || "/"}`,
       middlewares: route.middlewares || [],
+      builtinMiddlewares: builtinMiddlewareViews(draft, route),
       action: routeActionLabel(route),
     };
   }
@@ -172,6 +175,8 @@ function JanusEdge({ sourceX, sourceY, sourcePosition, targetX, targetY, targetP
 function JanusNode({ data, selected }: { data: NodeData; selected?: boolean }) {
   const meta = KIND_META[data.kind];
   if (data.kind === "route") {
+    const configuredMiddlewares = data.middlewares || [];
+    const builtins = data.builtinMiddlewares || [];
     return (
       <div className={`flow-node flow-route ${selected ? "selected" : ""}`} style={{ borderTopColor: meta.color }}>
         <Handle type="target" position={Position.Left} />
@@ -188,13 +193,22 @@ function JanusNode({ data, selected }: { data: NodeData; selected?: boolean }) {
           <small className="flow-section-title">◈ 匹配</small>
           <span className="flow-section-body mono">{data.match || "未配置"}</span>
         </button>
-        <button type="button" className="flow-section" title="管理中间件" onClick={(e) => { e.stopPropagation(); data.onOpenMiddleware?.(); }}>
-          <small className="flow-section-title">◈ 中间件（{(data.middlewares || []).length}）</small>
-          {(data.middlewares || []).length === 0 ? (
+        <button type="button" className="flow-section" title="管理中间件；内置层不可移除，可覆盖其参数" onClick={(e) => { e.stopPropagation(); data.onOpenMiddleware?.(); }}>
+          <small className="flow-section-title">◈ 中间件（内置 {builtins.length} · 配置 {configuredMiddlewares.length}）</small>
+          {builtins.length === 0 && configuredMiddlewares.length === 0 ? (
             <span className="flow-section-empty">未挂载，点击添加＋</span>
           ) : (
             <span className="flow-section-chips">
-              {(data.middlewares || []).map((m, i) => <em key={`${m}-${i}`}>{i + 1}.{m}</em>)}
+              {builtins.map((middleware, index) => (
+                <em
+                  key={`builtin-${middleware.scope}-${middleware.name}-${index}`}
+                  className={`flow-section-chip-builtin ${middleware.overridden ? "overridden" : ""} ${middleware.active === false ? "inactive" : ""}`}
+                  title={`${middleware.name}（内置层不可移除${middleware.editable ? "，参数可修改" : ""} · ${middleware.scope}）· ${middleware.detail}`}
+                >
+                  ◆ {middleware.name}{middleware.overridden ? " · 覆盖" : middleware.active === false ? " · 未启用" : ""}
+                </em>
+              ))}
+              {configuredMiddlewares.map((middleware, i) => <em key={`${middleware}-${i}`} title={`${middleware}（配置，可编辑）`}>{i + 1}.{middleware}</em>)}
             </span>
           )}
         </button>
@@ -346,7 +360,8 @@ function ConfigEditor({ store, id, onBack, onStatusChange }: { store: ConfigStor
           desc.detail === node.data.detail &&
           desc.match === node.data.match &&
           desc.action === node.data.action &&
-          JSON.stringify(desc.middlewares || []) === JSON.stringify(node.data.middlewares || [])
+          JSON.stringify(desc.middlewares || []) === JSON.stringify(node.data.middlewares || []) &&
+          JSON.stringify(desc.builtinMiddlewares || []) === JSON.stringify(node.data.builtinMiddlewares || [])
         ) {
           return node;
         }
@@ -941,6 +956,7 @@ function ConfigEditor({ store, id, onBack, onStatusChange }: { store: ConfigStor
 function routeCoreLabel(route: Route): string {
   if (route.action?.redirect) return `↗ Redirect → ${route.action.redirect.location || ""}`;
   if (route.action?.respond) return `直接响应 ${route.action.respond.status ?? 200}`;
+  if (route.action?.static) return `静态文件 ${route.action.static.root || "未配置目录"}`;
   const service = route.action?.forward?.service || route.service || "未选择";
   return `→ Service ${service}`;
 }
@@ -1301,10 +1317,15 @@ function translateWarning(warning: string): string {
           instances={draft.middlewares || {}}
           catalog={middlewareCatalog}
           flow={editing.value.middlewares || []}
+          builtinFlow={editing.kind === "route" ? builtinMiddlewareViews(draft, editing.value) : []}
+          builtinOverrides={editing.kind === "route" ? editing.value.builtin_middleware_overrides : undefined}
           onFlowChange={(flow) => {
             if (editing.kind === "route") setEditing({ ...editing, value: { ...editing.value, middlewares: flow } });
             else setEditing({ ...editing, value: { ...editing.value, middlewares: flow } });
           }}
+          onBuiltinOverridesChange={editing.kind === "route" ? (overrides) => {
+            setEditing({ ...editing, value: { ...editing.value, builtin_middleware_overrides: overrides } });
+          } : undefined}
           onInstantiate={instantiateMiddleware}
           onUpdateInstance={updateMiddlewareInstance}
           onDeleteInstance={removeMiddlewareDef}

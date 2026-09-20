@@ -567,6 +567,70 @@ func TestSettingsDurationSyntaxAndDefaults(t *testing.T) {
 	}
 }
 
+func TestRouteBuiltinMiddlewareOverridesResolveAgainstGlobalSettings(t *testing.T) {
+	body := `{
+  "listen":"127.0.0.1:8080",
+  "settings":{"request":{"maximum_duration":"30s","max_in_flight":100},"stream":{"max_duration":"1h","idle_timeout":"5m"},"server":{"write_timeout":"35s"}},
+  "services":{"s":{"upstreams":["http://localhost:9000"]}},
+  "routes":[{"name":"r","path_prefix":"/","service":"s","builtin_middleware_overrides":{"timeout":{"maximum_duration":"10s"},"admission":{"max_in_flight":7},"stream_timeout":{"idle_timeout":"20m"},"write_timeout":{"timeout":"15s"}}}]
+}`
+	c, err := Load(strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	parameters := c.Routes[0].EffectiveBuiltinMiddlewareParameters(c.Settings)
+	if parameters.MaximumDuration != 10*time.Second || parameters.MaxInFlight != 7 ||
+		parameters.StreamMax != time.Hour || parameters.StreamIdle != 20*time.Minute || parameters.WriteTimeout != 15*time.Second {
+		t.Fatalf("effective route parameters = %+v", parameters)
+	}
+	if limit, ok := c.Routes[0].RouteMaxInFlight(); !ok || limit != 7 {
+		t.Fatalf("route admission = %d, %v; want 7, true", limit, ok)
+	}
+}
+
+func TestRouteBuiltinMiddlewareOverridesValidateEffectiveRelationships(t *testing.T) {
+	tests := []struct {
+		name      string
+		overrides string
+		want      string
+	}{
+		{
+			name:      "idle exceeds inherited stream max",
+			overrides: `{"stream_timeout":{"idle_timeout":"2h"}}`,
+			want:      "effective stream_timeout.idle_timeout must not exceed stream_timeout.max_duration",
+		},
+		{
+			name:      "write deadline does not cover request",
+			overrides: `{"timeout":{"maximum_duration":"40s"}}`,
+			want:      "effective write_timeout.timeout must exceed timeout.maximum_duration",
+		},
+		{
+			name:      "invalid route admission",
+			overrides: `{"admission":{"max_in_flight":0}}`,
+			want:      "builtin_middleware_overrides.admission.max_in_flight must be between",
+		},
+		{
+			name:      "route admission exceeds global total",
+			overrides: `{"admission":{"max_in_flight":2000}}`,
+			want:      "builtin_middleware_overrides.admission.max_in_flight must not exceed global request.max_in_flight",
+		},
+		{
+			name:      "route write deadline exceeds shutdown drain",
+			overrides: `{"write_timeout":{"timeout":"40s"}}`,
+			want:      "effective write_timeout.timeout must not exceed shutdown.drain_timeout",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			body := `{"listen":"127.0.0.1:8080","services":{"s":{"upstreams":["http://localhost:9000"]}},"routes":[{"name":"r","path_prefix":"/","service":"s","builtin_middleware_overrides":` + test.overrides + `}]}`
+			_, err := Load(strings.NewReader(body))
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("Load error = %v, want substring %q", err, test.want)
+			}
+		})
+	}
+}
+
 func TestMaximumOverallDerivesValidWriteHeadroom(t *testing.T) {
 	settings := Settings{Request: RequestSettings{MaximumDuration: Duration(MaxSettingDuration)}}.WithDefaults()
 	if got, want := settings.Server.WriteTimeout.Duration(), MaxServerWriteTimeout; got != want {

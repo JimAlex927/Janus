@@ -49,6 +49,13 @@ export interface RouteAction {
   static?: StaticAction;
 }
 
+export interface BuiltinMiddlewareOverrides {
+  timeout?: { maximum_duration?: string };
+  admission?: { max_in_flight?: number };
+  stream_timeout?: { max_duration?: string; idle_timeout?: string };
+  write_timeout?: { timeout?: string };
+}
+
 export interface Route {
   name: string;
   limen?: string;
@@ -59,6 +66,7 @@ export interface Route {
   /** 兼容老配置的扁平 service 字段，新配置优先用 action.forward */
   service?: string;
   middlewares?: string[];
+  builtin_middleware_overrides?: BuiltinMiddlewareOverrides;
   action?: RouteAction;
 }
 
