@@ -65,12 +65,24 @@
       "in_flight": {
         "max_concurrent": 100
       }
+    },
+    "strip_prefix-janus": {
+      "scope": "route",
+      "strip_prefix": {
+        "prefix": "/janus"
+      }
+    },
+    "strip_prefix_vault": {
+      "scope": "route",
+      "strip_prefix": {
+        "prefix": "/vault"
+      }
     }
   },
   "services": {
     "service-1": {
       "upstreams": [
-        "http://127.0.0.1:9000"
+        "http://127.0.0.1:8787"
       ],
       "middlewares": [
         "in_flight-1"
@@ -84,31 +96,37 @@
         "scheme": "http"
       },
       "middlewares": []
+    },
+    "service-3": {
+      "upstreams": [
+        "http://127.0.0.1:9090"
+      ],
+      "middlewares": []
     }
   },
   "routes": [
     {
       "name": "route-1",
       "limen": "private",
-      "match": "PathPrefix(`/test`)",
+      "match": "PathPrefix(`/vault`)",
       "middlewares": [
         "buffer-1",
-        "body_limit-1"
+        "body_limit-1",
+        "strip_prefix_vault"
       ],
       "action": {
-        "respond": {
-          "status": 200,
-          "body": "okok\n"
+        "forward": {
+          "service": "service-1"
         }
       }
     },
     {
       "name": "route-2",
       "limen": "private",
-      "match": "PathPrefix(`/new2`)",
+      "match": "PathPrefix(`/janus`)",
       "action": {
         "forward": {
-          "service": "service-2"
+          "service": "service-3"
         }
       }
     }

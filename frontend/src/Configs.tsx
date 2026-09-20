@@ -1,18 +1,23 @@
 import { useEffect, useRef, useState } from "react";
 import { apiPath, getConfig, listConfigs, type ConfigRecord } from "./api";
 import type { ConfigStore } from "./useConfig";
-import { Badge, Empty, StatCard, useDialogController } from "./ui";
+import { Badge, Empty, useDialogController } from "./ui";
 
-const PAGE_SIZE = 12;
+const PAGE_SIZE = 20;
+
+type StatusTab = "active" | "draft" | "archived";
+
+const TAB_LABELS: Record<StatusTab, { label: string; hint: string }> = {
+  active: { label: "当前生效", hint: "正在运行的版本" },
+  draft: { label: "草稿", hint: "可编辑、可发布" },
+  archived: { label: "历史版本", hint: "可直接回滚" },
+};
 
 export function ConfigsPage({ store, onEdit }: { store: ConfigStore; onEdit: (id: number) => void }) {
-  const [active, setActive] = useState<ConfigRecord | null>(null);
-  const [drafts, setDrafts] = useState<ConfigRecord[]>([]);
-  const [archived, setArchived] = useState<ConfigRecord[]>([]);
-  const [draftTotal, setDraftTotal] = useState(0);
-  const [archivedTotal, setArchivedTotal] = useState(0);
-  const [draftPageNum, setDraftPageNum] = useState(1);
-  const [archivedPageNum, setArchivedPageNum] = useState(1);
+  const [tab, setTab] = useState<StatusTab>("draft");
+  const [records, setRecords] = useState<ConfigRecord[]>([]);
+  const [totals, setTotals] = useState<Record<StatusTab, number>>({ active: 0, draft: 0, archived: 0 });
+  const [pageNum, setPageNum] = useState(1);
   const [createdAtFrom, setCreatedAtFrom] = useState("");
   const [createdAtTo, setCreatedAtTo] = useState("");
   const [updatedAtFrom, setUpdatedAtFrom] = useState("");
@@ -25,29 +30,28 @@ export function ConfigsPage({ store, onEdit }: { store: ConfigStore; onEdit: (id
 
   useEffect(() => {
     loadConfigs().catch(() => undefined);
-    // Each status owns its own page number.
+    // Reload when tab, page, or filters change. Tab switching always starts at page 1.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [draftPageNum, archivedPageNum, createdAtFrom, createdAtTo, updatedAtFrom, updatedAtTo, sortBy, sortOrder]);
+  }, [tab, pageNum, createdAtFrom, createdAtTo, updatedAtFrom, updatedAtTo, sortBy, sortOrder]);
 
   async function loadConfigs() {
     setLoading(true);
     setError("");
     try {
-      const [activePage, draftPage, archivedPage] = await Promise.all([
-        listConfigs({ status: "active", pageNum: 1, pageSize: 1 }),
-        listConfigs({ status: "draft", pageNum: draftPageNum, pageSize: PAGE_SIZE, ...queryFilters() }),
-        listConfigs({ status: "archived", pageNum: archivedPageNum, pageSize: PAGE_SIZE, ...queryFilters() }),
+      const [page, activePage, draftPage, archivedPage] = await Promise.all([
+        listConfigs({ status: tab, pageNum, pageSize: PAGE_SIZE, ...queryFilters() }),
+        tab !== "active" ? listConfigs({ status: "active", pageNum: 1, pageSize: 1 }) : Promise.resolve(null),
+        tab !== "draft" ? listConfigs({ status: "draft", pageNum: 1, pageSize: 1 }) : Promise.resolve(null),
+        tab !== "archived" ? listConfigs({ status: "archived", pageNum: 1, pageSize: 1 }) : Promise.resolve(null),
       ]);
-      setActive(activePage.configs[0] || null);
-      setDrafts(draftPage.configs || []);
-      setArchived(archivedPage.configs || []);
-      setDraftTotal(draftPage.total || 0);
-      setArchivedTotal(archivedPage.total || 0);
-      if (draftPage.configs.length === 0 && draftPage.total > 0 && draftPageNum > Math.ceil(draftPage.total / PAGE_SIZE)) {
-        setDraftPageNum(Math.ceil(draftPage.total / PAGE_SIZE));
-      }
-      if (archivedPage.configs.length === 0 && archivedPage.total > 0 && archivedPageNum > Math.ceil(archivedPage.total / PAGE_SIZE)) {
-        setArchivedPageNum(Math.ceil(archivedPage.total / PAGE_SIZE));
+      setRecords(page.configs || []);
+      setTotals({
+        active: tab === "active" ? page.total : activePage?.total ?? totals.active,
+        draft: tab === "draft" ? page.total : draftPage?.total ?? totals.draft,
+        archived: tab === "archived" ? page.total : archivedPage?.total ?? totals.archived,
+      });
+      if ((page.configs || []).length === 0 && page.total > 0 && pageNum > Math.ceil(page.total / PAGE_SIZE)) {
+        setPageNum(Math.ceil(page.total / PAGE_SIZE));
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -67,16 +71,21 @@ export function ConfigsPage({ store, onEdit }: { store: ConfigStore; onEdit: (id
     };
   }
 
+  function switchTab(next: StatusTab) {
+    if (next === tab) return;
+    setTab(next);
+    setPageNum(1);
+  }
+
   function resetQueryPage() {
-    setDraftPageNum(1);
-    setArchivedPageNum(1);
+    setPageNum(1);
   }
 
   async function createConfig() {
     const name = (await dialogs.prompt({
       title: "新建配置",
       message: "为这份配置设置一个便于识别的名称。",
-      initialValue: `config-${draftTotal + archivedTotal + (active ? 1 : 0) + 1}`,
+      initialValue: `config-${totals.draft + totals.archived + totals.active + 1}`,
       placeholder: "例如 production",
       confirmLabel: "创建配置",
       icon: "plus",
@@ -212,7 +221,7 @@ export function ConfigsPage({ store, onEdit }: { store: ConfigStore; onEdit: (id
     try {
       const res = await fetch(apiPath(`/api/v1/configs/${id}`), { method: "DELETE" });
       if (!res.ok) throw new Error(await res.text());
-      if (drafts.length === 1 && draftPageNum > 1) setDraftPageNum((page) => page - 1);
+      if (records.length === 1 && pageNum > 1) setPageNum((page) => page - 1);
       else await loadConfigs();
       store.setMessage("配置已删除");
     } catch (e) {
@@ -253,17 +262,18 @@ export function ConfigsPage({ store, onEdit }: { store: ConfigStore; onEdit: (id
     }
   }
 
-  function renderConfigCard(cfg: ConfigRecord) {
+  function renderConfigRow(cfg: ConfigRecord) {
     return (
-      <div key={cfg.id} className={`config-card ${cfg.status}`}>
-        <div className="config-card-header">
-          <div className="config-name">
-            <strong>{cfg.name}</strong>
-            <Badge text={cfg.status} variant={cfg.status === "active" ? "success" : cfg.status === "draft" ? "warn" : "default"} />
-          </div>
-          <div className="config-time">更新于 {new Date(cfg.updated_at).toLocaleString()}</div>
+      <div key={cfg.id} className={`config-row ${cfg.status}`}>
+        <div className="config-row-main">
+          <strong className="config-row-name" title={cfg.name}>{cfg.name}</strong>
+          <Badge text={cfg.status} variant={cfg.status === "active" ? "success" : cfg.status === "draft" ? "warn" : "default"} />
         </div>
-        <div className="config-card-actions">
+        <div className="config-row-time">
+          <span title={new Date(cfg.updated_at).toLocaleString()}>更新于 {new Date(cfg.updated_at).toLocaleString()}</span>
+          <small>创建于 {new Date(cfg.created_at).toLocaleString()}</small>
+        </div>
+        <div className="config-row-actions">
           <button type="button" className="btn small" onClick={() => onEdit(cfg.id)}>编辑</button>
           {cfg.status !== "active" && (
             <button type="button" className="btn small primary" onClick={() => publishConfig(cfg.id)}>
@@ -280,8 +290,8 @@ export function ConfigsPage({ store, onEdit }: { store: ConfigStore; onEdit: (id
     );
   }
 
-  if (loading) return <Empty text="正在加载配置列表…" />;
-  if (error) return <Empty text={`加载失败：${error}`} action={<button className="btn primary" onClick={loadConfigs}>重试</button>} />;
+  const currentTotal = totals[tab];
+  const pageCount = Math.max(1, Math.ceil(currentTotal / PAGE_SIZE));
 
   return (
     <section className="page config-library-page">
@@ -298,45 +308,68 @@ export function ConfigsPage({ store, onEdit }: { store: ConfigStore; onEdit: (id
         <input ref={fileInput} type="file" accept=".json,application/json" hidden onChange={importConfig} />
       </div>
 
-      <div className="config-query-controls">
-        <label>排序字段<select value={sortBy} onChange={(event) => { setSortBy(event.target.value as "createdAt" | "updatedAt"); resetQueryPage(); }}><option value="updatedAt">修改时间</option><option value="createdAt">创建时间</option></select></label>
-        <label>顺序<select value={sortOrder} onChange={(event) => { setSortOrder(event.target.value as "asc" | "desc"); resetQueryPage(); }}><option value="desc">倒序</option><option value="asc">正序</option></select></label>
-        <label>创建时间起<input type="datetime-local" value={createdAtFrom} onChange={(event) => { setCreatedAtFrom(event.target.value); resetQueryPage(); }} /></label>
-        <label>创建时间止<input type="datetime-local" value={createdAtTo} onChange={(event) => { setCreatedAtTo(event.target.value); resetQueryPage(); }} /></label>
-        <label>修改时间起<input type="datetime-local" value={updatedAtFrom} onChange={(event) => { setUpdatedAtFrom(event.target.value); resetQueryPage(); }} /></label>
-        <label>修改时间止<input type="datetime-local" value={updatedAtTo} onChange={(event) => { setUpdatedAtTo(event.target.value); resetQueryPage(); }} /></label>
+      <div className="config-tabs" role="tablist" aria-label="配置状态">
+        {(Object.keys(TAB_LABELS) as StatusTab[]).map((key) => (
+          <button
+            key={key}
+            type="button"
+            role="tab"
+            aria-selected={tab === key}
+            className={`config-tab ${tab === key ? "active" : ""}`}
+            onClick={() => switchTab(key)}
+          >
+            <span className="config-tab-label">{TAB_LABELS[key].label}</span>
+            <span className="config-tab-count">{totals[key]}</span>
+            <span className="config-tab-hint">{TAB_LABELS[key].hint}</span>
+          </button>
+        ))}
       </div>
 
-      <div className="stat-grid config-summary-grid">
-        <StatCard label="生效中" value={active ? 1 : 0} sub={active?.name} />
-        <StatCard label="草稿" value={draftTotal} />
-        <StatCard label="历史版本" value={archivedTotal} />
-      </div>
+      {tab !== "active" && (
+        <div className="config-query-controls">
+          <label>排序字段<select value={sortBy} onChange={(event) => { setSortBy(event.target.value as "createdAt" | "updatedAt"); resetQueryPage(); }}><option value="updatedAt">修改时间</option><option value="createdAt">创建时间</option></select></label>
+          <label>顺序<select value={sortOrder} onChange={(event) => { setSortOrder(event.target.value as "asc" | "desc"); resetQueryPage(); }}><option value="desc">倒序</option><option value="asc">正序</option></select></label>
+          <label>创建时间起<input type="datetime-local" value={createdAtFrom} onChange={(event) => { setCreatedAtFrom(event.target.value); resetQueryPage(); }} /></label>
+          <label>创建时间止<input type="datetime-local" value={createdAtTo} onChange={(event) => { setCreatedAtTo(event.target.value); resetQueryPage(); }} /></label>
+          <label>修改时间起<input type="datetime-local" value={updatedAtFrom} onChange={(event) => { setUpdatedAtFrom(event.target.value); resetQueryPage(); }} /></label>
+          <label>修改时间止<input type="datetime-local" value={updatedAtTo} onChange={(event) => { setUpdatedAtTo(event.target.value); resetQueryPage(); }} /></label>
+        </div>
+      )}
 
-      {!active && draftTotal === 0 && archivedTotal === 0 ? (
-        <Empty text="暂无配置，点击右上角创建" action={<button className="btn primary" onClick={createConfig}>创建第一个配置</button>} />
+      {loading ? (
+        <Empty text="正在加载配置列表…" />
+      ) : error ? (
+        <Empty text={`加载失败：${error}`} action={<button className="btn primary" onClick={loadConfigs}>重试</button>} />
+      ) : currentTotal === 0 ? (
+        <Empty
+          text={tab === "active" ? "当前没有生效中的配置" : tab === "draft" ? "暂无草稿，点击右上角创建" : "暂无历史版本"}
+          action={tab === "draft" ? <button className="btn primary" onClick={createConfig}>创建第一个配置</button> : undefined}
+        />
       ) : (
-        <div className="config-groups">
-          {active && <ConfigGroup label="当前生效" detail="正在运行的版本"><div className="card-list">{renderConfigCard(active)}</div></ConfigGroup>}
-          {draftTotal > 0 && <ConfigGroup label="草稿" detail={`共 ${draftTotal} 条，独立分页`}><div className="card-list">{drafts.map(renderConfigCard)}</div><PageControls total={draftTotal} pageNum={draftPageNum} onPageChange={setDraftPageNum} /></ConfigGroup>}
-          {archivedTotal > 0 && <ConfigGroup label="历史版本" detail={`共 ${archivedTotal} 条，独立分页，可直接回滚`}><div className="card-list">{archived.map(renderConfigCard)}</div><PageControls total={archivedTotal} pageNum={archivedPageNum} onPageChange={setArchivedPageNum} /></ConfigGroup>}
+        <div className="config-table">
+          <div className="config-table-head">
+            <span>名称</span>
+            <span>时间</span>
+            <span>操作</span>
+          </div>
+          {records.map(renderConfigRow)}
+        </div>
+      )}
+
+      {currentTotal > 0 && (
+        <div className="config-pager">
+          <span className="config-pager-info">共 {currentTotal} 条 · 第 {pageNum}/{pageCount} 页 · 每页 {PAGE_SIZE} 条</span>
+          <div className="config-pager-controls">
+            <button type="button" className="btn small" disabled={pageNum === 1} onClick={() => setPageNum(1)} title="第一页">«</button>
+            <button type="button" className="btn small" disabled={pageNum === 1} onClick={() => setPageNum((p) => Math.max(1, p - 1))}>上一页</button>
+            <button type="button" className="btn small" disabled={pageNum >= pageCount} onClick={() => setPageNum((p) => Math.min(pageCount, p + 1))}>下一页</button>
+            <button type="button" className="btn small" disabled={pageNum >= pageCount} onClick={() => setPageNum(pageCount)} title="最后一页">»</button>
+          </div>
         </div>
       )}
       {dialogs.dialog}
     </section>
   );
-}
-
-function ConfigGroup({ label, detail, children }: { label: string; detail: string; children: React.ReactNode }) {
-  return <section className="config-group"><div className="config-group-head"><div><span>{label}</span><small>{detail}</small></div></div>{children}</section>;
-}
-
-function PageControls({ total, pageNum, onPageChange }: { total: number; pageNum: number; onPageChange: (pageNum: number) => void }) {
-  if (total <= PAGE_SIZE) return null;
-  const first = (pageNum - 1) * PAGE_SIZE + 1;
-  const last = Math.min(pageNum * PAGE_SIZE, total);
-  const pageCount = Math.ceil(total / PAGE_SIZE);
-  return <div className="config-page-controls"><small>{first}-{last} / {total} · 第 {pageNum}/{pageCount} 页</small><div><button type="button" className="btn small" disabled={pageNum === 1} onClick={() => onPageChange(Math.max(1, pageNum - 1))} title="上一页">←</button><button type="button" className="btn small" disabled={pageNum >= pageCount} onClick={() => onPageChange(Math.min(pageCount, pageNum + 1))} title="下一页">→</button></div></div>;
 }
 
 function toApiTime(value: string): string | undefined {

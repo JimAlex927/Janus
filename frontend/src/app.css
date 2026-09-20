@@ -673,6 +673,39 @@ input:focus, select:focus, textarea:focus { outline: 2px solid #c7d0ff; border-c
 .config-summary-grid .stat-card { border: 0; border-right: 1px solid #dce5df; border-radius: 0; background: transparent; padding: 18px 22px; }
 .config-summary-grid .stat-card:last-child { border-right: 0; }
 .config-summary-grid .stat-card span { color: #6b8a83; text-transform: uppercase; letter-spacing: .12em; font-size: 10px; font-weight: 800; }
+/* configuration library: status tabs + list rows + pager */
+.config-tabs { display: flex; gap: 10px; flex-wrap: wrap; }
+.config-tab { flex: 1 1 150px; display: grid; grid-template-columns: auto auto; grid-template-rows: auto auto; column-gap: 8px; align-items: center; justify-items: start; border: 1px solid #dce5df; background: #fff; border-radius: 10px; padding: 12px 16px 10px; cursor: pointer; text-align: left; transition: border-color .15s, box-shadow .15s, background .15s; }
+.config-tab-label { grid-column: 1; font-size: 14px; font-weight: 700; color: #173c40; }
+.config-tab-count { grid-column: 2; justify-self: end; min-width: 24px; padding: 2px 8px; border-radius: 20px; background: #eef4ef; color: #4c9b8c; font-size: 12px; font-weight: 700; text-align: center; }
+.config-tab-hint { grid-column: 1 / -1; margin-top: 3px; color: #78908a; font-size: 11px; }
+.config-tab:hover { border-color: #9fbbb1; }
+.config-tab.active { border-color: #4c9b8c; background: #f4faf7; box-shadow: 0 0 0 3px #4c9b8c1f; }
+.config-tab.active .config-tab-count { background: #4c9b8c; color: #fff; }
+
+.config-table { border: 1px solid #e0e8e3; border-radius: 10px; background: #fff; overflow: hidden; }
+.config-table-head { display: grid; grid-template-columns: minmax(0, 2.2fr) minmax(0, 2fr) minmax(0, 2.6fr); gap: 14px; padding: 10px 18px; background: #f2f5f0; color: #6b8a83; font-size: 11px; font-weight: 750; letter-spacing: .08em; text-transform: uppercase; }
+.config-row { display: grid; grid-template-columns: minmax(0, 2.2fr) minmax(0, 2fr) minmax(0, 2.6fr); gap: 14px; align-items: center; padding: 13px 18px; border-top: 1px solid #eef0f5; transition: background .12s; }
+.config-row:hover { background: #f8fbf7; }
+.config-row.active { background: #f4faf7; box-shadow: inset 3px 0 0 #d18c4e; }
+.config-row-main { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.config-row-name { font-size: 13px; color: #173c40; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.config-row-time { display: grid; gap: 2px; min-width: 0; color: #55736c; font-size: 12px; }
+.config-row-time small { color: #9aa8a3; font-size: 11px; }
+.config-row-actions { display: flex; gap: 7px; flex-wrap: wrap; justify-content: flex-end; }
+
+.config-pager { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 4px 2px; }
+.config-pager-info { color: #78908a; font-size: 12px; }
+.config-pager-controls { display: flex; gap: 6px; }
+.config-pager-controls .btn { min-width: 34px; }
+
+@media (max-width: 760px) {
+  .config-table-head { display: none; }
+  .config-row { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+  .config-row-actions { justify-content: flex-start; }
+  .config-tabs { display: grid; grid-template-columns: 1fr; }
+  .config-tab { flex: none; }
+}
 .config-summary-grid .stat-card strong { color: #173c40; font-size: 27px; font-weight: 650; }
 .config-card { border: 0; border-top: 2px solid #b6ccc3; border-radius: 0; background: #f8fbf7; padding: 18px 20px; box-shadow: 0 8px 24px #173c4009; }
 .config-card.active { border-top-color: #d18c4e; }
