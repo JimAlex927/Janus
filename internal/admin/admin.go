@@ -88,6 +88,7 @@ type Handler struct {
 	saveActive     func(config.Config) error
 	cookiePath     string
 	sessionsMu     sync.Mutex
+	controlMu      sync.Mutex // serialize file/runtime/library mutations
 	sessions       map[string]time.Time
 }
 
@@ -113,7 +114,7 @@ func NewHandlerWithOptions(options Options) http.Handler {
 	h := &Handler{state: options.State, metrics: options.Metrics, health: options.Health, current: options.Current, revision: options.Revision, discovery: options.Discovery, registryHealth: options.RegistryHealth, publish: options.Publish, subscribe: options.Subscribe, library: options.Library, saveActive: options.SaveActive, cookiePath: cookiePath, sessions: make(map[string]time.Time)}
 	console := http.NewServeMux()
 	console.HandleFunc("/", h.ui)
-	console.HandleFunc("/api/v1/auth/login", h.login)
+	console.Handle("/api/v1/auth/login", protectLogin(http.HandlerFunc(h.login)))
 	console.HandleFunc("/api/v1/auth/logout", h.logout)
 	console.HandleFunc("/api/v1/status", h.status)
 	console.HandleFunc("/api/v1/discovery", h.discoveryStatus)
@@ -263,7 +264,7 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 	}
 	h.sessions[token] = now.Add(8 * time.Hour)
 	h.sessionsMu.Unlock()
-	http.SetCookie(w, &http.Cookie{Name: "janus_session", Value: token, Path: h.cookiePath, HttpOnly: true, SameSite: http.SameSiteStrictMode, MaxAge: 8 * 60 * 60})
+	http.SetCookie(w, &http.Cookie{Name: "janus_session", Value: token, Path: h.cookiePath, HttpOnly: true, Secure: h.secureSessionCookie(r), SameSite: http.SameSiteStrictMode, MaxAge: 8 * 60 * 60})
 	writeJSON(w, 200, map[string]any{"ok": true})
 }
 func (h *Handler) logout(w http.ResponseWriter, r *http.Request) {
@@ -275,7 +276,7 @@ func (h *Handler) logout(w http.ResponseWriter, r *http.Request) {
 		delete(h.sessions, c.Value)
 		h.sessionsMu.Unlock()
 	}
-	http.SetCookie(w, &http.Cookie{Name: "janus_session", Path: h.cookiePath, MaxAge: -1, HttpOnly: true, SameSite: http.SameSiteStrictMode})
+	http.SetCookie(w, &http.Cookie{Name: "janus_session", Path: h.cookiePath, MaxAge: -1, HttpOnly: true, Secure: h.secureSessionCookie(r), SameSite: http.SameSiteStrictMode})
 	writeJSON(w, 200, map[string]any{"ok": true})
 }
 func (h *Handler) status(w http.ResponseWriter, r *http.Request) {
@@ -393,6 +394,8 @@ func (h *Handler) validate(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"ok": true})
 }
 func (h *Handler) publishConfig(w http.ResponseWriter, r *http.Request) {
+	h.controlMu.Lock()
+	defer h.controlMu.Unlock()
 	if !allowMethod(w, r, http.MethodPost) {
 		return
 	}

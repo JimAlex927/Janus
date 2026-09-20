@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -31,5 +32,39 @@ func TestRateLimitBurstAndRefill(t *testing.T) {
 	h.ServeHTTP(rr, httptest.NewRequest("GET", "/", nil))
 	if rr.Code != http.StatusNoContent {
 		t.Fatalf("refilled request got %d", rr.Code)
+	}
+}
+
+func TestRateLimitLRUBoundsAndGenerationReset(t *testing.T) {
+	options := RateLimitOptions{Average: 1, Period: time.Hour, Burst: 1, MaxKeys: 2}
+	l, _ := NewRateLimiter(options)
+	l.allow("a")
+	l.allow("b")
+	l.allow("a")
+	l.allow("c")
+	if len(l.buckets) != 2 || l.buckets["b"] != nil || l.buckets["a"] == nil {
+		t.Fatal("not bounded LRU")
+	}
+	if allowed, _ := l.allow("a"); allowed {
+		t.Fatal("existing bucket refilled unexpectedly")
+	}
+	next, _ := NewRateLimiter(options)
+	if allowed, _ := next.allow("a"); !allowed {
+		t.Fatal("generation-local bucket did not reset")
+	}
+}
+
+func BenchmarkRateLimitHighCardinality(b *testing.B) {
+	for _, size := range []int{1024, 65536} {
+		b.Run(fmt.Sprint(size), func(b *testing.B) {
+			l, _ := NewRateLimiter(RateLimitOptions{Average: 1, Period: time.Hour, Burst: 1, MaxKeys: size})
+			for i := 0; i < size; i++ {
+				l.allow(fmt.Sprint(i))
+			}
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				l.allow(fmt.Sprint(i + size))
+			}
+		})
 	}
 }

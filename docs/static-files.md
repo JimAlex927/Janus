@@ -28,10 +28,17 @@ requested by a GET. This is suitable for React, Vue, and other history-mode
 single-page applications. Directory listing is disabled by default and should
 only be enabled for an intentionally public, controlled file tree.
 
-Janus resolves the configured root once at startup and resolves each existing
-requested file before serving it. A symlinked root is supported, but a symlink
-inside that tree may not resolve outside the root; such a request returns 404.
-Do not use a static route as a cross-directory mount mechanism.
+Each Gateway generation opens the configured directory once with `os.OpenRoot`.
+Files, indexes, SPA fallbacks and directory listings are opened relative to that
+handle; `Stat` and `ServeContent` use the same opened file. This removes the old
+check-then-open symlink race. Replacing the root pathname does not change an
+already running generation's directory; reload to adopt the replacement.
+The handle closes after that generation drains, or on candidate build failure.
+A symlinked root is supported. Relative symlinks contained inside it are allowed;
+absolute symlinks and escaping symlinks are rejected (404), even if an absolute
+symlink happens to point back inside. Use relative symlinks for internal assets.
+This is path confinement, not a filesystem sandbox: trusted operators must still
+control hard links, mounts and the contents of the served directory.
 
 The action preserves the standard Go HTTP file-serving behavior, including
 content type detection, byte ranges, `Last-Modified`, and conditional

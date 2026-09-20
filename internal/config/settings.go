@@ -65,6 +65,7 @@ type Settings struct {
 }
 
 type AdminSettings struct {
+	CookieSecure bool   `json:"cookie_secure,omitempty"`
 	Address      string `json:"address"` // optional loopback/private-network listener
 	Username     string `json:"username,omitempty"`
 	PasswordHash string `json:"password_hash,omitempty"`

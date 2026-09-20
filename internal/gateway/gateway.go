@@ -3,6 +3,7 @@ package gateway
 
 import (
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -31,6 +32,7 @@ type Gateway struct {
 	checkers        []*health.Checker
 	healthByService map[string]*health.Checker
 	discovered      map[string]*discovery.Lease
+	assets          []io.Closer
 }
 
 const routeLimiterPrefix = "\x00janus-route\x00"
@@ -81,9 +83,13 @@ func NewWithDiscovery(c config.Config, logger *zap.Logger, transport http.RoundT
 	healthByService := make(map[string]*health.Checker)
 	discovered := make(map[string]*discovery.Lease)
 	committed := false
+	var assets []io.Closer
 	defer func() {
 		if committed {
 			return
+		}
+		for _, asset := range assets {
+			_ = asset.Close()
 		}
 		for _, lease := range discovered {
 			lease.Close()
@@ -187,6 +193,9 @@ func NewWithDiscovery(c config.Config, logger *zap.Logger, transport http.RoundT
 		if err != nil {
 			return nil, err
 		}
+		if asset, ok := actionHandler.(*staticHandler); ok {
+			assets = append(assets, asset)
+		}
 		routeHandler := middleware.Chain(actionHandler, routeMiddlewares...)
 		parameters := r.EffectiveBuiltinMiddlewareParameters(c.Settings)
 		builtins := make([]middleware.Middleware, 0, 5)
@@ -224,6 +233,7 @@ func NewWithDiscovery(c config.Config, logger *zap.Logger, transport http.RoundT
 	}
 	committed = true
 	return &Gateway{
+		assets:     assets,
 		discovered: discovered,
 		handler:    routeHandler,
 		standalone: middleware.Chain(
@@ -444,6 +454,9 @@ func (g *Gateway) HealthSnapshot() []telemetry.BackendHealth {
 }
 
 func (g *Gateway) Close() {
+	for _, asset := range g.assets {
+		_ = asset.Close()
+	}
 	for _, lease := range g.discovered {
 		lease.Close()
 	}

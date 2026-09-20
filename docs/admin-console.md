@@ -22,6 +22,21 @@ The example hash is only a development placeholder and must be replaced before
 deployment. Health probes remain available at `/livez` and `/readyz`; the
 console API requires the configured session when credentials are present.
 
+Login protection is local to this admin handler/process: a global bucket permits
+60 attempts/minute (burst 20), and each TCP peer permits 5/minute (burst 10,
+at most 1,024 peers retained). At most four login handlers run concurrently;
+excess requests return 429 without waiting. Login bodies are capped at 4 KiB
+and body reads at five seconds. Behind a proxy, all clients from that peer share
+its budget. `X-Forwarded-For` is never accepted as the login identity. This is
+bounded brute-force protection, not distributed account lockout or DDoS defense.
+
+The built-in admin listener is private HTTP. Put it behind a trusted HTTPS
+terminator for remote access, block direct access to its private port, and set
+`settings.admin.cookie_secure: true` (restart required). Cookies are Secure when
+that explicit setting is true or the handler receives actual TLS. An arbitrary
+`X-Forwarded-Proto: https` never enables Secure. Leave the setting false only for
+intentional private/local HTTP use; Secure cookies cannot log in over plain HTTP.
+
 ## Base URL deployment
 
 The console can be mounted below a path when it shares a host with other
@@ -76,6 +91,21 @@ published. Settings that affect listeners or process-wide request
 infrastructure remain startup-owned; they are normalized away on publish and
 must be changed through `全局设置`, which rewrites the file and requires a
 restart.
+
+The console also sends `X-Janus-Record-Revision` on stored draft save and publish,
+using the exact `updated_at` returned by the preceding read/save. A stale token
+returns 409 before changing the record or Runtime. Publication returns its own
+new `updated_at`, so a follow-up read cannot accidentally bless another user's
+intervening change. Older API clients may omit this header for compatibility;
+they do not receive draft lost-update protection. Runtime revision remains
+mandatory for publication. Use a single Janus writer per config/library pair;
+the in-process mutation lock is not distributed coordination.
+
+Delayed loads, remote events, publication and conflicts preserve newer local
+edits. A 409 requires explicit comparison/merge, not blind retry. Drafts remain
+in browser memory: refreshing/closing the page can still discard unsaved work.
+Copy the JSON before reopening a conflicting record. For recovery and backups,
+see [Phase B acceptance record](phase-b-completion-2026-09-20.md).
 
 The API also remains compatible with direct atomic edits of the JSON file. The
 file reloader recognizes a snapshot already published by the console and does

@@ -156,9 +156,11 @@ export function getStoredConfig(id: number): Promise<StoredConfig> {
 export function saveStoredConfig(
   id: number,
   payload: { name?: string; content?: JanusConfig; layout?: Record<string, unknown> },
-): Promise<{ ok: boolean; id: number; status?: string; forked_from?: number }> {
+  recordRevision?: string,
+): Promise<{ ok: boolean; id: number; status?: string; forked_from?: number; updated_at: string }> {
   return request(`/api/v1/configs/${id}`, {
     method: "PUT",
+    headers: recordRevision ? { "X-Janus-Record-Revision": recordRevision } : undefined,
     body: JSON.stringify(payload),
   });
 }
@@ -167,10 +169,10 @@ export function deleteStoredConfig(id: number): Promise<{ ok: boolean }> {
   return request(`/api/v1/configs/${id}`, { method: "DELETE" });
 }
 
-export function publishStoredConfig(id: number, revision: number): Promise<{ ok: boolean; revision: number; warning?: string }> {
+export function publishStoredConfig(id: number, revision: number, recordRevision?: string): Promise<{ ok: boolean; revision: number; warning?: string; updated_at?: string }> {
   return request(`/api/v1/configs/${id}/publish`, {
     method: "POST",
-    headers: { "X-Janus-Revision": String(revision) },
+    headers: { "X-Janus-Revision": String(revision), ...(recordRevision ? { "X-Janus-Record-Revision": recordRevision } : {}) },
   });
 }
 

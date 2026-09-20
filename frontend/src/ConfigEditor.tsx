@@ -247,7 +247,7 @@ type ManagerSnapshot = { draft: JanusConfig; editing: EditorState | null };
 export function ConfigEditorPage({ store, id, onBack, onStatusChange }: { store: ConfigStore; id: number; onBack: () => void; onStatusChange: () => void }) {
   return (
     <ReactFlowProvider>
-      <ConfigEditor store={store} id={id} onBack={onBack} onStatusChange={onStatusChange} />
+      <ConfigEditor key={id} store={store} id={id} onBack={onBack} onStatusChange={onStatusChange} />
     </ReactFlowProvider>
   );
 }
@@ -265,6 +265,10 @@ function ConfigEditor({ store, id, onBack, onStatusChange }: { store: ConfigStor
   const [middlewareCatalog, setMiddlewareCatalog] = useState<MiddlewareCapability[]>([]);
   const [regManager, setRegManager] = useState<{ allowSelect: boolean; snapshot: ManagerSnapshot } | null>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const onSelectionChange = useCallback(({ nodes: selected }: { nodes: FlowNode[] }) => {
+    const ids = selected.map((node) => node.id);
+    setSelectedIds((previous) => previous.length === ids.length && previous.every((id, index) => id === ids[index]) ? previous : ids);
+  }, []);
   const [viewMode, setViewMode] = useState<EditorView>("canvas");
   const [ruleSort, setRuleSort] = useState<RuleSort>("priority");
   const [limenFilter, setLimenFilter] = useState("all");
@@ -275,6 +279,9 @@ function ConfigEditor({ store, id, onBack, onStatusChange }: { store: ConfigStor
   const { screenToFlowPosition } = useReactFlow();
   const dialogs = useDialogController();
   const draftRef = useRef<JanusConfig | null>(null);
+  const recordRevision = useRef("");
+  const saving = useRef(false);
+  const publishing = useRef(false);
   draftRef.current = draft;
 
   const dirty = useMemo(() => {
@@ -295,13 +302,15 @@ function ConfigEditor({ store, id, onBack, onStatusChange }: { store: ConfigStor
           getMiddlewareCapabilities(),
         ]);
         if (!alive) return;
+        recordRevision.current = record.updated_at;
         setMeta({ name: record.name, status: record.status });
         setMiddlewareCatalog(capabilities.middlewares);
         setDraft(record.content);
         setJsonText(JSON.stringify(record.content, null, 2));
         setSaved(JSON.stringify(record.content));
-        setSavedLayout(JSON.stringify(record.layout?.nodes || {}));
-        setNodes(buildNodes(record.content, record.layout?.nodes));
+        const loadedNodes = buildNodes(record.content, record.layout?.nodes);
+        setSavedLayout(JSON.stringify(Object.fromEntries(loadedNodes.map((node) => [node.id, { x: Math.round(node.position.x), y: Math.round(node.position.y) }]))));
+        setNodes(loadedNodes);
         setEdges(deriveEdges(record.content));
       } catch (error) {
         if (error instanceof ApiError && error.status === 401) store.setStatus("unauthorized");
@@ -958,16 +967,18 @@ function routeCoreLabel(route: Route): string {
 
   async function save() {
     const draft = draftRef.current;
-    if (!draft) return 0;
+    if (!draft || saving.current) return 0;
     const problems = validateLocal(draft, middlewareCatalog);
     if (problems.length > 0) {
       store.setMessage(`本地检查未通过：${problems[0]}`);
       return 0;
     }
+    saving.current = true;
     setBusy(true);
     try {
       const layout = { nodes: currentLayout() };
-      const result = await saveStoredConfig(workingId, { content: draft, layout });
+      const result = await saveStoredConfig(workingId, { content: draft, layout }, recordRevision.current);
+      recordRevision.current = result.updated_at;
       if (result.id !== workingId) {
         setWorkingId(result.id);
         setMeta((old) => (old ? { ...old, status: result.status || "draft" } : old));
@@ -980,10 +991,11 @@ function routeCoreLabel(route: Route): string {
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) store.setStatus("unauthorized");
       else if (error instanceof ApiError && error.status === 409) {
-        store.setMessage("配置版本发生冲突，请刷新后重试。");
+        store.setMessage("配置已被他人修改，本地草稿已保留且未覆盖远端。请先复制本地 JSON，再重新打开远端版本进行合并。");
       } else store.setMessage(error instanceof Error ? error.message : String(error));
       return 0;
     } finally {
+      saving.current = false;
       setBusy(false);
     }
   }
@@ -1040,8 +1052,13 @@ function routeCoreLabel(route: Route): string {
   }
 
   async function publish() {
+    if (publishing.current) return;
+    publishing.current = true;
+    try {
     const targetId = dirty ? await save() : workingId;
     if (!targetId) return;
+    const targetVersion = recordRevision.current;
+    const expectedRevision = store.revision;
     if (!(await dialogs.confirm({
       title: "发布配置",
       message: `当前生效配置将被「${meta?.name}」替换，路由变化会立即进入新的 generation。`,
@@ -1050,9 +1067,12 @@ function routeCoreLabel(route: Route): string {
     }))) return;
     setBusy(true);
     try {
-      const result = await publishStoredConfig(targetId, store.revision);
+      const result = await publishStoredConfig(targetId, expectedRevision, targetVersion);
       setMeta((old) => (old ? { ...old, status: "active" } : old));
-      await store.load(true);
+      if (result.updated_at) recordRevision.current = result.updated_at;
+      // Do not replace the editor's current content/layout: users may have
+      // continued editing while the saved snapshot was being published.
+      await store.load();
       store.setMessage(
         result.warning
           ? `已发布，网关 generation ${result.revision}。注意：${translateWarning(result.warning)}`
@@ -1061,8 +1081,8 @@ function routeCoreLabel(route: Route): string {
       onStatusChange();
     } catch (error) {
       if (error instanceof ApiError && error.status === 409) {
-        await store.load(true);
-        store.setMessage("版本冲突：远端已被他人更新。已刷新当前配置，请确认后再发布。");
+        await store.load();
+        store.setMessage("版本冲突：远端已被他人更新。本地草稿已保留，请比较并合并后再发布。");
         return;
       }
       const message = error instanceof Error ? error.message : String(error);
@@ -1074,6 +1094,7 @@ function routeCoreLabel(route: Route): string {
     } finally {
       setBusy(false);
     }
+    } finally { publishing.current = false; }
   }
 
 function translateWarning(warning: string): string {
@@ -1177,7 +1198,7 @@ function translateWarning(warning: string): string {
             onEdgesChange={onEdgesChange}
             onConnect={onConnect}
             onNodeDoubleClick={(_, node) => openEditor(node.id)}
-            onSelectionChange={({ nodes: selected }) => setSelectedIds(selected.map((n) => n.id))}
+            onSelectionChange={onSelectionChange}
             nodeTypes={nodeTypes}
             edgeTypes={edgeTypes}
             deleteKeyCode={["Backspace", "Delete"]}

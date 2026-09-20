@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 
 	"janus/internal/protocol"
 )
@@ -22,8 +23,9 @@ func Buffer(maxResponseBodyBytes int64) Middleware {
 				return
 			}
 			buffered := &responseBuffer{
-				header:   make(http.Header),
+				header:   w.Header().Clone(),
 				maxBytes: maxResponseBodyBytes,
+				head:     r.Method == http.MethodHead,
 			}
 			defer func() {
 				if recovered := recover(); recovered != nil {
@@ -66,6 +68,8 @@ type responseBuffer struct {
 	wroteHeader bool
 	maxBytes    int64
 	writeErr    error
+	head        bool
+	finalHeader http.Header
 }
 
 func (b *responseBuffer) Header() http.Header { return b.header }
@@ -81,6 +85,7 @@ func (b *responseBuffer) WriteHeader(status int) {
 	}
 	b.status = status
 	b.wroteHeader = true
+	b.finalHeader = b.header.Clone()
 }
 
 func (b *responseBuffer) Write(p []byte) (int, error) {
@@ -89,6 +94,12 @@ func (b *responseBuffer) Write(p []byte) (int, error) {
 	}
 	if b.writeErr != nil {
 		return 0, b.writeErr
+	}
+	if b.status == http.StatusNoContent || b.status == http.StatusNotModified {
+		return 0, http.ErrBodyNotAllowed
+	}
+	if b.head {
+		return len(p), nil
 	}
 	if b.maxBytes > 0 && int64(b.body.Len())+int64(len(p)) > b.maxBytes {
 		b.writeErr = errResponseTooLarge
@@ -101,7 +112,12 @@ func (b *responseBuffer) Write(p []byte) (int, error) {
 func (b *responseBuffer) Flush() {}
 
 func (b *responseBuffer) commit(dst http.ResponseWriter) {
-	for key, values := range b.header {
+	header := b.finalHeader
+	if header == nil {
+		header = b.header
+	}
+	clear(dst.Header())
+	for key, values := range header {
 		dst.Header()[key] = append([]string(nil), values...)
 	}
 	status := b.status
@@ -111,5 +127,18 @@ func (b *responseBuffer) commit(dst http.ResponseWriter) {
 	dst.WriteHeader(status)
 	if b.body.Len() > 0 {
 		_, _ = dst.Write(b.body.Bytes())
+	}
+	// Trailer values are the exception to the final-header snapshot: handlers
+	// supply them after writing the body, just as with net/http directly.
+	for _, declaration := range header.Values("Trailer") {
+		for _, name := range strings.Split(declaration, ",") {
+			name = http.CanonicalHeaderKey(strings.TrimSpace(name))
+			dst.Header()[name] = append([]string(nil), b.header.Values(name)...)
+		}
+	}
+	for name, values := range b.header {
+		if strings.HasPrefix(name, http.TrailerPrefix) {
+			dst.Header()[name] = append([]string(nil), values...)
+		}
 	}
 }

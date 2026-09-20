@@ -43,6 +43,10 @@ type Store struct {
 	mu sync.Mutex
 }
 
+// Fixed-width UTC values retain lexical ordering down to nanoseconds. The
+// variable-width RFC3339Nano format is suitable for API tokens, not SQL sorts.
+const storeTimeLayout = "2006-01-02T15:04:05.000000000Z"
+
 func Open(path string) (*Store, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, fmt.Errorf("create store dir: %w", err)
@@ -59,7 +63,55 @@ func Open(path string) (*Store, error) {
 		_ = db.Close()
 		return nil, err
 	}
+	if err := normalizeStoreTimes(db); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
 	return &Store{db: db}, nil
+}
+
+func normalizeStoreTimes(db *sql.DB) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	rows, err := tx.Query("SELECT id, created_at, updated_at FROM configs")
+	if err != nil {
+		return err
+	}
+	type stamp struct {
+		id               int64
+		created, updated string
+	}
+	var updates []stamp
+	for rows.Next() {
+		var item stamp
+		if err := rows.Scan(&item.id, &item.created, &item.updated); err != nil {
+			rows.Close()
+			return err
+		}
+		created, updated := parseStoreTime(item.created), parseStoreTime(item.updated)
+		if !created.IsZero() && !updated.IsZero() {
+			c, u := created.UTC().Format(storeTimeLayout), updated.UTC().Format(storeTimeLayout)
+			if c != item.created || u != item.updated {
+				updates = append(updates, stamp{item.id, c, u})
+			}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	for _, item := range updates {
+		if _, err := tx.Exec("UPDATE configs SET created_at = ?, updated_at = ? WHERE id = ?", item.created, item.updated, item.id); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 // parseStoreTime reads timestamps written by this package (RFC3339) and
@@ -169,7 +221,11 @@ func (s *Store) ListPageWithOptions(status string, options ConfigListOptions) ([
 	} {
 		if bound.value != "" {
 			where = append(where, bound.column+" "+bound.operator+" ?")
-			args = append(args, bound.value)
+			parsed := parseStoreTime(bound.value)
+			if parsed.IsZero() {
+				return nil, 0, fmt.Errorf("invalid timestamp %q", bound.value)
+			}
+			args = append(args, parsed.UTC().Format(storeTimeLayout))
 		}
 	}
 	whereSQL := strings.Join(where, " AND ")
@@ -324,7 +380,7 @@ func (s *Store) ReconcileActive(content config.Config) (bool, error) {
 		return false, err
 	}
 	defer func() { _ = tx.Rollback() }()
-	now := time.Now().UTC().Format(time.RFC3339)
+	now := time.Now().UTC().Format(storeTimeLayout)
 	if _, err := tx.Exec("UPDATE configs SET status = 'archived', updated_at = ? WHERE status = 'active'", now); err != nil {
 		return false, err
 	}
@@ -344,7 +400,7 @@ func (s *Store) Create(name string, content config.Config) (*ConfigRecord, error
 	if err != nil {
 		return nil, err
 	}
-	now := time.Now().UTC().Format(time.RFC3339)
+	now := time.Now().UTC().Format(storeTimeLayout)
 	res, err := s.db.Exec("INSERT INTO configs(name, content, status, created_at, updated_at) VALUES(?, ?, 'draft', ?, ?)",
 		name, string(raw), now, now)
 	if err != nil {
@@ -382,7 +438,7 @@ func (s *Store) ForkActive(id int64, name string, content config.Config, layout 
 		return nil, ErrActiveImmutable
 	}
 	now := time.Now().UTC()
-	stamp := now.Format(time.RFC3339)
+	stamp := now.Format(storeTimeLayout)
 	result, err := tx.Exec("INSERT INTO configs(name, content, status, layout, created_at, updated_at) VALUES(?, ?, 'draft', ?, ?, ?)",
 		name, string(raw), layout, stamp, stamp)
 	if err != nil {
@@ -408,7 +464,7 @@ func (s *Store) Update(id int64, name string, content config.Config) error {
 	if err != nil {
 		return err
 	}
-	now := time.Now().UTC().Format(time.RFC3339)
+	now := time.Now().UTC().Format(storeTimeLayout)
 	res, err := s.db.Exec("UPDATE configs SET name = ?, content = ?, updated_at = ? WHERE id = ?",
 		name, string(raw), now, id)
 	if err != nil {
@@ -451,7 +507,7 @@ func (s *Store) UpdateWithLayout(id int64, name string, content config.Config, l
 	} else if status == "active" {
 		return ErrActiveImmutable
 	}
-	now := time.Now().UTC().Format(time.RFC3339)
+	now := time.Now().UTC().Format(storeTimeLayout)
 	result, err := tx.Exec("UPDATE configs SET name = ?, content = ?, layout = ?, updated_at = ? WHERE id = ?",
 		name, string(raw), layout, now, id)
 	if err != nil {
@@ -481,7 +537,7 @@ func (s *Store) Publish(id int64) error {
 	} else if err != nil {
 		return err
 	}
-	now := time.Now().UTC().Format(time.RFC3339)
+	now := time.Now().UTC().Format(storeTimeLayout)
 	if _, err := tx.Exec("UPDATE configs SET status = 'archived', updated_at = ? WHERE status = 'active'", now); err != nil {
 		return err
 	}
@@ -540,7 +596,7 @@ func (s *Store) SaveLayout(id int64, layout string) error {
 	if err := s.ensureDraftLocked(id); err != nil {
 		return err
 	}
-	now := time.Now().UTC().Format(time.RFC3339)
+	now := time.Now().UTC().Format(storeTimeLayout)
 	res, err := s.db.Exec("UPDATE configs SET layout = ?, updated_at = ? WHERE id = ?", layout, now, id)
 	if err != nil {
 		return err

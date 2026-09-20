@@ -356,6 +356,8 @@ func (h *Handler) getConfig(w http.ResponseWriter, r *http.Request, id int64) {
 }
 
 func (h *Handler) saveConfig(w http.ResponseWriter, r *http.Request, id int64) {
+	h.controlMu.Lock()
+	defer h.controlMu.Unlock()
 	if !h.guard(r) {
 		http.Error(w, "authentication required", http.StatusUnauthorized)
 		return
@@ -384,6 +386,9 @@ func (h *Handler) saveConfig(w http.ResponseWriter, r *http.Request, id int64) {
 		return
 	}
 	name := record.Name
+	if !recordPrecondition(w, r, record) {
+		return
+	}
 	if input.Name != nil {
 		if strings.TrimSpace(*input.Name) == "" {
 			http.Error(w, "configuration name is required", http.StatusBadRequest)
@@ -442,6 +447,8 @@ func (h *Handler) saveConfig(w http.ResponseWriter, r *http.Request, id int64) {
 }
 
 func (h *Handler) deleteConfig(w http.ResponseWriter, r *http.Request, id int64) {
+	h.controlMu.Lock()
+	defer h.controlMu.Unlock()
 	if !h.guard(r) {
 		http.Error(w, "authentication required", http.StatusUnauthorized)
 		return
@@ -457,6 +464,8 @@ func (h *Handler) deleteConfig(w http.ResponseWriter, r *http.Request, id int64)
 }
 
 func (h *Handler) publishStoredConfig(w http.ResponseWriter, r *http.Request, id int64) {
+	h.controlMu.Lock()
+	defer h.controlMu.Unlock()
 	if h.publish == nil {
 		http.Error(w, "publishing is unavailable", http.StatusServiceUnavailable)
 		return
@@ -486,6 +495,9 @@ func (h *Handler) publishStoredConfig(w http.ResponseWriter, r *http.Request, id
 		return
 	}
 	startupChanged := !startupOwnedEqual(record.Content, active)
+	if !recordPrecondition(w, r, record) {
+		return
+	}
 	candidate := normalizeToActive(record.Content, active)
 	candidate = candidate.WithDefaults()
 	if err := candidate.Validate(); err != nil {
@@ -505,6 +517,11 @@ func (h *Handler) publishStoredConfig(w http.ResponseWriter, r *http.Request, id
 		return
 	}
 	result := map[string]any{"ok": true, "revision": h.revisionValue()}
+	// Return this publication's record version while controlMu is still held.
+	// A later client GET could observe another administrator's intervening edit.
+	if published, err := h.library.Get(id); err == nil && published != nil {
+		result["updated_at"] = published.UpdatedAt.UTC().Format(time.RFC3339Nano)
+	}
 	if startupChanged {
 		result["warning"] = "limens or settings differ from the running configuration: routes/services were published, listener and process settings require a file edit and restart"
 	}
@@ -517,6 +534,8 @@ func (h *Handler) publishStoredConfig(w http.ResponseWriter, r *http.Request, id
 // generation until then, exactly as with a manual file edit or a settings
 // save. Stored settings are deliberately left alone (see saveSettings).
 func (h *Handler) stageLimens(w http.ResponseWriter, r *http.Request, id int64) {
+	h.controlMu.Lock()
+	defer h.controlMu.Unlock()
 	if h.saveActive == nil {
 		http.Error(w, "settings persistence is unavailable", http.StatusNotImplemented)
 		return
@@ -565,6 +584,8 @@ func (h *Handler) stageLimens(w http.ResponseWriter, r *http.Request, id int64) 
 // must restart Janus. The file reloader keeps serving the previous generation
 // until then, exactly as with a manual file edit.
 func (h *Handler) saveSettings(w http.ResponseWriter, r *http.Request) {
+	h.controlMu.Lock()
+	defer h.controlMu.Unlock()
 	if !allowMethod(w, r, http.MethodPost) {
 		return
 	}
@@ -602,6 +623,17 @@ func (h *Handler) saveSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "restart_required": true})
+}
+
+// Optional for legacy API clients; the console always supplies this token.
+// controlMu keeps this comparison and the subsequent mutation indivisible
+// relative to other admin writes, including publish marker updates.
+func recordPrecondition(w http.ResponseWriter, r *http.Request, record *store.ConfigRecord) bool {
+	if expected := r.Header.Get("X-Janus-Record-Revision"); expected != "" && expected != record.UpdatedAt.UTC().Format(time.RFC3339Nano) {
+		http.Error(w, "stored configuration changed; local draft was not saved", http.StatusConflict)
+		return false
+	}
+	return true
 }
 
 // decodeStoredContent runs draft content through the same strict decoding as

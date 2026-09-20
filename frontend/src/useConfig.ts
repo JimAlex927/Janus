@@ -20,32 +20,50 @@ export function useConfig() {
   const [remoteChanged, setRemoteChanged] = useState(false);
   const [busy, setBusy] = useState(false);
   const dirtyRef = useRef(false);
+  const editVersion = useRef(0);
+  const loadVersion = useRef(0);
+  const publishing = useRef(false);
+  const pending = useRef(0);
+  const begin = () => { pending.current++; setBusy(true); };
+  const end = () => { pending.current--; setBusy(pending.current > 0); };
   const statusRef = useRef<ConfigStatus>("loading");
   statusRef.current = status;
 
   const load = useCallback(async (force = false) => {
+    if (publishing.current) return false;
     if (dirtyRef.current && !force) {
       setMessage("远端配置已变化，但本地有未发布草稿，未自动覆盖。请发布或手动刷新。");
       setRemoteChanged(true);
-      return;
+      return false;
     }
-    setBusy(true);
+    const requestVersion = ++loadVersion.current;
+    const editedAtStart = editVersion.current;
+    begin();
     try {
       const snapshot = await getConfig();
+      if (requestVersion !== loadVersion.current) return false;
+      if (editedAtStart !== editVersion.current) {
+        setRemoteChanged(true);
+        setMessage("加载期间产生了新编辑，已保留本地草稿；请确认远端变化后合并。");
+        return false;
+      }
       dirtyRef.current = false;
       setRevision(snapshot.revision);
       setDraft(snapshot.config);
       setDirty(false);
       setRemoteChanged(false);
       setStatus("ready");
+      return true;
     } catch (error) {
+      if (requestVersion !== loadVersion.current) return false;
       if (error instanceof ApiError && error.status === 401) setStatus("unauthorized");
       else {
-        setStatus("error");
+        if (statusRef.current !== "ready") setStatus("error");
         setMessage(error instanceof Error ? error.message : String(error));
       }
+      return false;
     } finally {
-      setBusy(false);
+      end();
     }
   }, []);
 
@@ -54,10 +72,11 @@ export function useConfig() {
     const close = subscribeEvents(() => {
       load().catch(() => undefined);
     });
-    return close;
+    return () => { ++loadVersion.current; close(); };
   }, [load]);
 
   const update = useCallback((fn: (prev: JanusConfig) => JanusConfig) => {
+    ++editVersion.current;
     setDraft((prev) => {
       if (!prev) return prev;
       return fn(cloneConfig(prev));
@@ -68,14 +87,14 @@ export function useConfig() {
   }, []);
 
   const replace = useCallback((next: JanusConfig) => {
+    ++editVersion.current;
     setDraft(cloneConfig(next));
     dirtyRef.current = true;
     setDirty(true);
   }, []);
 
   const discard = useCallback(async () => {
-    await load(true);
-    setMessage("已丢弃本地草稿，回到远端版本。");
+    if (await load(true)) setMessage("已丢弃本地草稿，回到远端版本。");
   }, [load]);
 
   const validate = useCallback(async (): Promise<boolean> => {
@@ -85,7 +104,7 @@ export function useConfig() {
       setMessage(`本地检查未通过：${localErrors[0]}`);
       return false;
     }
-    setBusy(true);
+    begin();
     try {
       await validateConfig(draft);
       setMessage("配置校验通过。");
@@ -94,26 +113,32 @@ export function useConfig() {
       setMessage(error instanceof Error ? error.message : String(error));
       return false;
     } finally {
-      setBusy(false);
+      end();
     }
   }, [draft]);
 
   const publish = useCallback(async (): Promise<boolean> => {
-    if (!draft) return false;
+    if (!draft || publishing.current) return false;
     const localErrors = validateLocal(draft);
     if (localErrors.length > 0) {
       setMessage(`本地检查未通过：${localErrors[0]}`);
       return false;
     }
-    setBusy(true);
+    publishing.current = true;
+    ++loadVersion.current;
+    const submittedEdit = editVersion.current;
+    const submitted = cloneConfig(draft);
+    begin();
     try {
-      const result = await publishConfig(draft, revision);
+      const result = await publishConfig(submitted, revision);
       setRevision(result.revision);
-      dirtyRef.current = false;
-      setDirty(false);
+      const edited = submittedEdit !== editVersion.current;
+      dirtyRef.current = edited;
+      setDirty(edited);
       setRemoteChanged(false);
-      setMessage(`已发布配置版本 ${result.revision}。`);
-      await load(true);
+      setMessage(`已发布配置版本 ${result.revision}。${edited ? "发布期间的新编辑已保留，尚未发布。" : ""}`);
+      // Do not replace local edits with a post-publication fetch. The next
+      // remote event can refresh an unedited snapshot normally.
       return true;
     } catch (error) {
       if (error instanceof ApiError && error.status === 409) {
@@ -124,7 +149,8 @@ export function useConfig() {
       }
       return false;
     } finally {
-      setBusy(false);
+      publishing.current = false;
+      end();
     }
   }, [draft, revision, load]);
 

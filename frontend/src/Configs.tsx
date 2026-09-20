@@ -27,6 +27,7 @@ export function ConfigsPage({ store, onEdit }: { store: ConfigStore; onEdit: (id
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const dialogs = useDialogController();
+  const loadSequence = useRef(0);
 
   useEffect(() => {
     loadConfigs().catch(() => undefined);
@@ -35,6 +36,7 @@ export function ConfigsPage({ store, onEdit }: { store: ConfigStore; onEdit: (id
   }, [tab, pageNum, createdAtFrom, createdAtTo, updatedAtFrom, updatedAtTo, sortBy, sortOrder]);
 
   async function loadConfigs() {
+    const sequence = ++loadSequence.current;
     setLoading(true);
     setError("");
     try {
@@ -44,6 +46,7 @@ export function ConfigsPage({ store, onEdit }: { store: ConfigStore; onEdit: (id
         tab !== "draft" ? listConfigs({ status: "draft", pageNum: 1, pageSize: 1 }) : Promise.resolve(null),
         tab !== "archived" ? listConfigs({ status: "archived", pageNum: 1, pageSize: 1 }) : Promise.resolve(null),
       ]);
+      if (sequence !== loadSequence.current) return;
       setRecords(page.configs || []);
       setTotals({
         active: tab === "active" ? page.total : activePage?.total ?? totals.active,
@@ -54,9 +57,9 @@ export function ConfigsPage({ store, onEdit }: { store: ConfigStore; onEdit: (id
         setPageNum(Math.ceil(page.total / PAGE_SIZE));
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      if (sequence === loadSequence.current) setError(e instanceof Error ? e.message : String(e));
     } finally {
-      setLoading(false);
+      if (sequence === loadSequence.current) setLoading(false);
     }
   }
 
@@ -230,6 +233,8 @@ export function ConfigsPage({ store, onEdit }: { store: ConfigStore; onEdit: (id
   }
 
   async function publishConfig(id: number) {
+    const expectedRevision = store.revision;
+    const expectedRecord = records.find(record => record.id === id)?.updated_at;
     if (!(await dialogs.confirm({
       title: "发布配置",
       message: "当前生效配置将被替换，发布后路由配置会立即进入新的 generation。",
@@ -241,11 +246,11 @@ export function ConfigsPage({ store, onEdit }: { store: ConfigStore; onEdit: (id
     try {
       const res = await fetch(apiPath(`/api/v1/configs/${id}/publish`), {
         method: "POST",
-        headers: { "X-Janus-Revision": String(store.revision) },
+        headers: { "X-Janus-Revision": String(expectedRevision), ...(expectedRecord ? { "X-Janus-Record-Revision": expectedRecord } : {}) },
       });
       if (res.status === 409) {
-        await store.load(true);
-        store.setMessage("版本冲突：远端已被他人更新。已刷新当前配置，请确认后再发布。");
+        await store.load();
+        store.setMessage("版本冲突：远端已被他人更新。本地草稿已保留，请确认并合并后再发布。");
         return;
       }
       if (!res.ok) {
@@ -255,7 +260,7 @@ export function ConfigsPage({ store, onEdit }: { store: ConfigStore; onEdit: (id
         throw new Error(msg);
       }
       await loadConfigs();
-      await store.load(true);
+      await store.load();
       store.setMessage("配置已发布");
     } catch (e) {
       store.setMessage(e instanceof Error ? e.message : String(e));

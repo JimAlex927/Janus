@@ -132,6 +132,8 @@ go test -race ./... -skip '^TestEmbeddedConsole(IsServed|CanMountBelowBuildBaseU
 
 ### 阶段 B：边界与故障专项（约 4–6 天，P0/P1）
 
+2026-09-20 更新：本地 B1–B4 实施与验收已完成，结果、兼容性和运维边界见 [阶段 B 验收记录](phase-b-completion-2026-09-20.md)。下面保留原始任务定义。
+
 **B1. 身份与外部认证依赖（优先）**
 
 - ForwardAuth：缺失身份头、正则过滤、拒绝响应、超大/慢响应、forward body、HeaderField 和 hop-by-hop 头处理。

@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -70,12 +71,17 @@ func ForwardAuth(options ForwardAuthOptions) (Middleware, error) {
 				defer restore()
 			}
 			authRequest := buildAuthRequest(r, authURL, body, options, requestHeaders)
+			ctx, cancel := context.WithTimeout(r.Context(), options.Timeout)
+			defer cancel()
+			authRequest = authRequest.WithContext(ctx)
 			response, err := client.Do(authRequest)
 			if err != nil {
 				http.Error(w, "authentication service unavailable", http.StatusBadGateway)
 				return
 			}
 			defer response.Body.Close()
+			response.Header = response.Header.Clone()
+			removeConnectionHeaders(response.Header)
 			if response.StatusCode < 200 || response.StatusCode >= 300 {
 				writeForwardAuthResponse(w, response, options.MaxResponseBodyBytes)
 				return
@@ -202,6 +208,13 @@ func buildAuthRequest(r *http.Request, target *url.URL, body io.Reader, options 
 			}
 		}
 	}
+	// Connection itself is not copied, so consult the original header for
+	// additional hop-by-hop fields named by the client.
+	for _, value := range r.Header.Values("Connection") {
+		for _, name := range strings.Split(value, ",") {
+			authRequest.Header.Del(strings.TrimSpace(name))
+		}
+	}
 	authRequest.Header.Set("X-Forwarded-Method", r.Method)
 	authRequest.Header.Set("X-Forwarded-Uri", r.URL.RequestURI())
 	if options.ForwardedHeaders != nil {
@@ -215,6 +228,7 @@ func buildAuthRequest(r *http.Request, target *url.URL, body io.Reader, options 
 }
 
 func copyAuthHeader(destination, source http.Header, name string) {
+	name = http.CanonicalHeaderKey(name)
 	destination.Del(name)
 	if value := source.Values(name); len(value) > 0 {
 		destination[name] = append([]string(nil), value...)
@@ -248,16 +262,25 @@ func copyAuthResponseHeaders(destination, source http.Header, allowed map[string
 }
 
 func writeForwardAuthResponse(w http.ResponseWriter, response *http.Response, maxBody int64) {
+	body, err := io.ReadAll(io.LimitReader(response.Body, maxBody+1))
+	if err != nil || int64(len(body)) > maxBody {
+		http.Error(w, "invalid authentication response", http.StatusBadGateway)
+		return
+	}
 	for name, values := range response.Header {
 		if validForwardAuthHeader(name) {
 			w.Header()[name] = append([]string(nil), values...)
 		}
 	}
-	body, err := io.ReadAll(io.LimitReader(response.Body, maxBody+1))
-	if err != nil || int64(len(body)) > maxBody {
-		http.Error(w, "authentication response too large", http.StatusUnauthorized)
-		return
-	}
 	w.WriteHeader(response.StatusCode)
 	_, _ = w.Write(body)
+}
+
+func removeConnectionHeaders(header http.Header) {
+	for _, value := range header.Values("Connection") {
+		for _, name := range strings.Split(value, ",") {
+			header.Del(strings.TrimSpace(name))
+		}
+	}
+	header.Del("Connection")
 }
