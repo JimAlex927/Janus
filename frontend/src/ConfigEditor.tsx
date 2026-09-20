@@ -177,6 +177,7 @@ function JanusNode({ data, selected }: { data: NodeData; selected?: boolean }) {
   if (data.kind === "route") {
     const configuredMiddlewares = data.middlewares || [];
     const builtins = data.builtinMiddlewares || [];
+    const overriddenBuiltins = builtins.filter((middleware) => middleware.overridden).length;
     return (
       <div className={`flow-node flow-route ${selected ? "selected" : ""}`} style={{ borderTopColor: meta.color }}>
         <Handle type="target" position={Position.Left} />
@@ -199,16 +200,10 @@ function JanusNode({ data, selected }: { data: NodeData; selected?: boolean }) {
             <span className="flow-section-empty">未挂载，点击添加＋</span>
           ) : (
             <span className="flow-section-chips">
-              {builtins.map((middleware, index) => (
-                <em
-                  key={`builtin-${middleware.scope}-${middleware.name}-${index}`}
-                  className={`flow-section-chip-builtin ${middleware.overridden ? "overridden" : ""}`}
-                  title={`${middleware.name}（内置层不可移除${middleware.editable ? "，参数可修改" : ""} · ${middleware.scope}）· ${middleware.detail}`}
-                >
-                  ◆ {middleware.name}{middleware.overridden ? " · 覆盖" : ""}
-                </em>
-              ))}
-              {configuredMiddlewares.map((middleware, i) => <em key={`${middleware}-${i}`} title={`${middleware}（配置，可编辑）`}>{i + 1}.{middleware}</em>)}
+              <em className="flow-section-chip-builtin" title="内置层固定存在，点击查看执行链">◆ 内置 {builtins.length}</em>
+              {overriddenBuiltins > 0 && <em className="flow-section-chip-builtin overridden" title="存在 Route 参数覆盖">覆盖 {overriddenBuiltins}</em>}
+              {configuredMiddlewares.slice(0, 3).map((middleware, i) => <em key={`${middleware}-${i}`} title={`${middleware}（配置，可编辑）`}>{i + 1}.{middleware}</em>)}
+              {configuredMiddlewares.length > 3 && <em title="其余配置中间件">+{configuredMiddlewares.length - 3}</em>}
             </span>
           )}
         </button>

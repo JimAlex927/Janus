@@ -234,6 +234,7 @@ export function MiddlewareManagerModal({
   const [chainSel, setChainSel] = useState<string | null>(null);
   const [builtinSel, setBuiltinSel] = useState<string | null>(null);
   const [requestKind, setRequestKind] = useState<BuiltinRequestKind>("http");
+  const [addSelection, setAddSelection] = useState("");
   const [nameDraft, setNameDraft] = useState("");
   const [renameError, setRenameError] = useState("");
   useDialogLifecycle(dialogRef, onCancel);
@@ -282,7 +283,11 @@ export function MiddlewareManagerModal({
 
   const available = names.filter((name) => !flow.includes(name) && isFlowCompatible(instances[name], scope, catalog));
   const selectedDef = selected ? instances[selected] : undefined;
+  const chainSelectedDef = chainSel ? instances[chainSel] : undefined;
   const selectedBuiltin = builtinFlow.find((builtin, index) => builtinKey(builtin, index) === builtinSel);
+  useEffect(() => {
+    if (addSelection && !available.includes(addSelection)) setAddSelection("");
+  }, [addSelection, available]);
 
   return (
     <div className="backdrop" onMouseDown={onCancel}>
@@ -297,81 +302,94 @@ export function MiddlewareManagerModal({
         <div className="mw-modal-body">
           <nav className="mw-tabs">
             {([
-              ["flow", `Flow（内置 ${builtinFlow.length} · 配置 ${flow.length}）`],
-              ["instance", `Instance（${names.length}）`],
-              ["class", `Class（${catalog.length}）`],
+              ["flow", `执行链 ${builtinFlow.length + flow.length}`],
+              ["instance", `实例 ${names.length}`],
+              ["class", `添加类型 ${catalog.length}`],
             ] as [Tab, string][]).map(([id, label]) => (
               <button key={id} type="button" className={tab === id ? "active" : ""} onClick={() => setTab(id)}>
                 {label}
               </button>
             ))}
-            <p className="muted">实例全局共享；确认后写入当前配置草稿，取消会撤销本次全部修改。</p>
+            <p className="muted">本次修改先保存在配置草稿中；取消会完整撤销。</p>
           </nav>
           <div className="mw-tab-panel">
             {tab === "flow" && (
               <div className="mw-flow">
-                <p className="muted">所有协议进入同一条执行链，请求从上到下、响应按相反顺序返回。内置层不可移除或排序；带“参数可修改”的内置层可以点击编辑。每层会标明对当前协议是否生效。</p>
-                {builtinFlow.length > 0 && (
-                  <div className="mw-request-kind" role="group" aria-label="请求类型">
-                    <span>当前请求协议</span>
-                    {([['http', '普通 HTTP'], ['sse', 'SSE'], ['websocket', 'WebSocket']] as [BuiltinRequestKind, string][]).map(([kind, label]) => (
-                      <button key={kind} type="button" className={requestKind === kind ? "active" : ""} onClick={() => setRequestKind(kind)}>{label}</button>
-                    ))}
+                <div className="mw-flow-head">
+                  <div><strong>请求执行链</strong><small>从上到下执行；点击任意可编辑层，在右侧调整参数。</small></div>
+                  {builtinFlow.length > 0 && (
+                    <div className="mw-request-kind" role="group" aria-label="请求类型">
+                      <span>协议预览</span>
+                      {([['http', 'HTTP'], ['sse', 'SSE'], ['websocket', 'WebSocket']] as [BuiltinRequestKind, string][]).map(([kind, label]) => (
+                        <button key={kind} type="button" className={requestKind === kind ? "active" : ""} onClick={() => setRequestKind(kind)}>{label}</button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <div className="mw-flow-layout">
+                  <div className="mw-flow-canvas">
+                    {flow.length === 0 && builtinFlow.length === 0 ? (
+                      <div className="mw-pipeline-end action"><span>直达动作核心</span><strong>{coreLabel}</strong></div>
+                    ) : (
+                      <PipelineView
+                        flow={flow}
+                        builtinFlow={builtinFlow}
+                        instances={instances}
+                        catalog={catalog}
+                        scope={scope}
+                        coreLabel={coreLabel}
+                        chainSel={chainSel}
+                        builtinSel={builtinSel}
+                        requestKind={requestKind}
+                        onSelect={(name) => {
+                          setBuiltinSel(null);
+                          setChainSel((cur) => (cur === name ? null : name));
+                        }}
+                        onSelectBuiltin={(key) => {
+                          setChainSel(null);
+                          setBuiltinSel((current) => current === key ? null : key);
+                        }}
+                      />
+                    )}
                   </div>
-                )}
-                {flow.length === 0 && builtinFlow.length === 0 ? (
-                  <div className="mw-pipeline-end action"><span>直达动作核心</span><strong>{coreLabel}</strong></div>
-                ) : (
-                  <>
-                    <PipelineView
-                      flow={flow}
-                      builtinFlow={builtinFlow}
-                      instances={instances}
-                      catalog={catalog}
-                      scope={scope}
-                      coreLabel={coreLabel}
-                      chainSel={chainSel}
-                      builtinSel={builtinSel}
-                      requestKind={requestKind}
-                      onSelect={(name) => {
-                        setBuiltinSel(null);
-                        setChainSel((cur) => (cur === name ? null : name));
-                      }}
-                      onSelectBuiltin={(key) => {
-                        setChainSel(null);
-                        setBuiltinSel((current) => current === key ? null : key);
-                      }}
-                    />
-                    {selectedBuiltin?.editable && onBuiltinOverridesChange && (
+                  <aside className="mw-flow-inspector">
+                    <div className="mw-inspector-head"><span>当前选择</span><small>{selectedBuiltin?.name || chainSel || "未选择"}</small></div>
+                    {selectedBuiltin?.editable && onBuiltinOverridesChange ? (
                       <BuiltinParameterEditor builtin={selectedBuiltin} overrides={builtinOverrides} onChange={onBuiltinOverridesChange} />
-                    )}
-                    {chainSel && flow.includes(chainSel) && (
-                      <div className="mw-chain-actions">
-                        <strong>{chainSel}</strong>
-                        <button type="button" disabled={flow.indexOf(chainSel) === 0} onClick={() => move(flow.indexOf(chainSel), -1)}>← 外移</button>
-                        <button type="button" disabled={flow.indexOf(chainSel) === flow.length - 1} onClick={() => move(flow.indexOf(chainSel), 1)}>内移 →</button>
-                        <button type="button" onClick={() => { setSelected(chainSel); setNameDraft(chainSel); setRenameError(""); setTab("instance"); }}>⚙ 参数</button>
-                        <button type="button" className="danger" onClick={() => onFlowChange(flow.filter((m) => m !== chainSel))}>× 移除</button>
+                    ) : chainSel && flow.includes(chainSel) ? (
+                      <div className="mw-configured-editor">
+                        <div><strong>{chainSel}</strong><small>{instanceLabel(chainSelectedDef, catalog)}</small></div>
+                        <div className="mw-inspector-actions">
+                          <button type="button" disabled={flow.indexOf(chainSel) === 0} onClick={() => move(flow.indexOf(chainSel), -1)}>↑ 前移</button>
+                          <button type="button" disabled={flow.indexOf(chainSel) === flow.length - 1} onClick={() => move(flow.indexOf(chainSel), 1)}>↓ 后移</button>
+                          <button type="button" className="danger" onClick={() => onFlowChange(flow.filter((name) => name !== chainSel))}>从链中移除</button>
+                        </div>
+                        {chainSelectedDef ? <MiddlewareDefForm value={chainSelectedDef} catalog={catalog} onChange={(def) => onUpdateInstance(chainSel, def)} /> : <p className="error-text">实例定义不存在，请从执行链移除。</p>}
+                        <button type="button" className="btn small ghost" onClick={() => { setSelected(chainSel); setNameDraft(chainSel); setRenameError(""); setTab("instance"); }}>改名或删除实例 →</button>
                       </div>
+                    ) : (
+                      <div className="mw-inspector-empty"><strong>选择一层开始编辑</strong><p>内置层只能改参数；配置层可以改参数、排序或从当前执行链移除。</p></div>
                     )}
-                  </>
-                )}
-                <div className="field-label">可选用（{scope === "route" ? "Route 兼容" : "Service 兼容"}）</div>
-                {available.length === 0 && <small className="muted">没有可用的实例，去 Instance 新建或调整作用域。</small>}
-                {available.map((name) => (
-                  <div className="mw-order-row" key={name}>
-                    <span><strong>{name}</strong><small>{instanceLabel(instances[name], catalog)}</small></span>
-                    <span className="mw-order-actions">
-                      <button type="button" className="btn small" onClick={() => onFlowChange([...flow, name])}>＋ 选用</button>
-                    </span>
-                  </div>
-                ))}
+                    <div className="mw-flow-add">
+                      <div><strong>添加到执行链</strong><small>{scope === "route" ? "仅显示 Route 兼容实例" : "仅显示 Service 兼容实例"}</small></div>
+                      <div className="mw-flow-add-row">
+                        <select value={addSelection} onChange={(event) => setAddSelection(event.target.value)}>
+                          <option value="">选择已有实例</option>
+                          {available.map((name) => <option key={name} value={name}>{name} · {instanceLabel(instances[name], catalog)}</option>)}
+                        </select>
+                        <button type="button" className="btn small primary" disabled={!addSelection} onClick={() => { onFlowChange([...flow, addSelection]); setAddSelection(""); }}>添加</button>
+                      </div>
+                      {available.length === 0 && <small className="muted">没有可直接添加的实例。</small>}
+                      <button type="button" className="btn small ghost" onClick={() => setTab("class")}>＋ 创建新实例</button>
+                    </div>
+                  </aside>
+                </div>
               </div>
             )}
             {tab === "instance" && (
               <div className="mw-instance">
                 <div className="mw-instance-list">
-                  {names.length === 0 && <p className="muted">还没有实例，去 Class 页实例化。</p>}
+                  {names.length === 0 && <p className="muted">还没有实例，请从“添加类型”创建。</p>}
                   {names.map((name) => (
                     <button
                       key={name}
@@ -381,13 +399,13 @@ export function MiddlewareManagerModal({
                     >
                       <strong>{name}</strong>
                       <small>{instanceLabel(instances[name], catalog)}</small>
-                      {flow.includes(name) && <em className="badge">flow 中</em>}
+                      {flow.includes(name) && <em className="badge">执行链中</em>}
                     </button>
                   ))}
                 </div>
                 <div className="mw-instance-editor">
                   {!selected || !selectedDef ? (
-                    <p className="muted">左侧选择一个实例编辑参数；改名后所有引用自动同步。</p>
+                    <p className="muted">从左侧选择实例编辑参数；实例名称修改后，所有引用会自动同步。</p>
                   ) : (
                     <>
                       <Field label="实例名称" hint="改名会自动同步所有 Route 与 Service 的引用" error={renameError}>
@@ -418,7 +436,7 @@ export function MiddlewareManagerModal({
                         </div>
                       </div>
                       <button type="button" className="btn small primary" disabled={!usable} onClick={() => instantiate(klass.type, klass)}>
-                        实例化并选用
+                        创建并加入执行链
                       </button>
                     </div>
                   );

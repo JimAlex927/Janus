@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
-import { setBuiltinMiddlewareOverride } from "./builtinMiddleware";
+import { builtinMiddlewareViews } from "./builtinMiddleware";
 import { limenNames, serviceNames } from "./model";
 import { Drawer, Field } from "./ui";
-import type { BuiltinMiddlewareOverrides, JanusConfig, Route } from "./types";
+import type { JanusConfig, Route } from "./types";
 
 export type MatchRule = { type: "host" | "path" | "pathPrefix" | "pathPattern" | "method" | "protocol" | "header" | "query"; value: string; extra?: string };
 
@@ -51,18 +51,14 @@ function buildMatchExpression(rules: MatchRule[]): string {
   return parts.join(" && ");
 }
 
-function globalSetting(config: JanusConfig, section: string, key: string, fallback: string): string {
-  const group = config.settings?.[section];
-  if (!group || typeof group !== "object") return fallback;
-  const value = (group as Record<string, unknown>)[key];
-  return value === undefined || value === null || value === "" ? fallback : String(value);
-}
+type RouteEditorSection = "basic" | "match" | "middleware" | "action";
 
 export function RouteEditor({ draft, value, isNew, onChange, onConfirm, onCancel, onClose, onDelete, onOpenMiddlewareManager }: {
   draft: JanusConfig; value: Route; isNew: boolean;
   onChange: (value: Route) => void; onConfirm: () => void; onCancel: () => void; onClose: () => void; onDelete?: () => void;
   onOpenMiddlewareManager?: () => void;
 }) {
+  const [section, setSection] = useState<RouteEditorSection>("basic");
   const [showAdvanced, setShowAdvanced] = useState(() => !parseMatchExpression(value.match || "").safe);
   const actionType = value.action?.redirect ? "redirect" : value.action?.respond ? "respond" : value.action?.static ? "static" : "forward";
   const services = serviceNames(draft);
@@ -73,10 +69,6 @@ export function RouteEditor({ draft, value, isNew, onChange, onConfirm, onCancel
     if (!parsedMatch.safe) setShowAdvanced(true);
   }, [parsedMatch.safe]);
   const set = (patch: Partial<Route>) => onChange({ ...value, ...patch });
-
-  function setBuiltinOverride(group: keyof BuiltinMiddlewareOverrides, field: string, raw: string, numeric = false) {
-    set({ builtin_middleware_overrides: setBuiltinMiddlewareOverride(value.builtin_middleware_overrides, group, field, raw, numeric) });
-  }
 
   function setActionType(type: string) {
     if (type === "redirect") set({ action: { redirect: { status: 308, location: "https://example.com" } } });
@@ -137,17 +129,18 @@ export function RouteEditor({ draft, value, isNew, onChange, onConfirm, onCancel
               {(rule.type === "header" || rule.type === "query") && (
                 <input value={rule.extra || ""} onChange={(e) => updateRule(index, { extra: e.target.value })} placeholder={rule.type === "header" ? "Header 值" : "Query 值"} />
               )}
+              {rule.type !== "header" && rule.type !== "query" && <span className="match-rule-spacer" />}
               <button type="button" className="btn small danger" onClick={() => removeRule(index)}>×</button>
             </div>
           ))}
           <div className="match-add">
-            <button type="button" className="btn small" onClick={() => addRule("pathPrefix")}>＋ PathPrefix</button>
-            <button type="button" className="btn small" onClick={() => addRule("pathPattern")}>＋ PathPattern</button>
-            <button type="button" className="btn small" onClick={() => addRule("host")}>＋ Host</button>
-            <button type="button" className="btn small" onClick={() => addRule("method")}>＋ Method</button>
-            <button type="button" className="btn small" onClick={() => addRule("protocol")}>＋ Protocol</button>
-            <button type="button" className="btn small" onClick={() => addRule("header")}>＋ Header</button>
-            <button type="button" className="btn small" onClick={() => addRule("query")}>＋ Query</button>
+            <span>＋ 添加匹配条件</span>
+            <select value="" onChange={(event) => event.target.value && addRule(event.target.value as MatchRule["type"])}>
+              <option value="">选择条件类型…</option>
+              <option value="pathPrefix">PathPrefix</option><option value="pathPattern">PathPattern (*)</option>
+              <option value="path">Path</option><option value="host">Host</option><option value="method">Method</option>
+              <option value="protocol">Protocol</option><option value="header">Header</option><option value="query">Query</option>
+            </select>
           </div>
           {value.match && <div className="match-preview mono">{value.match}</div>}
         </div>
@@ -223,80 +216,80 @@ export function RouteEditor({ draft, value, isNew, onChange, onConfirm, onCancel
     </>
   );
 
-  const middlewareSection = (
-    <div className="check-group">
-      <div className="field-label-row">
-        <div className="field-label">中间件（{(value.middlewares || []).length}）</div>
-        {onOpenMiddlewareManager && <button type="button" className="btn small primary" onClick={onOpenMiddlewareManager}>管理中间件</button>}
-      </div>
-      {(value.middlewares || []).length === 0 ? (
-        <small className="muted">尚未挂载。在管理弹窗中从 class 实例化、再到 flow 里选用编排。</small>
-      ) : (
-        <div className="mw-flow-preview">
-          {(value.middlewares || []).map((name, index, list) => (
-            <span className="mw-flow-chip" key={`${name}-${index}`}>
-              <em>{index + 1}</em><strong>{name}</strong>{!draft.middlewares?.[name] && <small className="error-text">未定义</small>}
-            </span>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-
   const builtinOverrides = value.builtin_middleware_overrides;
-  const builtinOverrideSection = (
-    <div className="check-group builtin-overrides">
-      <div className="field-label-row">
-        <div>
-          <div className="field-label">内置中间件参数覆盖</div>
-          <small className="muted">内置层固定且不可移除；参数可以覆盖，留空继承全局设置，只影响当前 Route。</small>
-        </div>
-        {builtinOverrides && <button type="button" className="btn small ghost" onClick={() => set({ builtin_middleware_overrides: undefined })}>全部恢复继承</button>}
-      </div>
-      <div className="grid-2">
-        <Field label="Timeout · maximum_duration" hint={`全局 ${globalSetting(draft, "request", "maximum_duration", "30s")}`}>
-          <input value={builtinOverrides?.timeout?.maximum_duration || ""} placeholder="继承全局" onChange={(e) => setBuiltinOverride("timeout", "maximum_duration", e.target.value)} />
-        </Field>
-        <Field label="Admission · max_in_flight" hint={`全局总上限 ${globalSetting(draft, "request", "max_in_flight", "1024")}`}>
-          <input type="number" min={1} value={builtinOverrides?.admission?.max_in_flight ?? ""} placeholder="继承全局" onChange={(e) => setBuiltinOverride("admission", "max_in_flight", e.target.value, true)} />
-        </Field>
-        <Field label="StreamTimeout · max_duration" hint={`全局 ${globalSetting(draft, "stream", "max_duration", "1h")}`}>
-          <input value={builtinOverrides?.stream_timeout?.max_duration || ""} placeholder="继承全局" onChange={(e) => setBuiltinOverride("stream_timeout", "max_duration", e.target.value)} />
-        </Field>
-        <Field label="StreamTimeout · idle_timeout" hint={`全局 ${globalSetting(draft, "stream", "idle_timeout", "5m")}`}>
-          <input value={builtinOverrides?.stream_timeout?.idle_timeout || ""} placeholder="继承全局" onChange={(e) => setBuiltinOverride("stream_timeout", "idle_timeout", e.target.value)} />
-        </Field>
-        <Field label="WriteTimeout · timeout" hint={`全局 server.write_timeout ${globalSetting(draft, "server", "write_timeout", "35s")}`}>
-          <input value={builtinOverrides?.write_timeout?.timeout || ""} placeholder="继承全局" onChange={(e) => setBuiltinOverride("write_timeout", "timeout", e.target.value)} />
-        </Field>
-      </div>
-    </div>
-  );
+  const overrideCount = builtinOverrides
+    ? Object.values(builtinOverrides).reduce((count, group) => count + (group ? Object.values(group).filter((item) => item !== undefined).length : 0), 0)
+    : 0;
+  const configuredMiddlewares = value.middlewares || [];
+  const builtinCount = builtinMiddlewareViews(draft, value).length;
+  const sectionItems: Array<{ id: RouteEditorSection; label: string; meta: string }> = [
+    { id: "basic", label: "基础", meta: value.limen || "默认入口" },
+    { id: "match", label: "匹配", meta: matchRules.length > 0 ? `${matchRules.length} 条规则` : value.match ? "高级表达式" : "全部请求" },
+    { id: "middleware", label: "中间件", meta: `${configuredMiddlewares.length} 个配置层${overrideCount > 0 ? ` · ${overrideCount} 处覆盖` : ""}` },
+    { id: "action", label: "动作", meta: actionType === "forward" ? "Forward" : actionType === "static" ? "Static" : actionType === "redirect" ? "Redirect" : "Response" },
+  ];
 
   return (
     <Drawer
       title={isNew ? "新建 Route" : `编辑 ${value.name}`}
-      subtitle="执行顺序：匹配 → 中间件 → 动作"
+      subtitle="分区编辑 Route；确认前所有修改都只保存在当前草稿。"
+      className="route-editor-drawer"
       onClose={onClose} onConfirm={onConfirm} onCancel={onCancel} onDelete={onDelete}
     >
-      <div className="grid-2">
-        <Field label="名称" hint={isNew ? "创建后不可改名" : "名称不可修改"}>
-          <input value={value.name} onChange={(e) => set({ name: e.target.value })} disabled={!isNew} />
-        </Field>
-        <Field label="入口 Limen">
-          <select value={value.limen || ""} onChange={(e) => set({ limen: e.target.value || undefined })}>
-            <option value="">默认入口</option>
-            {limens.map((name) => <option key={name} value={name}>{name}</option>)}
-          </select>
-        </Field>
+      <div className="route-editor-layout">
+        <nav className="route-editor-nav" aria-label="Route 编辑分区">
+          {sectionItems.map((item, index) => (
+            <button key={item.id} type="button" className={section === item.id ? "active" : ""} onClick={() => setSection(item.id)}>
+              <em>{index + 1}</em><span><strong>{item.label}</strong><small>{item.meta}</small></span>
+            </button>
+          ))}
+        </nav>
+        <section className="route-editor-panel">
+          <header>
+            <div><span>STEP {sectionItems.findIndex((item) => item.id === section) + 1}</span><h4>{sectionItems.find((item) => item.id === section)?.label}</h4></div>
+            <small>匹配 → 中间件 → 动作</small>
+          </header>
+          {section === "basic" && (
+            <div className="route-editor-fields">
+              <div className="grid-2">
+                <Field label="名称" hint={isNew ? "创建后不可改名" : "名称不可修改"}>
+                  <input value={value.name} onChange={(e) => set({ name: e.target.value })} disabled={!isNew} />
+                </Field>
+                <Field label="入口 Limen">
+                  <select value={value.limen || ""} onChange={(e) => set({ limen: e.target.value || undefined })}>
+                    <option value="">默认入口</option>
+                    {limens.map((name) => <option key={name} value={name}>{name}</option>)}
+                  </select>
+                </Field>
+              </div>
+              <Field label="优先级" hint="数字越大越先匹配，默认 0">
+                <input type="number" min={0} value={value.priority ?? 0} onChange={(e) => set({ priority: Number(e.target.value) || 0 })} />
+              </Field>
+            </div>
+          )}
+          {section === "match" && matchBuilder}
+          {section === "middleware" && (
+            <div className="route-middleware-overview">
+              <div className="route-middleware-stats">
+                <span><strong>固定内置层</strong><b>{builtinCount}</b><small>不可移除，可覆盖参数</small></span>
+                <span><strong>配置中间件</strong><b>{configuredMiddlewares.length}</b><small>可排序、编辑和移除</small></span>
+                <span><strong>Route 覆盖</strong><b>{overrideCount}</b><small>未覆盖参数继承全局</small></span>
+              </div>
+              {configuredMiddlewares.length > 0 ? (
+                <div className="mw-flow-preview">
+                  {configuredMiddlewares.map((name, index) => (
+                    <span className="mw-flow-chip" key={`${name}-${index}`}>
+                      <em>{index + 1}</em><strong>{name}</strong>{!draft.middlewares?.[name] && <small className="error-text">未定义</small>}
+                    </span>
+                  ))}
+                </div>
+              ) : <p className="route-editor-empty">当前没有配置型中间件，请在执行链管理器中添加。</p>}
+              {onOpenMiddlewareManager && <button type="button" className="btn primary route-open-middleware" onClick={onOpenMiddlewareManager}>打开中间件执行链 →</button>}
+            </div>
+          )}
+          {section === "action" && <div className="route-editor-fields">{actionFields}</div>}
+        </section>
       </div>
-      <Field label="优先级" hint="数字越大优先级越高，默认 0">
-        <input type="number" min={0} value={value.priority ?? 0} onChange={(e) => set({ priority: Number(e.target.value) || 0 })} />
-      </Field>
-      {matchBuilder}
-      {middlewareSection}
-      {builtinOverrideSection}
-      {actionFields}
     </Drawer>
   );
 }

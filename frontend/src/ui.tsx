@@ -214,6 +214,7 @@ function DialogGlyph({ icon }: { icon: DialogIcon }) {
 export function Drawer({
   title,
   subtitle,
+  className = "",
   onClose,
   onConfirm,
   onCancel,
@@ -224,6 +225,7 @@ export function Drawer({
 }: {
   title: string;
   subtitle?: string;
+  className?: string;
   onClose: () => void;
   onConfirm: () => void;
   onCancel: () => void;
@@ -240,7 +242,7 @@ export function Drawer({
     <div className="backdrop" onMouseDown={onCancel}>
       <div
         ref={dialogRef}
-        className="drawer"
+        className={`drawer ${className}`.trim()}
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
