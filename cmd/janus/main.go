@@ -315,7 +315,11 @@ func closeServers(servers []*limen.Limen) {
 
 // openConfigLibrary opens the SQLite named-configuration library and seeds
 // it with the startup snapshot when empty, so the console always shows the
-// running configuration as one entry. A failure only disables the library
+// running configuration as one entry. When the library already holds history
+// but no record matches the startup file (for example the process last ran
+// with a different configuration), the startup snapshot is created and
+// published so the active marker reflects what the gateway actually runs
+// instead of a stale leftover. A failure only disables the library
 // endpoints; the gateway itself keeps serving.
 func openConfigLibrary(dbPath string, startup config.Config, logger *zap.Logger) *store.Store {
 	library, err := store.Open(dbPath)
@@ -341,7 +345,13 @@ func openConfigLibrary(dbPath string, startup config.Config, logger *zap.Logger)
 		if err != nil {
 			logger.Warn("configuration library reconciliation failed", zap.Error(err))
 		} else if !matched {
-			logger.Warn("configuration library active record does not match startup file")
+			logger.Warn("configuration library active record does not match startup file; seeding startup snapshot")
+			record, err := library.Create("启动配置", startup)
+			if err != nil {
+				logger.Warn("configuration library startup seed failed", zap.Error(err))
+			} else if err := library.Publish(record.ID); err != nil {
+				logger.Warn("configuration library startup publish failed", zap.Error(err))
+			}
 		}
 	}
 	return library

@@ -9,10 +9,12 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 
 	"janus/internal/config"
+	"janus/internal/store"
 
 	"go.uber.org/zap"
 )
@@ -187,6 +189,56 @@ func TestRunCheckDoesNotBindConfiguredListeners(t *testing.T) {
 		t.Fatalf("configured listener was disturbed by check mode: %v", err)
 	}
 	_ = probe.Close()
+}
+
+func TestOpenConfigLibrarySeedsStartupWhenActiveMismatch(t *testing.T) {
+	t.Helper()
+	directory := t.TempDir()
+	dbPath := filepath.Join(directory, "janus-configs.db")
+
+	// Simulate a previous run that published an unrelated configuration, so the
+	// library carries a stale active record.
+	stale := config.Config{
+		Version: config.CurrentConfigVersion,
+		Limens:  map[string]config.LimenConfig{"default": {Address: "127.0.0.1:8080", Protocols: []string{config.ProtocolHTTP1}}},
+		Routes:  []config.Route{{Name: "stale", PathPrefix: "/", Service: ""}},
+	}
+	library, err := store.Open(dbPath)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	record, err := library.Create("stale-active", stale)
+	if err != nil {
+		t.Fatalf("seed stale record: %v", err)
+	}
+	if err := library.Publish(record.ID); err != nil {
+		t.Fatalf("publish stale record: %v", err)
+	}
+	if err := library.Close(); err != nil {
+		t.Fatalf("close store: %v", err)
+	}
+
+	startup := config.Config{
+		Version: config.CurrentConfigVersion,
+		Limens:  map[string]config.LimenConfig{"default": {Address: "127.0.0.1:9090", Protocols: []string{config.ProtocolHTTP1}}},
+		Routes:  []config.Route{{Name: "startup", PathPrefix: "/"}},
+	}
+	library = openConfigLibrary(dbPath, startup, zap.NewNop())
+	if library == nil {
+		t.Fatal("openConfigLibrary returned nil")
+	}
+	defer func() { _ = library.Close() }()
+
+	active, err := library.Active()
+	if err != nil {
+		t.Fatalf("active: %v", err)
+	}
+	if active == nil {
+		t.Fatal("no active record after reconciliation")
+	}
+	if !reflect.DeepEqual(active.Content.WithDefaults(), startup.WithDefaults()) {
+		t.Fatalf("active content does not match startup snapshot: %+v", active.Content)
+	}
 }
 
 func reserveMainTestAddress(t *testing.T) string {

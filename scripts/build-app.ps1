@@ -1,102 +1,89 @@
-#!/usr/bin/env pwsh
-
-[CmdletBinding()]
-param()
-
-$ErrorActionPreference = "Stop"
-Set-StrictMode -Version Latest
-
 # Build the reviewed Admin Console, refresh the Go embed, then produce a
-# small, static Windows binary. Override environment variables as needed.
-$root = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
-$frontend = Join-Path $root "frontend"
-$dist = Join-Path $frontend "dist"
-$embed = Join-Path $root "internal\admin\ui"
-$goos = if ($env:GOOS) { $env:GOOS } else { "windows" }
-$goarch = if ($env:GOARCH) { $env:GOARCH } else { "amd64" }
-$output = if ($env:JANUS_OUTPUT) { $env:JANUS_OUTPUT } else { Join-Path $root "bin\janus.exe" }
-$uiBase = if ($env:JANUS_UI_BASE_URL) { $env:JANUS_UI_BASE_URL.Trim() } else { "" }
+# small, static Janus binary. Override JANUS_OUTPUT/GOOS/GOARCH as needed.
+# Mirrors scripts/build-app.sh for Windows hosts.
+$ErrorActionPreference = 'Stop'
 
-function Require-Command([string]$Name) {
-  if (-not (Get-Command $Name -ErrorAction SilentlyContinue)) { throw "$Name is required" }
+$Root     = Split-Path -Parent (Split-Path -Parent $PSCommandPath)
+$Frontend = Join-Path $Root 'frontend'
+$Dist     = Join-Path $Frontend 'dist'
+$Embed    = Join-Path $Root 'internal\admin\ui'
+
+$Goos   = if ($env:GOOS)   { $env:GOOS }   else { (go env GOOS) }
+$Goarch = if ($env:GOARCH) { $env:GOARCH } else { (go env GOARCH) }
+$Output = if ($env:JANUS_OUTPUT) { $env:JANUS_OUTPUT } else { Join-Path $Root 'bin\janus' }
+$UiBase = if ($env:JANUS_UI_BASE_URL) { $env:JANUS_UI_BASE_URL } else { '' }
+
+function Fail([string]$Message) {
+    Write-Error $Message
+    exit 1
 }
 
-Require-Command "node"
-Require-Command "npm"
-Require-Command "go"
-
-if ($uiBase -eq "/") { $uiBase = "" }
-if ($uiBase) {
-  if ($uiBase -notmatch '^/[A-Za-z0-9._/-]*$' -or $uiBase.Contains("//")) { throw "JANUS_UI_BASE_URL must be empty or an absolute URL path such as /janus" }
-  $uiBase = $uiBase.TrimEnd("/")
+foreach ($tool in 'node', 'npm', 'go') {
+    if (-not (Get-Command $tool -ErrorAction SilentlyContinue)) { Fail "$tool is required" }
 }
 
-if ($goos -eq "windows" -and -not $output.EndsWith(".exe", [StringComparison]::OrdinalIgnoreCase)) { $output = "$output.exe" }
-
-Write-Host "==> building Admin Console"
-$nodeModules = Join-Path $frontend "node_modules"
-if (($env:JANUS_INSTALL_DEPS -eq "1") -or -not (Test-Path $nodeModules)) {
-  Push-Location $frontend
-  try { npm ci } finally { Pop-Location }
+if ($UiBase -eq '/') {
+    $UiBase = ''
+} elseif ($UiBase -ne '') {
+    if (-not $UiBase.StartsWith('/')) { Fail 'JANUS_UI_BASE_URL must be empty or an absolute URL path such as /janus' }
+    if ($UiBase -match '[^A-Za-z0-9._/-]') { Fail 'JANUS_UI_BASE_URL must be empty or an absolute URL path such as /janus' }
+    $UiBase = $UiBase.TrimEnd('/')
+    if ($UiBase.Contains('//')) { Fail 'JANUS_UI_BASE_URL must not contain empty path segments' }
 }
-Push-Location $frontend
+
+if ($Goos -eq 'windows' -and $Output -notlike '*.exe') {
+    $Output = "$Output.exe"
+}
+
+Write-Host '==> building Admin Console'
+if ($env:JANUS_INSTALL_DEPS -eq '1' -or -not (Test-Path (Join-Path $Frontend 'node_modules'))) {
+    Push-Location $Frontend
+    try { npm ci } finally { Pop-Location }
+    if ($LASTEXITCODE -ne 0) { Fail 'npm ci failed' }
+}
+Push-Location $Frontend
 try {
-  $previousUiBase = $env:JANUS_UI_BASE_URL
-  $env:JANUS_UI_BASE_URL = $uiBase
-  npm run build
+    $env:JANUS_UI_BASE_URL = $UiBase
+    npm run build
 } finally {
-  if ($null -eq $previousUiBase) { Remove-Item Env:JANUS_UI_BASE_URL -ErrorAction SilentlyContinue } else { $env:JANUS_UI_BASE_URL = $previousUiBase }
-  Pop-Location
+    Pop-Location
 }
+if ($LASTEXITCODE -ne 0) { Fail 'frontend build failed' }
 
-if (-not (Test-Path (Join-Path $dist "index.html"))) { throw "frontend build did not produce dist/index.html" }
-$distAssets = Join-Path $dist "assets"
-if (-not (Test-Path $distAssets)) { throw "frontend build did not produce dist/assets" }
+if (-not (Test-Path (Join-Path $Dist 'index.html'))) { Fail 'frontend build did not produce dist/index.html' }
+if (-not (Test-Path (Join-Path $Dist 'assets')))     { Fail 'frontend build did not produce dist/assets' }
 
-Write-Host "==> synchronizing embedded Admin Console"
-$embedAssets = Join-Path $embed "assets"
-New-Item -ItemType Directory -Force -Path $embedAssets | Out-Null
-Get-ChildItem -Path $embedAssets -File -Force -ErrorAction SilentlyContinue | Remove-Item -Force
-Copy-Item (Join-Path $dist "index.html") (Join-Path $embed "index.html") -Force
-Copy-Item (Join-Path $distAssets "*") $embedAssets -Force
+Write-Host '==> synchronizing embedded Admin Console'
+New-Item -ItemType Directory -Force (Join-Path $Embed 'assets') | Out-Null
+Remove-Item (Join-Path $Embed 'assets\*') -Force -ErrorAction SilentlyContinue
+Copy-Item (Join-Path $Dist 'index.html') (Join-Path $Embed 'index.html') -Force
+Copy-Item (Join-Path $Dist 'assets\*') (Join-Path $Embed 'assets') -Force
+& (Join-Path $Root 'scripts\verify-embedded-ui.ps1')
 
-function Get-Hash([string]$Path) { return (Get-FileHash -Algorithm SHA256 -LiteralPath $Path).Hash }
+$OutputDir = Split-Path -Parent $Output
+if ($OutputDir) { New-Item -ItemType Directory -Force $OutputDir | Out-Null }
 
-$distFiles = @(Get-ChildItem -Path $distAssets -File | Sort-Object Name)
-$embedFiles = @(Get-ChildItem -Path $embedAssets -File | Sort-Object Name)
-if (($distFiles.Name -join "`n") -ne ($embedFiles.Name -join "`n")) { throw "embedded asset names differ from frontend/dist" }
-if ((Get-Hash (Join-Path $dist "index.html")) -ne (Get-Hash (Join-Path $embed "index.html"))) { throw "embedded index.html differs from frontend/dist" }
-foreach ($file in $distFiles) {
-  if ((Get-Hash $file.FullName) -ne (Get-Hash (Join-Path $embedAssets $file.Name))) { throw "embedded asset differs: $($file.Name)" }
-}
-Write-Host "embedded Admin Console matches frontend/dist"
-
-$outputDir = Split-Path -Parent $output
-if ([string]::IsNullOrWhiteSpace($outputDir)) { $outputDir = "." }
-New-Item -ItemType Directory -Force -Path $outputDir | Out-Null
-Write-Host "==> building $goos/$goarch -> $output"
-$previousCgo = $env:CGO_ENABLED
-$previousGoos = $env:GOOS
-$previousGoarch = $env:GOARCH
-$env:CGO_ENABLED = "0"
-$env:GOOS = $goos
-$env:GOARCH = $goarch
+Write-Host "==> building $Goos/$Goarch -> $Output"
+Push-Location $Root
 try {
-  & go build -trimpath -buildvcs=false "-ldflags=-s -w -buildid= -X janus/internal/admin.uiBaseURL=$uiBase" -o $output ./cmd/janus
+    $env:CGO_ENABLED = '0'
+    $env:GOOS        = $Goos
+    $env:GOARCH      = $Goarch
+    go build -trimpath -buildvcs=false -ldflags "-s -w -buildid= -X janus/internal/admin.uiBaseURL=$UiBase" -o $Output ./cmd/janus
 } finally {
-  if ($null -eq $previousCgo) { Remove-Item Env:CGO_ENABLED -ErrorAction SilentlyContinue } else { $env:CGO_ENABLED = $previousCgo }
-  if ($null -eq $previousGoos) { Remove-Item Env:GOOS -ErrorAction SilentlyContinue } else { $env:GOOS = $previousGoos }
-  if ($null -eq $previousGoarch) { Remove-Item Env:GOARCH -ErrorAction SilentlyContinue } else { $env:GOARCH = $previousGoarch }
+    Pop-Location
+}
+if ($LASTEXITCODE -ne 0) { Fail 'go build failed' }
+
+if ($env:JANUS_UPX -eq '1') {
+    if (-not (Get-Command upx -ErrorAction SilentlyContinue)) { Fail 'JANUS_UPX=1 requires upx in PATH' }
+    Write-Host '==> applying optional UPX compression'
+    upx --best --lzma $Output
+    if ($LASTEXITCODE -ne 0) { Fail 'upx compression failed' }
 }
 
-if ($env:JANUS_UPX -eq "1") {
-  Require-Command "upx"
-  Write-Host "==> applying optional UPX compression"
-  & upx --best --lzma $output
-}
+if (-not (Test-Path $Output)) { Fail "Go build did not produce $Output" }
 
-if (-not (Test-Path $output)) { throw "Go build did not produce $output" }
-$hash = Get-Hash $output
-$bytes = (Get-Item $output).Length
-Write-Host "SHA-256 $hash"
-Write-Host "built $output ($bytes bytes)"
+$hash = (Get-FileHash $Output -Algorithm SHA256).Hash.ToLowerInvariant()
+Write-Host "sha256  $hash  $Output"
+Write-Host ("built {0} ({1} bytes)" -f $Output, (Get-Item $Output).Length)
