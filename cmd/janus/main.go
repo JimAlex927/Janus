@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"sync"
 	"syscall"
@@ -410,8 +411,16 @@ func writeConfigAtomically(path string, c config.Config) error {
 	if err := os.Rename(tempName, path); err != nil {
 		return err
 	}
-	// The file's contents are durable after temp.Sync, but the rename itself
-	// is only durable once the containing directory metadata is flushed too.
+	// The file's contents are durable after temp.Sync, but on Unix the rename
+	// itself is only durable once the containing directory metadata is flushed
+	// too. Windows does not support syncing a directory handle: File.Sync on
+	// such a handle returns ERROR_ACCESS_DENIED even though the rename succeeded.
+	// The file sync above is the strongest portable durability step available on
+	// Windows, so do not turn a successful configuration replacement into a
+	// persistence error there.
+	if runtime.GOOS == "windows" {
+		return nil
+	}
 	directoryFile, err := os.Open(directory)
 	if err != nil {
 		return fmt.Errorf("open configuration directory for sync: %w", err)

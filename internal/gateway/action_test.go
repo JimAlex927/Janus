@@ -118,6 +118,12 @@ func TestStaticDirectoryListing(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "files", "readme.txt"), []byte("hello"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.Mkdir(filepath.Join(root, "files", "nested"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "files", "nested", "child.txt"), []byte("child"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	g, err := New(config.Config{
 		Listen: "127.0.0.1:8080",
 		Routes: []config.Route{{
@@ -135,6 +141,12 @@ func TestStaticDirectoryListing(t *testing.T) {
 	g.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "http://gateway/files/", nil))
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "readme.txt") {
 		t.Fatalf("directory listing = %d %q", response.Code, response.Body.String())
+	}
+
+	response = httptest.NewRecorder()
+	g.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "http://gateway/files/nested/", nil))
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "child.txt") {
+		t.Fatalf("nested directory listing = %d %q", response.Code, response.Body.String())
 	}
 }
 
