@@ -89,6 +89,7 @@ export interface NacosRef {
 }
 
 export interface Service {
+  pass_host_header?: boolean;
   upstreams?: string[];
   nacos?: NacosRef;
   middlewares?: string[];

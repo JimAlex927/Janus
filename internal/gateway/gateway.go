@@ -169,7 +169,7 @@ func NewWithDiscovery(c config.Config, logger *zap.Logger, transport http.RoundT
 			}
 		}
 		//这里启用了proxy机制
-		serviceHandler := proxy.NewWithForwarding(pool, transport, logger.With(zap.String("service", name)), forwardingPolicies)
+		serviceHandler := proxy.NewWithForwarding(pool, transport, logger.With(zap.String("service", name)), forwardingPolicies, proxy.Options{PassHostHeader: service.PassHostHeader})
 		serviceLimiter := serviceLimiters[name]
 		if serviceLimiter == nil {
 			if limit, ok := configuredServiceLimit(c, service); ok {

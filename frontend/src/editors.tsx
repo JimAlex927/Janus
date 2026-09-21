@@ -81,6 +81,12 @@ export function ServiceEditor({
           <option value="nacos">Nacos service discovery</option>
         </select>
       </Field>
+      <Field label="后端 Host" hint="保留客户端 Host（含端口）可用于同源校验；不改变后端连接地址或 TLS 证书校验。">
+        <select value={value.pass_host_header ? "preserve" : "upstream"} onChange={(e) => set({ pass_host_header: e.target.value === "preserve" })}>
+          <option value="upstream">使用上游地址（默认）</option>
+          <option value="preserve">保留客户端 Host</option>
+        </select>
+      </Field>
       {source === "static" ? (
         <>
           <Field label="Upstreams" hint="每行一个 http(s) origin，例如 http://127.0.0.1:9000">

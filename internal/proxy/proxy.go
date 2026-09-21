@@ -71,13 +71,21 @@ type TargetSelector interface {
 	NextHealthy() (url.URL, bool)
 }
 
+type Options struct {
+	PassHostHeader bool
+}
+
 func New(pool TargetSelector, transport http.RoundTripper, logger *zap.Logger) http.Handler {
 	return NewWithForwarding(pool, transport, logger, forwarding.NewPolicies())
 }
 
 // NewWithForwarding builds a proxy that derives canonical forwarding headers
 // from the request's trusted Limen policy before contacting the backend.
-func NewWithForwarding(pool TargetSelector, transport http.RoundTripper, logger *zap.Logger, policies forwarding.Policies) http.Handler {
+func NewWithForwarding(pool TargetSelector, transport http.RoundTripper, logger *zap.Logger, policies forwarding.Policies, values ...Options) http.Handler {
+	var options Options
+	if len(values) > 0 {
+		options = values[0]
+	}
 	if logger == nil {
 		logger = zap.NewNop()
 	}
@@ -91,6 +99,11 @@ func NewWithForwarding(pool TargetSelector, transport http.RoundTripper, logger 
 				target, _ = pool.NextHealthy()
 			}
 			r.SetURL(&target)
+			if options.PassHostHeader {
+				// Preserve HTTP authority only, never the dial target or TLS SNI.
+				// Do not derive this value from client-supplied forwarding headers.
+				r.Out.Host = r.In.Host
+			}
 			// Rewrite already removes the standard forwarding headers. Remove
 			// alternate identity hints too; v0 trusts only its immediate peer.
 			// Note: Delete the specified header for those will be regenerated.

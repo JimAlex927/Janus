@@ -1,4 +1,8 @@
 /bin/
+/app
+/janus
+/janus.manifest.json
+.DS_Store
 /coverage.out
 *.test
 *.prof
@@ -7,6 +11,7 @@
 /frontend/dist/
 *.tsbuildinfo
 /.playwright-cli/
+/.local/
 /output/playwright/
 /output/qualification/
 # Runtime SQLite configuration library (created next to the active config).

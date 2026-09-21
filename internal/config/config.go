@@ -277,10 +277,13 @@ type AddPrefixSettings struct {
 }
 
 type Service struct {
-	Upstreams   []string             `json:"upstreams,omitempty"`
-	Nacos       *NacosService        `json:"nacos,omitempty"`
-	Middlewares []string             `json:"middlewares"`
-	HealthCheck *HealthCheckSettings `json:"health_check,omitempty"`
+	// PassHostHeader preserves the incoming HTTP authority, including its port.
+	// Backend dial address and TLS verification still use the selected upstream.
+	PassHostHeader bool                 `json:"pass_host_header,omitempty"`
+	Upstreams      []string             `json:"upstreams,omitempty"`
+	Nacos          *NacosService        `json:"nacos,omitempty"`
+	Middlewares    []string             `json:"middlewares"`
+	HealthCheck    *HealthCheckSettings `json:"health_check,omitempty"`
 }
 
 // HealthCheckSettings controls optional active HTTP health probes for every
