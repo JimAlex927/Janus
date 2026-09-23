@@ -386,6 +386,20 @@ func (r *Runtime) ReplaceAndPersist(c config.Config, expectedRevision uint64, pe
 	return r.replace(c, &expectedRevision, persist)
 }
 
+// ReplaceAndPersistAs activates a hot-compatible configuration while writing
+// the complete next-start configuration. This lets a control-plane publish
+// persist listener changes without changing the listeners of this process.
+func (r *Runtime) ReplaceAndPersistAs(running, onDisk config.Config, expectedRevision uint64, persist func(config.Config) error) error {
+	if persist == nil {
+		return errors.New("runtime persistence callback is nil")
+	}
+	onDisk = onDisk.WithDefaults()
+	if err := onDisk.Validate(); err != nil {
+		return err
+	}
+	return r.replace(running, &expectedRevision, func(config.Config) error { return persist(onDisk) })
+}
+
 // replace implements both ordinary reloads and control-plane publication.
 // Holding updateMu from validation through persistence prevents a failed file
 // write from racing a later replacement and rolling back a newer generation.

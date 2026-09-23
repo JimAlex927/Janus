@@ -169,7 +169,7 @@ export function deleteStoredConfig(id: number): Promise<{ ok: boolean }> {
   return request(`/api/v1/configs/${id}`, { method: "DELETE" });
 }
 
-export function publishStoredConfig(id: number, revision: number, recordRevision?: string): Promise<{ ok: boolean; revision: number; warning?: string; updated_at?: string }> {
+export function publishStoredConfig(id: number, revision: number, recordRevision?: string): Promise<{ ok: boolean; revision: number; restart_required: boolean; hot_applied: boolean; warning?: string; updated_at?: string }> {
   return request(`/api/v1/configs/${id}/publish`, {
     method: "POST",
     headers: { "X-Janus-Revision": String(revision), ...(recordRevision ? { "X-Janus-Record-Revision": recordRevision } : {}) },

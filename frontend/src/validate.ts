@@ -137,7 +137,7 @@ export function diffSummary(oldConfig: JanusConfig | null, newConfig: JanusConfi
   if (newMw.filter((m) => !oldMw.includes(m)).length) changes.push("中间件有新增");
   if (oldMw.filter((m) => !newMw.includes(m)).length) changes.push("中间件有删除");
 
-  if (JSON.stringify(oldConfig.limens || {}) !== JSON.stringify(newConfig.limens || {})) changes.push("入口（Limen）配置有变更，需写入文件并重启生效");
+  if (JSON.stringify(oldConfig.limens || {}) !== JSON.stringify(newConfig.limens || {})) changes.push("入口（Limen）配置有变更，发布后需重启生效");
   if (JSON.stringify(oldConfig.settings) !== JSON.stringify(newConfig.settings)) changes.push("全局设置有变更");
   if (JSON.stringify(oldConfig.discovery) !== JSON.stringify(newConfig.discovery)) changes.push("注册中心配置有变更");
 

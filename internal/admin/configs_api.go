@@ -27,9 +27,9 @@ import (
 //	POST   /api/v1/configs/{id}/publish  publish a draft as the running generation
 //	POST   /api/v1/config/settings       rewrite the active file settings (restart required)
 //
-// Publishing normalizes the draft to the active startup-owned sections
-// (settings and limens) before going through the standard publish path, so a
-// stored draft can never fail activation over listener or process settings.
+// Publishing writes the complete validated draft to the startup file. The
+// running generation keeps its current listeners and process settings until
+// restart; route changes are activated immediately when compatible with them.
 
 type configRecordView struct {
 	ID        int64     `json:"id"`
@@ -466,7 +466,7 @@ func (h *Handler) deleteConfig(w http.ResponseWriter, r *http.Request, id int64)
 func (h *Handler) publishStoredConfig(w http.ResponseWriter, r *http.Request, id int64) {
 	h.controlMu.Lock()
 	defer h.controlMu.Unlock()
-	if h.publish == nil {
+	if h.publishStored == nil {
 		http.Error(w, "publishing is unavailable", http.StatusServiceUnavailable)
 		return
 	}
@@ -494,17 +494,23 @@ func (h *Handler) publishStoredConfig(w http.ResponseWriter, r *http.Request, id
 		http.Error(w, "configuration does not exist", http.StatusNotFound)
 		return
 	}
-	startupChanged := !startupOwnedEqual(record.Content, active)
 	if !recordPrecondition(w, r, record) {
 		return
 	}
-	candidate := normalizeToActive(record.Content, active)
-	candidate = candidate.WithDefaults()
-	if err := candidate.Validate(); err != nil {
+	onDisk := record.Content.WithDefaults()
+	if err := onDisk.Validate(); err != nil {
 		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"ok": false, "error": err.Error()})
 		return
 	}
-	if err := h.publish(candidate, expectedRevision); err != nil {
+	running := normalizeToActive(onDisk, active).WithDefaults()
+	hotApplied := true
+	if err := running.Validate(); err != nil {
+		// A route bound to a new Limen cannot run before restart. Persist the
+		// complete validated draft and keep the current route generation.
+		running = active
+		hotApplied = false
+	}
+	if err := h.publishStored(running, onDisk, expectedRevision); err != nil {
 		if errors.Is(err, janusruntime.ErrRevisionConflict) {
 			http.Error(w, "configuration revision conflict", http.StatusConflict)
 			return
@@ -512,18 +518,16 @@ func (h *Handler) publishStoredConfig(w http.ResponseWriter, r *http.Request, id
 		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"ok": false, "error": err.Error()})
 		return
 	}
+	restartRequired := !startupOwnedEqual(onDisk, active)
 	if err := h.library.Publish(id); err != nil {
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "revision": h.revisionValue(), "warning": err.Error()})
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "revision": h.revisionValue(), "restart_required": restartRequired, "hot_applied": hotApplied, "warning": "配置已写入文件，但配置库状态更新失败: " + err.Error()})
 		return
 	}
-	result := map[string]any{"ok": true, "revision": h.revisionValue()}
+	result := map[string]any{"ok": true, "revision": h.revisionValue(), "restart_required": restartRequired, "hot_applied": hotApplied}
 	// Return this publication's record version while controlMu is still held.
 	// A later client GET could observe another administrator's intervening edit.
 	if published, err := h.library.Get(id); err == nil && published != nil {
 		result["updated_at"] = published.UpdatedAt.UTC().Format(time.RFC3339Nano)
-	}
-	if startupChanged {
-		result["warning"] = "limens or settings differ from the running configuration: routes/services were published, listener and process settings require a file edit and restart"
 	}
 	writeJSON(w, http.StatusOK, result)
 }

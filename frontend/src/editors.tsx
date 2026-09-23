@@ -440,7 +440,6 @@ export function LimenEditor({
   onCancel,
   onClose,
   onDelete,
-  onStageLimens,
 }: {
   name: string;
   limen: Limen;
@@ -451,7 +450,6 @@ export function LimenEditor({
   onCancel: () => void;
   onClose: () => void;
   onDelete?: () => void;
-  onStageLimens?: () => void;
 }) {
   const protocolOptions = limen.tls ? LIMEN_PROTOCOLS_WITH_TLS : LIMEN_PROTOCOLS_WITHOUT_TLS;
 
@@ -489,7 +487,7 @@ export function LimenEditor({
   return (
     <Drawer
       title={isNew ? "新建 Limen" : `编辑 Limen · ${name}`}
-      subtitle="入口变更会写入配置草稿；发布不会重启监听器，写入生效文件后需重启 Janus。"
+      subtitle="入口变更先保存到草稿；发布时写入配置文件，重启 Janus 后生效。"
       onClose={onClose}
       onConfirm={onConfirm}
       onCancel={onCancel}
@@ -574,13 +572,6 @@ export function LimenEditor({
         <Field label="HTTP/3 max concurrent streams" hint="需要同时保留 HTTP/1.1 或 HTTP/2 作为 TCP 回退">
           <input type="number" min={1} value={limen.http3?.max_concurrent_streams ?? 100} onChange={(event) => onChange({ ...limen, http3: { ...(limen.http3 || {}), max_concurrent_streams: Number(event.target.value) || 0 } })} />
         </Field>
-      )}
-      {onStageLimens && (
-        <div className="stage-box">
-          <div className="field-label">入口写文件</div>
-          <small className="muted">先点击“确认”保存入口草稿，再写入生效文件；运行中的监听不会改变。</small>
-          <button type="button" className="btn small" onClick={onStageLimens}>写入文件（需重启生效）</button>
-        </div>
       )}
     </Drawer>
   );

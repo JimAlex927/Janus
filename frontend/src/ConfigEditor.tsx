@@ -25,7 +25,6 @@ import {
   getStoredConfig,
   publishStoredConfig,
   saveStoredConfig,
-  stageLimens,
   validateConfig,
   type StoredConfig,
 } from "./api";
@@ -517,7 +516,7 @@ function ConfigEditor({ store, id, onBack, onStatusChange }: { store: ConfigStor
     const draft = draftRef.current;
     if (!draft) return;
     if (kind === "limen") {
-      store.setMessage("Limen 是启动级入口，不能热发布；双击已有 Limen 可编辑，确认后写入草稿，写入生效文件并重启后生效。");
+      store.setMessage("Limen 是启动级入口；双击已有 Limen 编辑，确认后发布会写入配置文件，重启 Janus 后生效。");
       return;
     }
     if (kind === "route") {
@@ -1005,38 +1004,6 @@ function routeCoreLabel(route: Route): string {
     }
   }
 
-  /** 将已保存草稿的入口写入生效文件（运行不受影响，重启后生效）。 */
-  async function stageSavedLimens() {
-    if (editing?.kind === "limen") {
-      store.setMessage("请先点击入口编辑器的“确认”保存草稿，再写入生效文件。取消则不会保留本次修改。");
-      return;
-    }
-    if (dirty) {
-      store.setMessage("草稿有未保存的修改，请先确认抽屉并保存草稿，再写入文件。");
-      return;
-    }
-    if (!(await dialogs.confirm({
-      title: "写入入口配置",
-      message: "将已保存的入口写入生效文件。当前运行不受影响，重启 Janus 后才会生效。",
-      confirmLabel: "写入文件",
-      tone: "warning",
-    }))) return;
-    setBusy(true);
-    try {
-      const result = await stageLimens(workingId);
-      store.setMessage(
-        result.warning
-          ? `入口已写入文件，重启后生效。注意：${result.warning}`
-          : "入口已写入文件，重启 Janus 后生效。",
-      );
-    } catch (error) {
-      if (error instanceof ApiError && error.status === 401) store.setStatus("unauthorized");
-      else store.setMessage(error instanceof Error ? error.message : String(error));
-    } finally {
-      setBusy(false);
-    }
-  }
-
   async function validate() {
     const draft = draftRef.current;
     if (!draft) return;
@@ -1050,7 +1017,7 @@ function routeCoreLabel(route: Route): string {
       await validateConfig(draft);
       store.setMessage("配置校验通过。");
     } catch (error) {
-      store.setMessage(error instanceof Error ? error.message : String(error));
+      store.setMessage(`校验失败：${error instanceof Error ? error.message : String(error)}`);
     } finally {
       setBusy(false);
     }
@@ -1066,7 +1033,7 @@ function routeCoreLabel(route: Route): string {
     const expectedRevision = store.revision;
     if (!(await dialogs.confirm({
       title: "发布配置",
-      message: `当前生效配置将被「${meta?.name}」替换，路由变化会立即进入新的 generation。`,
+      message: `将「${meta?.name}」的完整配置写入配置文件。兼容的路由变更会立即生效；入口和全局设置变更需重启 Janus。`,
       confirmLabel: "确认发布",
       tone: "warning",
     }))) return;
@@ -1078,11 +1045,8 @@ function routeCoreLabel(route: Route): string {
       // Do not replace the editor's current content/layout: users may have
       // continued editing while the saved snapshot was being published.
       await store.load();
-      store.setMessage(
-        result.warning
-          ? `已发布，网关 generation ${result.revision}。注意：${translateWarning(result.warning)}`
-          : `已发布，网关 generation ${result.revision}。`,
-      );
+      const effect = result.hot_applied ? "路由已生效。" : "路由引用了新入口，当前运行配置未改变。";
+      store.setMessage(`完整配置已写入文件。${effect}${result.restart_required ? "重启 Janus 后入口及全局设置生效。" : ""}${result.warning ? `配置库提示：${result.warning}` : ""}`);
       onStatusChange();
     } catch (error) {
       if (error instanceof ApiError && error.status === 409) {
@@ -1090,24 +1054,12 @@ function routeCoreLabel(route: Route): string {
         store.setMessage("版本冲突：远端已被他人更新。本地草稿已保留，请比较并合并后再发布。");
         return;
       }
-      const message = error instanceof Error ? error.message : String(error);
-      store.setMessage(
-        /limen/i.test(message)
-          ? `${message}（入口是启动级的：新增/修改入口需改文件并重启后再生效）`
-          : message,
-      );
+      store.setMessage(`发布失败：${error instanceof Error ? error.message : String(error)}`);
     } finally {
       setBusy(false);
     }
     } finally { publishing.current = false; }
   }
-
-function translateWarning(warning: string): string {
-  if (/limens or settings/i.test(warning)) {
-    return "入口或全局设置与线上不同，已按线上版本发布路由部分；入口/设置变更需改文件并重启。";
-  }
-  return warning;
-}
 
   async function leaveEditor() {
     if (!dirty || await dialogs.confirm({
@@ -1191,7 +1143,7 @@ function translateWarning(warning: string): string {
             <span>Limen → Route 指定入口</span>
             <span>Route → Service 设置转发</span>
             <small>中间件在 Route / Service 的编辑器中新建、改参、排序。</small>
-            <small>入口地址、协议和 TLS 可在入口编辑器修改；确认后写入文件并重启才生效。Route / Service 节点可拖动、删除和双击编辑。</small>
+            <small>入口地址、协议和 TLS 可在入口编辑器修改；确认后发布会写入文件，重启后生效。Route / Service 节点可拖动、删除和双击编辑。</small>
           </div>
           <button type="button" className="btn ghost" onClick={() => openRegistryManager(false)}>注册中心管理</button>
         </aside>
@@ -1327,7 +1279,6 @@ function translateWarning(warning: string): string {
           onCancel={() => setEditing(null)}
           onClose={() => setEditing(null)}
           onDelete={editing.isNew ? deleteEditing : undefined}
-          onStageLimens={stageSavedLimens}
         />
       )}
       {mwManager && editing && (editing.kind === "route" || editing.kind === "service") && (

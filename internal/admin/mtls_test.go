@@ -31,17 +31,16 @@ func TestMTLSDraftRoundTripAndStage(t *testing.T) {
 			t.Fatal(res.Body.String())
 		}
 	}
-	// Publishing application routes cannot silently enable a TLS policy.
+	// Publishing writes the TLS policy to disk; the current listener stays put.
 	res := f.do(t, http.MethodPost, "/api/v1/configs/1/publish", "")
-	if res.Code != http.StatusOK || !strings.Contains(res.Body.String(), "require a file edit and restart") || f.published.Limens["default"].TLS != nil {
+	if res.Code != http.StatusOK || !strings.Contains(res.Body.String(), `"restart_required":true`) || f.published.Limens["default"].TLS != nil || f.onDisk.Limens["default"].TLS == nil {
 		t.Fatal(res.Body.String())
 	}
 	res = f.do(t, http.MethodPost, "/api/v1/configs/1/stage-limens", "")
 	if res.Code != http.StatusOK || !strings.Contains(res.Body.String(), `"restart_required":true`) {
 		t.Fatal(res.Body.String())
 	}
-	res = f.do(t, http.MethodGet, "/api/v1/config", "")
-	if res.Code != http.StatusOK || !strings.Contains(res.Body.String(), `"client_ca_file":"../certs/client-ca.pem"`) {
-		t.Fatal(res.Body.String())
+	if f.onDisk.Limens["default"].TLS.ClientCAFile != "../certs/client-ca.pem" {
+		t.Fatal("staged client CA missing from file")
 	}
 }

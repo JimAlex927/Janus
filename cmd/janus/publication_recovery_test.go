@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"go.uber.org/zap"
@@ -102,5 +103,84 @@ func TestPublicationFileFailureKeepsRuntime(t *testing.T) {
 	}
 	if r.Revision() != 1 || r.ConfigSnapshot().Routes[0].Name != "old" {
 		t.Fatal("failed persistence activated candidate")
+	}
+}
+
+func TestStoredPublicationPersistsLimenForNextStart(t *testing.T) {
+	old := publicationConfig("old")
+	r, err := janusruntime.New(old, zap.NewNop())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := writeConfigAtomically(path, old); err != nil {
+		t.Fatal(err)
+	}
+	running := publicationConfig("new")
+	onDisk := publicationConfig("new")
+	onDisk.Limens["private"] = config.LimenConfig{Address: "127.0.0.1:8181", Protocols: []string{config.ProtocolHTTP1}}
+	if err := publishStoredConfig(path, r, running, onDisk, r.Revision()); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := config.LoadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Limens["private"].Address != "127.0.0.1:8181" || loaded.Routes[0].Name != "new" {
+		t.Fatalf("published file lost draft: %+v", loaded)
+	}
+	if r.ConfigSnapshot().Limens["private"].Address != "127.0.0.1:8080" || r.ConfigSnapshot().Routes[0].Name != "new" {
+		t.Fatalf("running snapshot changed listener or lost hot route: %+v", r.ConfigSnapshot())
+	}
+}
+
+func TestStoredPublicationWriteFailureKeepsRuntime(t *testing.T) {
+	old := publicationConfig("old")
+	r, err := janusruntime.New(old, zap.NewNop())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := os.Mkdir(path, 0700); err != nil {
+		t.Fatal(err)
+	}
+	running := publicationConfig("new")
+	onDisk := publicationConfig("new")
+	onDisk.Limens["private"] = config.LimenConfig{Address: "127.0.0.1:8181", Protocols: []string{config.ProtocolHTTP1}}
+	if err := publishStoredConfig(path, r, running, onDisk, r.Revision()); err == nil {
+		t.Fatal("file error ignored")
+	}
+	if r.Revision() != 1 || r.ConfigSnapshot().Routes[0].Name != "old" || r.ConfigSnapshot().Limens["private"].Address != "127.0.0.1:8080" {
+		t.Fatal("failed persistence activated candidate")
+	}
+}
+
+func TestStoredPublicationRejectsMissingClientCA(t *testing.T) {
+	old := publicationConfig("old")
+	r, err := janusruntime.New(old, zap.NewNop())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := writeConfigAtomically(path, old); err != nil {
+		t.Fatal(err)
+	}
+	onDisk := publicationConfig("new")
+	binding := onDisk.Limens["private"]
+	binding.TLS = &config.TLSSettings{CertFile: "server.crt", KeyFile: "server.key", ClientAuth: config.ClientAuthRequireAndVerify, ClientCAFile: "missing/ca.crt"}
+	onDisk.Limens["private"] = binding
+	err = publishStoredConfig(path, r, old, onDisk, r.Revision())
+	if err == nil || !strings.Contains(err.Error(), "client CA") {
+		t.Fatalf("missing client CA accepted: %v", err)
+	}
+	loaded, err := config.LoadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Limens["private"].TLS != nil || loaded.Routes[0].Name != "old" || r.Revision() != 1 {
+		t.Fatal("invalid certificate path changed the file or runtime")
 	}
 }

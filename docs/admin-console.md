@@ -80,17 +80,19 @@ The command writes only the bcrypt hash to standard output. Copy that value to
 The console manages a library of named configurations stored in SQLite next
 to the active file (`janus-configs.db`). Exactly one record is `active`;
 publishing another record archives the previous one. A publish request
-normalizes the draft to the active startup-owned sections (settings and
-limens), validates and builds a new Runtime generation, persists the active
-file with an atomic rename and containing-directory sync, and only then
-activates that generation. If
-persistence fails, the candidate is released without ever receiving traffic.
+validates and writes the complete draft, including Limens and settings, to the
+active file with an atomic rename and containing-directory sync. It activates
+compatible route and service changes in a new Runtime generation after the
+file write. If a route refers to a new Limen that is not running yet, the file
+is still published but the current route generation remains in place until
+restart. Startup TLS assets are checked before the write; missing or invalid
+certificates are rejected. If persistence fails, no candidate receives traffic.
 Both direct and library-based publishes carry the Runtime revision, so a stale
 console cannot overwrite a configuration that another operator has already
 published. Settings that affect listeners or process-wide request
-infrastructure remain startup-owned; they are normalized away on publish and
-must be changed through `全局设置`, which rewrites the file and requires a
-restart.
+infrastructure remain startup-owned; publication writes their next-start
+values to the file and reports that a restart is required. `全局设置` can also
+rewrite settings directly without publishing a configuration record.
 
 The console also sends `X-Janus-Record-Revision` on stored draft save and publish,
 using the exact `updated_at` returned by the preceding read/save. A stale token
@@ -136,14 +138,13 @@ previous active record, which can later be selected with `回滚`.
   异机恢复需重填密码，同机复制请用“复制”按钮，凭据由服务端直接拷贝）。
   点`编辑`进入画布；`draft` 与 `archived` 各自独立分页，历史版本可直接回滚。
 - 画布是三类节点的 DAG（React Flow）：`Limen`（监听入口，可编辑；
-  启动级配置，发布时路由部分即时生效，入口差异会明确提示需重启）、
+  发布时写入文件，监听器需重启才生效）、
   `Route`（三段式节点：匹配 → 中间件 → 动作，点击分段直达对应编辑器）、
   `Service`（上游池或 Nacos 引用）。连线即语义：Limen → Route 指定入口，
   Route → Service 设置转发；Backspace/Delete 或“删除选中”按钮删节点，
   被引用的节点会拒绝并点名；顶栏“整理布局”按引用关系分层重排，边尽量
-  不交叉。入口监听配置是启动级的：发布时路由部分即时生效，入口差异会
-  明确提示需重启；入口抽屉里的“写入文件”可把已保存草稿的入口合并进
-  生效文件（运行不受影响，重启后生效）。
+  不交叉。发布会将完整配置写入文件；路由若引用尚未启动的入口，
+  路由也要等重启后生效。界面会分别提示文件写入和运行时状态。
 - Route / Service 的 Middleware 管理器和 Nacos Registry 管理器使用嵌套事务：
   `确认修改`保留本次资源与编排变更；`取消`、遮罩、右上角关闭和 Escape
   都恢复打开弹窗前的配置快照。Middleware 类型、适用作用域、默认值和

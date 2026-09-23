@@ -141,6 +141,9 @@ func run(ctx context.Context, path string, check, printEffective bool, reloadInt
 				Publish: func(candidate config.Config, revision uint64) error {
 					return publishConfig(path, requestRuntime, candidate, revision)
 				},
+				PublishStored: func(running, onDisk config.Config, revision uint64) error {
+					return publishStoredConfig(path, requestRuntime, running, onDisk, revision)
+				},
 				Subscribe:  requestRuntime.Subscribe,
 				Library:    configLibrary,
 				SaveActive: func(updated config.Config) error { return writeConfigAtomically(path, updated) },
@@ -392,6 +395,34 @@ func publishConfig(path string, r *janusruntime.Runtime, candidate config.Config
 		candidate.Settings.Admin.PasswordHash = previous.Settings.Admin.PasswordHash
 	}
 	return r.ReplaceAndPersist(candidate, expectedRevision, func(next config.Config) error {
+		if err := writeConfigAtomically(path, next); err != nil {
+			return fmt.Errorf("persist configuration: %w", err)
+		}
+		return nil
+	})
+}
+
+func publishStoredConfig(path string, r *janusruntime.Runtime, running, onDisk config.Config, expectedRevision uint64) error {
+	if onDisk.Settings.Admin.PasswordHash == "" {
+		onDisk.Settings.Admin.PasswordHash = r.ConfigSnapshot().Settings.Admin.PasswordHash
+	}
+	// Validate TLS assets exactly as the next process will resolve them. A
+	// syntactically valid mTLS path must not turn a successful publication into
+	// a gateway that cannot start after its required restart.
+	encoded, err := json.Marshal(onDisk)
+	if err != nil {
+		return fmt.Errorf("encode next-start configuration: %w", err)
+	}
+	checked, err := config.LoadFileBytes(path, encoded)
+	if err != nil {
+		return fmt.Errorf("validate next-start configuration: %w", err)
+	}
+	for name, binding := range checked.LimenBindings() {
+		if _, err := limen.NewBinding(name, binding, http.NotFoundHandler(), checked.Settings); err != nil {
+			return fmt.Errorf("validate next-start limen %q: %w", name, err)
+		}
+	}
+	return r.ReplaceAndPersistAs(running, onDisk, expectedRevision, func(next config.Config) error {
 		if err := writeConfigAtomically(path, next); err != nil {
 			return fmt.Errorf("persist configuration: %w", err)
 		}

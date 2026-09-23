@@ -237,7 +237,7 @@ export function ConfigsPage({ store, onEdit }: { store: ConfigStore; onEdit: (id
     const expectedRecord = records.find(record => record.id === id)?.updated_at;
     if (!(await dialogs.confirm({
       title: "发布配置",
-      message: "当前生效配置将被替换，发布后路由配置会立即进入新的 generation。",
+      message: "完整配置将写入文件；兼容的路由变更立即生效，入口和全局设置变更需重启 Janus。",
       confirmLabel: "确认发布",
       tone: "warning",
       icon: "publish",
@@ -259,11 +259,12 @@ export function ConfigsPage({ store, onEdit }: { store: ConfigStore; onEdit: (id
         try { const body = JSON.parse(text); if (body.error) msg = body.error; } catch {}
         throw new Error(msg);
       }
+      const outcome = await res.json() as { restart_required: boolean; hot_applied: boolean; warning?: string };
       await loadConfigs();
       await store.load();
-      store.setMessage("配置已发布");
+      store.setMessage(`完整配置已写入文件。${outcome.hot_applied ? "路由已生效。" : "路由引用了新入口，当前运行配置未改变。"}${outcome.restart_required ? "重启 Janus 后入口及全局设置生效。" : ""}${outcome.warning ? `配置库提示：${outcome.warning}` : ""}`);
     } catch (e) {
-      store.setMessage(e instanceof Error ? e.message : String(e));
+      store.setMessage(`发布失败：${e instanceof Error ? e.message : String(e)}`);
     }
   }
 

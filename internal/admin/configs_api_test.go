@@ -3,6 +3,7 @@ package admin
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -50,6 +51,7 @@ type libraryFixture struct {
 	handler    http.Handler
 	cookie     *http.Cookie
 	published  *config.Config
+	onDisk     *config.Config
 	revision   uint64
 	publishErr error
 }
@@ -62,7 +64,8 @@ func newLibraryFixture(t *testing.T) *libraryFixture {
 	}
 	current := testVersionedConfig()
 	current.Settings.Admin = config.AdminSettings{Username: "admin", PasswordHash: string(hash)}
-	fixture := &libraryFixture{published: &config.Config{}, revision: 1}
+	persisted := current
+	fixture := &libraryFixture{published: &config.Config{}, onDisk: &persisted, revision: 1}
 	library := openTestLibrary(t)
 	fixture.handler = NewHandlerWithOptions(Options{
 		State:    NewState(),
@@ -83,10 +86,29 @@ func newLibraryFixture(t *testing.T) *libraryFixture {
 			fixture.revision++
 			return nil
 		},
+		PublishStored: func(running, persisted config.Config, expectedRevision uint64) error {
+			if expectedRevision != fixture.revision {
+				return janusruntime.ErrRevisionConflict
+			}
+			if fixture.publishErr != nil {
+				return fixture.publishErr
+			}
+			if err := running.Validate(); err != nil {
+				return err
+			}
+			if err := persisted.Validate(); err != nil {
+				return err
+			}
+			*fixture.onDisk = persisted
+			*fixture.published = running
+			current = running
+			fixture.revision++
+			return nil
+		},
 		Library: library,
 		SaveActive: func(updated config.Config) error {
 			updated.Settings.Admin.PasswordHash = current.Settings.Admin.PasswordHash
-			current = updated
+			*fixture.onDisk = updated
 			return nil
 		},
 	})
@@ -217,7 +239,7 @@ func TestConfigLibrarySupportsTimeFiltersAndOrdering(t *testing.T) {
 	}
 }
 
-func TestConfigLibraryPublishWarnsOnStartupDiff(t *testing.T) {
+func TestConfigLibraryPublishWritesStartupDiff(t *testing.T) {
 	f := newLibraryFixture(t)
 
 	created := f.do(t, http.MethodPost, "/api/v1/configs", `{"name":"with-limen"}`)
@@ -233,11 +255,61 @@ func TestConfigLibraryPublishWarnsOnStartupDiff(t *testing.T) {
 	if published.Code != http.StatusOK {
 		t.Fatalf("publish = %d %s", published.Code, published.Body.String())
 	}
-	if !strings.Contains(published.Body.String(), "limens or settings") {
-		t.Fatalf("publish missing startup warning: %s", published.Body.String())
+	if !strings.Contains(published.Body.String(), `"restart_required":true`) || !strings.Contains(published.Body.String(), `"hot_applied":true`) {
+		t.Fatalf("publish result: %s", published.Body.String())
 	}
 	if len(f.published.Routes) != 1 {
 		t.Fatalf("published routes = %+v", f.published.Routes)
+	}
+	if _, ok := f.onDisk.Limens["extra"]; !ok {
+		t.Fatalf("published file lost extra limen: %+v", f.onDisk.Limens)
+	}
+	if _, ok := f.published.Limens["extra"]; ok {
+		t.Fatal("new listener became active before restart")
+	}
+}
+
+func TestConfigLibraryPublishNewLimenRouteWaitsForRestart(t *testing.T) {
+	f := newLibraryFixture(t)
+	if res := f.do(t, http.MethodPost, "/api/v1/configs", `{"name":"new-listener"}`); res.Code != http.StatusCreated {
+		t.Fatal(res.Body.String())
+	}
+	content := testVersionedConfig()
+	content.Limens["extra"] = config.LimenConfig{Address: "127.0.0.1:8081", Protocols: []string{"http1"}}
+	content.Routes[0].Limen = "extra"
+	content.Routes[0].Name = "on-extra"
+	body, err := json.Marshal(map[string]any{"content": content})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res := f.do(t, http.MethodPut, "/api/v1/configs/1", string(body)); res.Code != http.StatusOK {
+		t.Fatal(res.Body.String())
+	}
+	published := f.do(t, http.MethodPost, "/api/v1/configs/1/publish", "")
+	if published.Code != http.StatusOK || !strings.Contains(published.Body.String(), `"hot_applied":false`) || !strings.Contains(published.Body.String(), `"restart_required":true`) {
+		t.Fatalf("publish = %d %s", published.Code, published.Body.String())
+	}
+	if f.onDisk.Routes[0].Name != "on-extra" || f.onDisk.Routes[0].Limen != "extra" {
+		t.Fatalf("file lost new route: %+v", f.onDisk.Routes)
+	}
+	if f.published.Routes[0].Name != "example-api" {
+		t.Fatalf("current generation changed prematurely: %+v", f.published.Routes)
+	}
+}
+
+func TestConfigLibraryPublishFileErrorKeepsRuntimeAndMarker(t *testing.T) {
+	f := newLibraryFixture(t)
+	if res := f.do(t, http.MethodPost, "/api/v1/configs", `{"name":"new-listener"}`); res.Code != http.StatusCreated {
+		t.Fatal(res.Body.String())
+	}
+	f.publishErr = errors.New("disk full")
+	published := f.do(t, http.MethodPost, "/api/v1/configs/1/publish", "")
+	if published.Code != http.StatusUnprocessableEntity || f.revision != 1 || len(f.published.Routes) != 0 {
+		t.Fatalf("failed publish changed runtime: %d %s", published.Code, published.Body.String())
+	}
+	config := f.do(t, http.MethodGet, "/api/v1/configs/1", "")
+	if !strings.Contains(config.Body.String(), `"status":"draft"`) {
+		t.Fatalf("failed publish changed library marker: %s", config.Body.String())
 	}
 }
 
@@ -257,9 +329,8 @@ func TestConfigLibraryStageLimens(t *testing.T) {
 	if staged.Code != http.StatusOK || !strings.Contains(staged.Body.String(), "restart_required") {
 		t.Fatalf("stage = %d %s", staged.Code, staged.Body.String())
 	}
-	active := f.do(t, http.MethodGet, "/api/v1/config", "")
-	if active.Code != http.StatusOK || !strings.Contains(active.Body.String(), `"extra"`) {
-		t.Fatalf("staged limen missing from active file: %d %s", active.Code, active.Body.String())
+	if _, ok := f.onDisk.Limens["extra"]; !ok {
+		t.Fatalf("staged limen missing from active file: %+v", f.onDisk.Limens)
 	}
 }
 

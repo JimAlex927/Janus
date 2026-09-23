@@ -65,10 +65,11 @@ type Options struct {
 	// Publish must atomically reject a stale expected revision. The console
 	// performs an early check for a clear response, while this callback closes
 	// the check-then-publish race at Runtime's serialization boundary.
-	Publish    func(config.Config, uint64) error
-	Subscribe  func() (<-chan janusruntime.Event, func())
-	Library    *store.Store
-	SaveActive func(config.Config) error
+	Publish       func(config.Config, uint64) error
+	PublishStored func(config.Config, config.Config, uint64) error
+	Subscribe     func() (<-chan janusruntime.Event, func())
+	Library       *store.Store
+	SaveActive    func(config.Config) error
 	// UIBaseURL mounts the console and its API below an absolute path such as
 	// /janus. Empty uses the build-time default, which is root by default.
 	UIBaseURL string
@@ -83,6 +84,7 @@ type Handler struct {
 	discovery      func() map[string]discovery.Status
 	registryHealth func(string, *config.NacosRegistry) discovery.RegistryHealth
 	publish        func(config.Config, uint64) error
+	publishStored  func(config.Config, config.Config, uint64) error
 	subscribe      func() (<-chan janusruntime.Event, func())
 	library        *store.Store
 	saveActive     func(config.Config) error
@@ -111,7 +113,7 @@ func NewHandlerWithOptions(options Options) http.Handler {
 	if baseURL != "" {
 		cookiePath = baseURL + "/"
 	}
-	h := &Handler{state: options.State, metrics: options.Metrics, health: options.Health, current: options.Current, revision: options.Revision, discovery: options.Discovery, registryHealth: options.RegistryHealth, publish: options.Publish, subscribe: options.Subscribe, library: options.Library, saveActive: options.SaveActive, cookiePath: cookiePath, sessions: make(map[string]time.Time)}
+	h := &Handler{state: options.State, metrics: options.Metrics, health: options.Health, current: options.Current, revision: options.Revision, discovery: options.Discovery, registryHealth: options.RegistryHealth, publish: options.Publish, publishStored: options.PublishStored, subscribe: options.Subscribe, library: options.Library, saveActive: options.SaveActive, cookiePath: cookiePath, sessions: make(map[string]time.Time)}
 	console := http.NewServeMux()
 	console.HandleFunc("/", h.ui)
 	console.Handle("/api/v1/auth/login", protectLogin(http.HandlerFunc(h.login)))
