@@ -60,6 +60,26 @@ Keep both `.key` files private. Clients must explicitly trust `rootCA.crt`;
 Janus does not install trust into the operating system. This server CA is not
 automatically used for mTLS client authentication.
 
+Generate certificates independently of gateway configuration (no OpenSSL
+installation required). First create a CA, then sign separate identities:
+
+```powershell
+go run ./cmd/janus cert ca --out .local/pki --name "Janus private CA"
+go run ./cmd/janus cert server --ca .local/pki/ca.crt --ca-key .local/pki/ca.key --hosts "39.104.66.49,127.0.0.1,localhost" --out .local/pki/server
+go run ./cmd/janus cert client --ca .local/pki/ca.crt --ca-key .local/pki/ca.key --name jim-laptop --out .local/pki/clients/jim-laptop
+```
+
+These commands do not read `-config`. `--hosts` is the list of server access
+DNS names/IPs (SANs), without a scheme, port or path. Client `--name` is a
+display identity, not a login, hostname requirement or authorization rule.
+The same CA can sign both identities; separate CAs are optional. Existing
+files are never overwritten. The client command also emits `client.p12` and
+a random `client-password.txt`; protect both and all private keys (on Windows,
+use private NTFS ACLs). Set the Limen's `client_ca_file` to `ca.crt` afterwards.
+No config or OS trust is changed automatically. See the
+[中文证书与 mTLS 使用说明书](docs/certificate-user-guide.zh-CN.md) for the complete workflow,
+or [mTLS setup](docs/mtls.md) for runtime behavior.
+
 ```sh
 go run ./cmd/janus -check -config configs/janus.json
 go run ./cmd/janus -print-effective-config -config configs/janus.json

@@ -14,6 +14,7 @@ require (
 	golang.org/x/term v0.45.0
 	gopkg.in/natefinch/lumberjack.v2 v2.0.0
 	modernc.org/sqlite v1.59.0
+	software.sslmate.com/src/go-pkcs12 v0.7.3
 )
 
 require (

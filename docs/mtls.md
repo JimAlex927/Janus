@@ -1,5 +1,7 @@
 # Limen 双向 TLS（mTLS）
 
+首次使用请阅读 [证书与 mTLS 使用说明书](certificate-user-guide.zh-CN.md)：包含构建、三步签发、Windows/macOS 导入、管理台配置和故障排查。
+
 普通 HTTPS 由客户端验证服务器；mTLS 还要求服务器验证客户端证书。
 Janus 在 Limen 的 TLS 握手层执行认证，不是 Route/Gateway 中间件。
 未通过认证的连接不会进入 HTTP handler，因此不会返回 HTTP 401/403。
@@ -45,10 +47,83 @@ HTTP/1.1、HTTP/2 和 HTTP/3 共用同一客户端信任策略；HTTP/3 仍需 U
 JANUS_UI_BASE_URL=/janus JANUS_OUTPUT=./janus ./scripts/build-app.sh
 ```
 
+## 独立生成 CA，再签发证书
+
+证书工具不依赖 Janus 配置，不读取 `-config`，也不启动网关。先生成 CA，再显式使用它签发服务器或设备证书。
+同一个私有 CA 可以签发两种证书；如果需要隔离用途，也可以自己生成两个 CA，签发时选择不同路径。
+
+以下命令适用于已经重新构建的 `./janus`。也可以用 `go run ./cmd/janus` 替换 `./janus`；
+Windows PowerShell 使用 `.\janus.exe`，路径参数可以使用正斜杠。无需安装 OpenSSL。
+
+```sh
+# 1. 只生成 CA，不生成服务端或客户端证书
+./janus cert ca --out .local/pki --name "Janus private CA"
+
+# 2. 使用这个 CA 签发服务端证书
+./janus cert server --ca .local/pki/ca.crt --ca-key .local/pki/ca.key --hosts "39.104.66.49,127.0.0.1,localhost" --out .local/pki/server
+
+# 3. 使用同一个 CA 签发客户端证书及带密码的 P12 导入包
+./janus cert client --ca .local/pki/ca.crt --ca-key .local/pki/ca.key --name jim-mac --out .local/pki/clients/jim-mac
+```
+
+### hosts 与 name 的区别
+
+- `--hosts` 仅用于服务端证书，写入 SAN。它是**浏览器 URL 中的主机名或 IP**，不含协议、端口、路径。
+  访问 `https://39.104.66.49:44091/vault/` 时需要 `39.104.66.49`，不需要 `44091` 或 `/vault/`。
+  多个地址用逗号分隔；监听地址 `0.0.0.0` / `::` 不是访问地址。
+  客户端验证时，访问地址必须匹配 SAN。仅有 `localhost` 的证书不能用于公网 IP。
+- `--name` 是证书的显示标识（Subject CN）。CA 可以叫 `Janus private CA`，设备可以叫 `jim-mac`。
+  客户端 name 不是系统用户名、不要求与真实电脑名相同，也不是应用登录或授权规则。
+  当前 Janus 验证证书链和用途，并不根据 name 做账号映射或白名单授权。
+- `--out` 决定文件放在哪里。客户端 name 不决定目录，不会从 name 推导文件路径。
+  添加第二台设备时选择不同的输出目录，例如 `--name jim-phone --out .local/pki/clients/jim-phone`。
+
+### 输出与管理台字段
+
+这里的格式叫 **PEM**，不是 perm。`.crt` / `.pem` 只是扩展名，生成的 `ca.crt`、
+`server.crt`、`client.crt` 都是 PEM 公共证书。
+
+| 文件 | 用途 / 对应字段 |
+| --- | --- |
+| `pki/ca.crt` | CA 公共证书：设备用于信任服务器，Limen 的 `client_ca_file` 用于验证设备 |
+| `pki/ca.key` | 签发私钥，管理员保管，网关运行及访问设备都不需要它 |
+| `pki/server/server.crt` | Limen 的 `cert_file` |
+| `pki/server/server.key` | Limen 的 `key_file`，只放服务器 |
+| `pki/clients/jim-mac/client.crt` / `client.key` | 设备的证书和独立私钥，适合程序客户端 |
+| `pki/clients/jim-mac/client.p12` | 设备证书、设备私钥及 CA 公共证书的加密导入包 |
+| `pki/clients/jim-mac/client-password.txt` | 随机导入密码，单独安全传递，不提交 Git |
+
+用上述同一个 CA 签发后，管理台 **Client CA file 填 `ca.crt`**，不要填客户端叶证书、私钥或 P12。
+例如配置文件在项目的 `configs/` 目录时，TLS 配置为：
+
+```json
+{
+  "cert_file": "../.local/pki/server/server.crt",
+  "key_file": "../.local/pki/server/server.key",
+  "client_auth": "require_and_verify",
+  "client_ca_file": "../.local/pki/ca.crt"
+}
+```
+
+**生成命令的路径相对于当前终端目录；网关配置中的相对路径则相对于配置文件目录。**
+证书生成后再手动填写管理台/配置文件、检查并重启；工具不会改配置或安装系统信任。
+每种证书有独立随机生成的私钥，不是从 CA 私钥派生；CA 只负责签名。
+新 CA 默认为 3650 天，叶证书为 365 天，可用 `--days` 指定，叶证书不会超过 CA 的到期时间。
+签发需要已存在、匹配且有效的自签名根 CA 和私钥；CA 缺失时不会偷偷新建一个。
+
+现有文件一律拒绝覆盖；需要续签时输出到新目录，验证后再安排替换，不要删除仍在使用的 CA。
+新建 POSIX 文件使用 0600、目录使用 0700。Windows 上应使用私有目录和 NTFS ACL，
+文件权限位不能代替 ACL。P12 密码文件与未加密 PEM 私钥都属于敏感文件。
+P12 使用 [SSLMate go-pkcs12](https://pkg.go.dev/software.sslmate.com/src/go-pkcs12) 的固定
+`Modern2023` AES/SHA-256 配置及 192-bit 随机密码；密码不打印在终端。
+
+原先提交的 `-init-tls -config ...` 仅作为旧版便捷入口保留；新的独立流程使用 `cert` 子命令。
+之前未发布的 `-init-mtls` 草案已移除。
+
 ## 客户端与验证
 
 每个设备应使用独立的 clientAuth 证书和私钥，可通过带密码的 PKCS#12 (`.p12`) 包安装。
-签发客户端证书建议使用独立私有 CA，避免把宽泛的公共 CA 当设备访问白名单。
+签发客户端证书应使用自己控制的私有 CA，避免把宽泛的公共 CA 当设备访问白名单；可以与服务端共用私有 CA，也可按需要分开。
 信任服务端 CA 与安装客户端证书是两个独立步骤；只有公共 CA 证书不能证明客户端身份。
 CA 私钥不放到访问设备，也不提交 Git。mTLS 不替代 Vault 登录，不自动把证书映射为应用账号。
 
