@@ -10,7 +10,7 @@ type StatusTab = "active" | "draft" | "archived";
 const TAB_LABELS: Record<StatusTab, { label: string; hint: string }> = {
   active: { label: "当前生效", hint: "正在运行的版本" },
   draft: { label: "草稿", hint: "可编辑、可发布" },
-  archived: { label: "历史版本", hint: "可直接回滚" },
+  archived: { label: "历史版本", hint: "可回滚，也可删除" },
 };
 
 export function ConfigsPage({ store, onEdit }: { store: ConfigStore; onEdit: (id: number) => void }) {
@@ -213,10 +213,14 @@ export function ConfigsPage({ store, onEdit }: { store: ConfigStore; onEdit: (id
   }
 
   async function deleteConfig(id: number, name: string) {
+    const record = records.find((item) => item.id === id);
+    const isArchived = record?.status === "archived";
     if (!(await dialogs.confirm({
-      title: "删除配置",
-      message: `确定删除「${name}」吗？该操作不可撤销。`,
-      confirmLabel: "删除配置",
+      title: isArchived ? "删除历史版本" : "删除草稿",
+      message: isArchived
+        ? `确定永久删除历史版本「${name}」吗？删除后将无法再回滚到此版本。`
+        : `确定删除草稿「${name}」吗？该操作不可撤销。`,
+      confirmLabel: isArchived ? "删除历史版本" : "删除草稿",
       tone: "danger",
       icon: "trash",
       context: "DELETE",
@@ -226,7 +230,7 @@ export function ConfigsPage({ store, onEdit }: { store: ConfigStore; onEdit: (id
       if (!res.ok) throw new Error(await res.text());
       if (records.length === 1 && pageNum > 1) setPageNum((page) => page - 1);
       else await loadConfigs();
-      store.setMessage("配置已删除");
+      store.setMessage(isArchived ? "历史版本已删除" : "草稿已删除");
     } catch (e) {
       store.setMessage(e instanceof Error ? e.message : String(e));
     }
@@ -288,8 +292,10 @@ export function ConfigsPage({ store, onEdit }: { store: ConfigStore; onEdit: (id
           )}
           <button type="button" className="btn small" onClick={() => exportConfig(cfg.id, cfg.name)}>导出</button>
           <button type="button" className="btn small" onClick={() => duplicateConfig(cfg.id, cfg.name)}>复制</button>
-          {cfg.status === "draft" && (
-            <button type="button" className="btn small danger" onClick={() => deleteConfig(cfg.id, cfg.name)}>删除</button>
+          {cfg.status !== "active" && (
+            <button type="button" className="btn small danger" onClick={() => deleteConfig(cfg.id, cfg.name)}>
+              {cfg.status === "archived" ? "删除历史" : "删除草稿"}
+            </button>
           )}
         </div>
       </div>

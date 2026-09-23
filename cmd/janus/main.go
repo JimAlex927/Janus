@@ -121,7 +121,7 @@ func run(ctx context.Context, path string, check, printEffective bool, reloadInt
 	var adminListener net.Listener
 	var configLibrary *store.Store
 	if address := c.Settings.Admin.Address; address != "" {
-		configLibrary = openConfigLibrary(filepath.Join(filepath.Dir(path), "janus-configs.db"), c, logger)
+		configLibrary = openConfigLibrary(filepath.Join(filepath.Dir(path), "janus-configs.db"), path, c, logger)
 		adminState = admin.NewState()
 		adminServer = &http.Server{
 			Handler: admin.NewHandlerWithOptions(admin.Options{
@@ -340,12 +340,17 @@ func closeServers(servers []*limen.Limen) {
 // published so the active marker reflects what the gateway actually runs
 // instead of a stale leftover. A failure only disables the library
 // endpoints; the gateway itself keeps serving.
-func openConfigLibrary(dbPath string, startup config.Config, logger *zap.Logger) *store.Store {
+func openConfigLibrary(dbPath, configPath string, startup config.Config, logger *zap.Logger) *store.Store {
 	library, err := store.Open(dbPath)
 	if err != nil {
 		logger.Warn("configuration library unavailable", zap.Error(err))
 		return nil
 	}
+	// The runtime snapshot resolves relative TLS paths for file access. Store
+	// the paths as they should appear in the startup JSON instead, otherwise a
+	// config loaded from "configs/janus.json" can turn "../.local/..." into
+	// ".local/..." in the console and write it back relative to the wrong dir.
+	startup = configPathsForStartupFile(startup, configPath)
 	records, err := library.List()
 	if err != nil {
 		logger.Warn("configuration library unavailable", zap.Error(err))
@@ -374,6 +379,37 @@ func openConfigLibrary(dbPath string, startup config.Config, logger *zap.Logger)
 		}
 	}
 	return library
+}
+
+func configPathsForStartupFile(c config.Config, configPath string) config.Config {
+	configAbs, err := filepath.Abs(configPath)
+	if err != nil {
+		return c
+	}
+	configDir := filepath.Dir(configAbs)
+	limens := make(map[string]config.LimenConfig, len(c.Limens))
+	for name, binding := range c.Limens {
+		if binding.TLS != nil {
+			tls := *binding.TLS
+			for _, path := range []*string{&tls.CertFile, &tls.KeyFile, &tls.ClientCAFile} {
+				if *path == "" || filepath.IsAbs(*path) {
+					continue
+				}
+				assetAbs, err := filepath.Abs(*path)
+				if err != nil {
+					continue
+				}
+				relative, err := filepath.Rel(configDir, assetAbs)
+				if err == nil {
+					*path = filepath.ToSlash(relative)
+				}
+			}
+			binding.TLS = &tls
+		}
+		limens[name] = binding
+	}
+	c.Limens = limens
+	return c
 }
 
 // publishConfig keeps the active file and Runtime generation aligned. Runtime

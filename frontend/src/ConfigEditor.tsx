@@ -64,6 +64,8 @@ const KIND_META: Record<NodeKind, { label: string; color: string; icon: string }
 
 const COLUMN_X: Record<NodeKind, number> = { limen: 0, route: 340, service: 700 };
 const ROW_GAP: Record<NodeKind, number> = { limen: 110, route: 240, service: 150 };
+const LANE_GAP = 56;
+const ROUTE_STEP = 320;
 
 function nodeId(kind: NodeKind, name: string): string {
   return `${kind}:${name}`;
@@ -106,35 +108,63 @@ function autoPosition(kind: NodeKind, index: number): { x: number; y: number } {
 }
 
 /**
- * 一键整理：按 Limen → Route → Service 分层，同层内按引用关系重心排序，
- * 让边尽量不交叉。结果是确定性的（同名排序），反复点击布局不变。
+ * 整理为 Limen 泳道：每个入口及其 Route 占据独立的纵向区域，
+ * 避免不同入口的 Limen → Route 连线彼此穿插。Service 再按上游 Route 的
+ * 重心排序，尽量减少 Route → Service 的交叉。布局确定且可重复。
  */
 function computeTidyPositions(draft: JanusConfig): Record<string, { x: number; y: number }> {
   const positions: Record<string, { x: number; y: number }> = {};
   const limens = Object.keys(draft.limens || {}).sort();
-  limens.forEach((name, index) => {
-    positions[nodeId("limen", name)] = { x: COLUMN_X.limen, y: 20 + index * ROW_GAP.limen };
-  });
-  const limenRank = new Map(limens.map((name, index) => [name, index]));
+  const routesByLimen = new Map(limens.map((name) => [name, [] as Route[]]));
+  const unassigned: Route[] = [];
+  for (const route of draft.routes || []) {
+    const group = route.limen ? routesByLimen.get(route.limen) : undefined;
+    (group || unassigned).push(route);
+  }
+
+  let laneTop = 24;
+  for (const name of limens) {
+    const routes = (routesByLimen.get(name) || []).sort((a, b) => a.name.localeCompare(b.name));
+    const laneHeight = Math.max(176, routes.length * ROUTE_STEP + LANE_GAP);
+    routes.forEach((route, index) => {
+      positions[nodeId("route", route.name)] = { x: COLUMN_X.route, y: laneTop + LANE_GAP / 2 + index * ROUTE_STEP };
+    });
+    // Route nodes are taller than Limen nodes; center the entry alongside its lane.
+    positions[nodeId("limen", name)] = { x: COLUMN_X.limen, y: laneTop + (laneHeight - 96) / 2 };
+    laneTop += laneHeight + LANE_GAP;
+  }
+
+  if (unassigned.length > 0) {
+    const routes = unassigned.sort((a, b) => a.name.localeCompare(b.name));
+    routes.forEach((route, index) => {
+      positions[nodeId("route", route.name)] = { x: COLUMN_X.route, y: laneTop + LANE_GAP / 2 + index * ROUTE_STEP };
+    });
+  }
+
   const routes = [...(draft.routes || [])].sort((a, b) => {
-    const rank = (limenRank.get(a.limen || "") ?? limens.length) - (limenRank.get(b.limen || "") ?? limens.length);
-    return rank !== 0 ? rank : a.name.localeCompare(b.name);
+    const yA = positions[nodeId("route", a.name)]?.y ?? 0;
+    const yB = positions[nodeId("route", b.name)]?.y ?? 0;
+    return yA - yB || a.name.localeCompare(b.name);
   });
-  routes.forEach((route, index) => {
-    positions[nodeId("route", route.name)] = { x: COLUMN_X.route, y: 20 + index * ROW_GAP.route };
-  });
-  const routeRank = new Map(routes.map((route, index) => [route.name, index]));
   const routeServiceOf = (routeName: string) => {
     const route = (draft.routes || []).find((r) => r.name === routeName);
     return route?.action?.forward?.service || route?.service || "";
   };
   const services = Object.keys(draft.services || {}).sort((a, b) => {
-    const rankA = Math.min(...(draft.routes || []).filter((r) => routeServiceOf(r.name) === a).map((r) => routeRank.get(r.name) ?? routes.length), routes.length);
-    const rankB = Math.min(...(draft.routes || []).filter((r) => routeServiceOf(r.name) === b).map((r) => routeRank.get(r.name) ?? routes.length), routes.length);
-    return rankA !== rankB ? rankA - rankB : a.localeCompare(b);
+    const center = (service: string) => {
+      const linked = (draft.routes || []).filter((route) => routeServiceOf(route.name) === service);
+      if (linked.length === 0) return Number.POSITIVE_INFINITY;
+      return linked.reduce((sum, route) => sum + (positions[nodeId("route", route.name)]?.y ?? 0), 0) / linked.length;
+    };
+    return center(a) - center(b) || a.localeCompare(b);
   });
-  services.forEach((name, index) => {
-    positions[nodeId("service", name)] = { x: COLUMN_X.service, y: 20 + index * ROW_GAP.service };
+  let serviceY = 24;
+  services.forEach((name) => {
+    const linkedRouteYs = (draft.routes || []).filter((route) => routeServiceOf(route.name) === name).map((route) => positions[nodeId("route", route.name)]?.y ?? 0);
+    const desiredY = linkedRouteYs.length ? linkedRouteYs.reduce((sum, y) => sum + y, 0) / linkedRouteYs.length : serviceY;
+    serviceY = Math.max(desiredY, serviceY);
+    positions[nodeId("service", name)] = { x: COLUMN_X.service, y: serviceY };
+    serviceY += ROW_GAP.service;
   });
   return positions;
 }
@@ -325,7 +355,8 @@ function ConfigEditor({ store, id, onBack, onStatusChange }: { store: ConfigStor
   }, [id]);
 
   function buildNodes(content: JanusConfig, layout?: Record<string, { x: number; y: number }>): FlowNode[] {
-    const at = (nid: string, kind: NodeKind, index: number) => layout?.[nid] || autoPosition(kind, index);
+    const tidy = computeTidyPositions(content);
+    const at = (nid: string, kind: NodeKind, index: number) => layout?.[nid] || tidy[nid] || autoPosition(kind, index);
     const list: FlowNode[] = [];
     Object.keys(content.limens || {}).forEach((name, index) => {
       const nid = nodeId("limen", name);
