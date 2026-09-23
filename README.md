@@ -42,6 +42,24 @@ curl http://127.0.0.1:8080/api/hello
 On Windows use PowerShell 7 or later. Stop Janus with Ctrl+C. For deployment and
 signal testing, build and run the binary directly instead of using `go run`.
 
+The sample `vault_https` Limen refers to certificate files under
+`.local/vault-tls`. Create a private CA and a CA-signed server certificate once,
+before starting Janus:
+
+```powershell
+go run ./cmd/janus -config configs/janus-admin.example.json -init-tls -tls-limen vault_https
+```
+
+The command writes to the configured `cert_file` and `key_file` paths, places
+`rootCA.crt` and `rootCA.key` beside the server certificate, and refuses to
+overwrite any of those files. The default certificate SAN names come from the
+Limen's listen address; a loopback address also includes `localhost`. If
+clients connect using another DNS name or IP address, pass it when creating
+the certificate, for example `-tls-hosts localhost,127.0.0.1,gateway.example`.
+Keep both `.key` files private. Clients must explicitly trust `rootCA.crt`;
+Janus does not install trust into the operating system. This server CA is not
+automatically used for mTLS client authentication.
+
 ```sh
 go run ./cmd/janus -check -config configs/janus.json
 go run ./cmd/janus -print-effective-config -config configs/janus.json

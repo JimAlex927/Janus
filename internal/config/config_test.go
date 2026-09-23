@@ -30,6 +30,11 @@ func TestStaticActionRequiresSafeLocalPaths(t *testing.T) {
 	if err := base.WithDefaults().Validate(); err != nil {
 		t.Fatalf("valid static action: %v", err)
 	}
+	forwardSlashRoot := filepath.ToSlash(root)
+	base.Routes[0].Action.Static.Root = forwardSlashRoot
+	if err := base.WithDefaults().Validate(); err != nil {
+		t.Fatalf("valid static action with forward slashes: %v", err)
+	}
 	for _, action := range []StaticAction{
 		{Root: "relative/site"},
 		{Root: root + string(filepath.Separator) + ".."},

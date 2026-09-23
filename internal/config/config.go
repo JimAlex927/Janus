@@ -1317,7 +1317,8 @@ func validateStaticAction(action StaticAction) error {
 		return fmt.Errorf("action.static.root must be a non-empty absolute path")
 	}
 	cleanRoot := filepath.Clean(action.Root)
-	if cleanRoot != action.Root {
+	// On Windows, Clean uses backslashes even for an otherwise clean path with forward slashes.
+	if cleanRoot != filepath.FromSlash(action.Root) {
 		return fmt.Errorf("action.static.root must be cleaned")
 	}
 	index := filepath.ToSlash(action.Index)

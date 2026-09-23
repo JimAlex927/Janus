@@ -33,8 +33,24 @@ func main() {
 	path := flag.String("config", "configs/janus-admin.example.json", "configuration file")
 	check := flag.Bool("check", false, "validate configuration and exit")
 	printEffective := flag.Bool("print-effective-config", false, "print normalized configuration without TLS asset paths and exit")
+	initTLS := flag.Bool("init-tls", false, "create a private CA and CA-signed server certificate for a TLS limen, then exit")
+	tlsLimen := flag.String("tls-limen", "", "TLS limen to initialize (optional when only one is configured)")
+	tlsHosts := flag.String("tls-hosts", "", "comma-separated certificate DNS names and IPs (defaults to the limen address)")
 	reloadInterval := flag.Duration("reload-interval", time.Second, "poll interval for versioned configuration and TLS files")
 	flag.Parse()
+	if *initTLS {
+		if *check || *printEffective {
+			fmt.Fprintln(os.Stderr, "-init-tls cannot be combined with -check or -print-effective-config")
+			os.Exit(2)
+		}
+		result, err := initializeTLS(*path, *tlsLimen, *tlsHosts)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "initialize TLS: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("Created CA %s and server certificate %s for limen %q.\nCA SHA-256: %s\nKeep %s and %s private; distribute only the CA certificate to clients.\n", result.CACertFile, result.ServerCertFile, result.Limen, result.CAFingerprint, result.CAKeyFile, result.ServerKeyFile)
+		return
+	}
 	//2、logger init---------------------------------
 	logger, cleanup, err := appLogger.New(appLogger.DefaultConfig())
 	if err != nil {
