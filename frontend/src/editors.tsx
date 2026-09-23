@@ -547,6 +547,27 @@ export function LimenEditor({
               <option value="1.3">TLS 1.3</option>
             </select>
           </Field>
+          <Field label="客户端证书认证（mTLS）" hint="作用于整个 Limen，在 HTTP 路由之前校验；更改模式或客户端 CA 后需重启。">
+            <select aria-label="客户端证书认证（mTLS）" value={limen.tls.client_auth || "none"} onChange={(event) => onChange({
+              ...limen,
+              tls: {
+                ...limen.tls!,
+                client_auth: event.target.value as "none" | "require_and_verify",
+                client_ca_file: event.target.value === "require_and_verify" ? (limen.tls!.client_ca_file || "") : undefined,
+              },
+            })}>
+              <option value="none">关闭 · 普通 HTTPS</option>
+              <option value="require_and_verify">开启 · 强制验证客户端证书</option>
+            </select>
+          </Field>
+          {limen.tls.client_auth === "require_and_verify" && (
+            <>
+              <Field label="Client CA file" hint="服务器上的 PEM CA 公共证书文件；相对路径按配置文件目录解析，不是客户端私钥。">
+                <input aria-label="Client CA file" value={limen.tls.client_ca_file || ""} placeholder="../certs/client-ca.pem" onChange={(event) => onChange({ ...limen, tls: { ...limen.tls!, client_ca_file: event.target.value } })} />
+              </Field>
+              <p className="muted">开启前请在访问设备安装客户端证书及对应私钥；没有有效证书将无法访问此入口，包括登录页。CA 内容修改也需重启，不影响其他 Limen。</p>
+            </>
+          )}
         </>
       )}
       {limen.protocols?.includes("http3") && (

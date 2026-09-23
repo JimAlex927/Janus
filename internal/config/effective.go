@@ -23,6 +23,7 @@ type EffectiveLimen struct {
 type EffectiveTLS struct {
 	Enabled    bool   `json:"enabled"`
 	MinVersion string `json:"min_version,omitempty"`
+	ClientAuth string `json:"client_auth,omitempty"`
 }
 
 type EffectiveService struct {
@@ -49,7 +50,7 @@ func (c Config) EffectiveView() EffectiveConfig {
 			TrustedProxies: append([]string(nil), binding.TrustedProxies...),
 		}
 		if binding.TLS != nil {
-			item.TLS = &EffectiveTLS{Enabled: true, MinVersion: binding.TLS.MinVersion}
+			item.TLS = &EffectiveTLS{Enabled: true, MinVersion: binding.TLS.MinVersion, ClientAuth: binding.TLS.ClientAuth}
 		}
 		if binding.HTTP3 != nil {
 			http3 := binding.HTTP3.WithDefaults()

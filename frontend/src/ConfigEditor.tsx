@@ -37,7 +37,7 @@ import { RegistryManagerModal } from "./RegistryManager";
 import { RouteEditor } from "./RouteEditor";
 import { Badge, Drawer, Empty, useDialogController } from "./ui";
 import type { ConfigStore } from "./useConfig";
-import { validateLocal } from "./validate";
+import { validateLimenTLS, validateLocal } from "./validate";
 import type { JanusConfig, Limen, Middleware, MiddlewareCapability, NacosRegistry, Route, Service } from "./types";
 
 type NodeKind = "limen" | "route" | "service";
@@ -596,6 +596,11 @@ function ConfigEditor({ store, id, onBack, onStatusChange }: { store: ConfigStor
         return;
       }
       const tlsOn = Boolean(editing.value.tls);
+      const tlsErrors = validateLimenTLS(editing.value.tls);
+      if (tlsErrors.length) {
+        store.setMessage(tlsErrors.join("；"));
+        return;
+      }
       if ((protocols.includes("http2") || protocols.includes("http3")) && !tlsOn) {
         store.setMessage("HTTP/2 与 HTTP/3 需要先启用 TLS。");
         return;

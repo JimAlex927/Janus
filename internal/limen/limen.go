@@ -204,6 +204,19 @@ func serverTLSConfig(binding config.LimenConfig, protocols *http.Protocols) (*tl
 	if binding.TLS == nil {
 		return nil, nil, nil
 	}
+	if err := binding.TLS.ValidateClientAuth(); err != nil {
+		return nil, nil, fmt.Errorf("limen TLS client authentication: %w", err)
+	}
+	var clientCAs *x509.CertPool
+	clientAuth := tls.NoClientCert
+	if binding.TLS.ClientAuth == config.ClientAuthRequireAndVerify {
+		var err error
+		clientCAs, err = loadClientCAs(binding.TLS.ClientCAFile)
+		if err != nil {
+			return nil, nil, fmt.Errorf("load limen client CA: %w", err)
+		}
+		clientAuth = tls.RequireAndVerifyClientCert
+	}
 	// One binding has one TLS identity shared by its enabled TCP protocols and
 	// the HTTP/3 adapter. ALPN selects HTTP/2 or HTTP/1.1 on the TLS connection.
 	cert, err := loadTLSKeyPair(binding.TLS.CertFile, binding.TLS.KeyFile)
@@ -230,6 +243,8 @@ func serverTLSConfig(binding config.LimenConfig, protocols *http.Protocols) (*tl
 	return &tls.Config{
 		MinVersion: minVersion,
 		NextProtos: nextProtos,
+		ClientAuth: clientAuth,
+		ClientCAs:  clientCAs,
 		GetCertificate: func(*tls.ClientHelloInfo) (*tls.Certificate, error) {
 			current := certificates.Load()
 			if current == nil {

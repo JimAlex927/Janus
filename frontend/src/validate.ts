@@ -1,5 +1,16 @@
-import type { JanusConfig, Middleware, MiddlewareCapability } from "./types";
+import type { JanusConfig, LimenTLS, Middleware, MiddlewareCapability } from "./types";
 import { routeService } from "./model";
+
+export function validateLimenTLS(tls?: LimenTLS): string[] {
+  if (!tls) return [];
+  const errors: string[] = [];
+  if (!tls.cert_file?.trim() || !tls.key_file?.trim()) errors.push("TLS 需要填写 Certificate file 和 Key file");
+  const mode = tls.client_auth || "none";
+  if (mode !== "none" && mode !== "require_and_verify") errors.push("client_auth 仅支持 none 或 require_and_verify");
+  if (mode === "require_and_verify" && !tls.client_ca_file?.trim()) errors.push("开启 mTLS 必须填写 Client CA file");
+  if (mode === "none" && tls.client_ca_file) errors.push("Client CA file 需要同时开启 mTLS");
+  return errors;
+}
 
 /** 前端本地快速检查：只拦截明显会 422 的问题，细则以后端校验为准。 */
 export function validateLocal(config: JanusConfig, catalog: MiddlewareCapability[] = []): string[] {
@@ -8,6 +19,9 @@ export function validateLocal(config: JanusConfig, catalog: MiddlewareCapability
   const services = config.services || {};
   const middlewares = config.middlewares || {};
   const limens = config.limens || {};
+  for (const [name, limen] of Object.entries(limens)) {
+    errors.push(...validateLimenTLS(limen.tls).map((error) => `Limen ${name}: ${error}`));
+  }
   const capabilityOf = (def: Middleware) => {
     const type = Object.keys(def).find((key) => key !== "scope");
     return catalog.find((item) => item.type === type);
@@ -123,9 +137,7 @@ export function diffSummary(oldConfig: JanusConfig | null, newConfig: JanusConfi
   if (newMw.filter((m) => !oldMw.includes(m)).length) changes.push("中间件有新增");
   if (oldMw.filter((m) => !newMw.includes(m)).length) changes.push("中间件有删除");
 
-  const oldLimens = Object.keys(oldConfig.limens || {});
-  const newLimens = Object.keys(newConfig.limens || {});
-  if (JSON.stringify(oldLimens.sort()) !== JSON.stringify(newLimens.sort())) changes.push("入口（Limen）配置有变更");
+  if (JSON.stringify(oldConfig.limens || {}) !== JSON.stringify(newConfig.limens || {})) changes.push("入口（Limen）配置有变更，需写入文件并重启生效");
   if (JSON.stringify(oldConfig.settings) !== JSON.stringify(newConfig.settings)) changes.push("全局设置有变更");
   if (JSON.stringify(oldConfig.discovery) !== JSON.stringify(newConfig.discovery)) changes.push("注册中心配置有变更");
 

@@ -34,6 +34,13 @@ const config = {
   services: { smoke: { upstreams: ["http://127.0.0.1:1"] } },
   routes: [{ name: "smoke", path_prefix: "/", service: "smoke" }],
 };
+// Opt into the versioned configuration library for interactive editor checks.
+if (process.env.JANUS_SMOKE_VERSIONED === "1") {
+  config.version = 1;
+  config.limens = { smoke: { address: config.listen, protocols: ["http1"] } };
+  delete config.listen;
+  config.routes[0].limen = "smoke";
+}
 const configPath = join(stage, "config.json");
 writeFileSync(configPath, JSON.stringify(config));
 let logs = "";

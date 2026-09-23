@@ -31,6 +31,12 @@ func startTestLimen(t *testing.T, binding config.LimenConfig, handler http.Handl
 	if err != nil {
 		t.Fatal(err)
 	}
+	if l.http3 != nil {
+		if _, err := l.ListenPacket(); err != nil {
+			_ = listener.Close()
+			t.Fatal(err)
+		}
+	}
 	serveDone := make(chan error, 1)
 	go func() { serveDone <- l.Serve(listener) }()
 	t.Cleanup(func() {

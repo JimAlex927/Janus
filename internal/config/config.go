@@ -64,6 +64,32 @@ type TLSSettings struct {
 	CertFile   string `json:"cert_file"`
 	KeyFile    string `json:"key_file"`
 	MinVersion string `json:"min_version,omitempty"`
+	// Client trust is startup-owned, including the contents of ClientCAFile.
+	ClientAuth   string `json:"client_auth,omitempty"`
+	ClientCAFile string `json:"client_ca_file,omitempty"`
+}
+
+const (
+	ClientAuthNone             = "none"
+	ClientAuthRequireAndVerify = "require_and_verify"
+)
+
+// ValidateClientAuth also protects direct Limen constructors that don't load
+// a full Config. Never silently ignore a configured client trust bundle.
+func (s TLSSettings) ValidateClientAuth() error {
+	switch s.ClientAuth {
+	case "", ClientAuthNone:
+		if s.ClientCAFile != "" {
+			return fmt.Errorf("client_ca_file requires client_auth=require_and_verify")
+		}
+	case ClientAuthRequireAndVerify:
+		if strings.TrimSpace(s.ClientCAFile) == "" {
+			return fmt.Errorf("client_auth=require_and_verify requires client_ca_file")
+		}
+	default:
+		return fmt.Errorf("client_auth must be none or require_and_verify")
+	}
+	return nil
 }
 
 // HTTP3Settings controls the inbound QUIC stream budget for an HTTP/3 Limen.
@@ -656,6 +682,9 @@ func LoadFileBytes(path string, data []byte) (Config, error) {
 		}
 		if !filepath.IsAbs(binding.TLS.KeyFile) {
 			binding.TLS.KeyFile = filepath.Join(base, binding.TLS.KeyFile)
+		}
+		if binding.TLS.ClientCAFile != "" && !filepath.IsAbs(binding.TLS.ClientCAFile) {
+			binding.TLS.ClientCAFile = filepath.Join(base, binding.TLS.ClientCAFile)
 		}
 		// Limens own transport protocols (HTTP/1, TLS HTTP/2, and HTTP/3).
 		// Routes select application request shapes such as HTTP, SSE, or the
@@ -1463,6 +1492,9 @@ func validateListenAddress(address string) error {
 func validateTLSSettings(name string, settings *TLSSettings) error {
 	if settings == nil {
 		return nil
+	}
+	if err := settings.ValidateClientAuth(); err != nil {
+		return fmt.Errorf("limen %q TLS: %w", name, err)
 	}
 	if strings.TrimSpace(settings.CertFile) == "" || strings.TrimSpace(settings.KeyFile) == "" {
 		return fmt.Errorf("limen %q TLS requires cert_file and key_file", name)

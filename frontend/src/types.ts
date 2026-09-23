@@ -5,6 +5,8 @@ export interface LimenTLS {
   cert_file: string;
   key_file: string;
   min_version?: string;
+  client_auth?: "none" | "require_and_verify";
+  client_ca_file?: string;
 }
 
 export interface LimenHTTP3 {
