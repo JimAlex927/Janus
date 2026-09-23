@@ -152,7 +152,7 @@ func newTemplate(name string, days int) (*x509.Certificate, crypto.Signer, error
 
 func loadCA(certFile, keyFile string) (*x509.Certificate, crypto.Signer, error) {
 	if certFile == "" || keyFile == "" {
-		return nil, nil, fmt.Errorf("--ca and --ca-key are required; create the CA first with 'janus cert ca'")
+		return nil, nil, fmt.Errorf("--ca and --ca-key are required; create the CA first with 'janus-cert ca'")
 	}
 	read := func(path string) ([]byte, error) {
 		f, err := os.Open(path)

@@ -64,9 +64,9 @@ Generate certificates independently of gateway configuration (no OpenSSL
 installation required). First create a CA, then sign separate identities:
 
 ```powershell
-go run ./cmd/janus cert ca --out .local/pki --name "Janus private CA"
-go run ./cmd/janus cert server --ca .local/pki/ca.crt --ca-key .local/pki/ca.key --hosts "39.104.66.49,127.0.0.1,localhost" --out .local/pki/server
-go run ./cmd/janus cert client --ca .local/pki/ca.crt --ca-key .local/pki/ca.key --name jim-laptop --out .local/pki/clients/jim-laptop
+go run ./cmd/janus-cert ca --out .local/pki --name "Janus private CA"
+go run ./cmd/janus-cert server --ca .local/pki/ca.crt --ca-key .local/pki/ca.key --hosts "39.104.66.49,127.0.0.1,localhost" --out .local/pki/server
+go run ./cmd/janus-cert client --ca .local/pki/ca.crt --ca-key .local/pki/ca.key --name jim-laptop --out .local/pki/clients/jim-laptop
 ```
 
 These commands do not read `-config`. `--hosts` is the list of server access

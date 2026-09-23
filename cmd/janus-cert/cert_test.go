@@ -4,8 +4,6 @@ import (
 	"bytes"
 	"crypto/tls"
 	"crypto/x509"
-	"encoding/json"
-	"flag"
 	"net/http"
 	"os"
 	"os/exec"
@@ -26,8 +24,7 @@ func TestCertCLIHelper(t *testing.T) {
 	}
 	for i, arg := range os.Args {
 		if arg == "--" {
-			os.Args = append([]string{"janus"}, os.Args[i+1:]...)
-			flag.CommandLine = flag.NewFlagSet("janus", flag.ExitOnError)
+			os.Args = append([]string{"janus-cert"}, os.Args[i+1:]...)
 			main()
 			os.Exit(0)
 		}
@@ -43,7 +40,7 @@ func TestIndependentCertCommandsAndMTLS(t *testing.T) {
 	dir := t.TempDir() // Intentionally no gateway config, even at the default path.
 	run := func(args ...string) string {
 		t.Helper()
-		cmd := exec.Command(bin, append([]string{"-test.run=^TestCertCLIHelper$", "--", "cert"}, args...)...)
+		cmd := exec.Command(bin, append([]string{"-test.run=^TestCertCLIHelper$", "--"}, args...)...)
 		cmd.Env = append(os.Environ(), "JANUS_TEST_CERT_CLI=1")
 		cmd.Dir = dir
 		out, err := cmd.CombinedOutput()
@@ -154,18 +151,6 @@ func TestIndependentCertCommandsAndMTLS(t *testing.T) {
 			res.Body.Close()
 			t.Fatal("anonymous client accepted")
 		}
-	}
-	// Exercise the actual -check entry point with a NEW, explicit config.
-	c := config.Config{Version: 1, Limens: map[string]config.LimenConfig{"test": {Address: "127.0.0.1:8443", Protocols: []string{"http1"}, TLS: settings}}, Routes: []config.Route{{Name: "r", Limen: "test", PathPrefix: "/", Action: &config.RouteAction{Respond: &config.RespondAction{Status: 200}}}}}
-	data, _ := json.Marshal(c)
-	path := filepath.Join(dir, "check.json")
-	if err := os.WriteFile(path, data, 0600); err != nil {
-		t.Fatal(err)
-	}
-	cmd := exec.Command(bin, "-test.run=^TestCertCLIHelper$", "--", "-config", path, "-check")
-	cmd.Env = append(os.Environ(), "JANUS_TEST_CERT_CLI=1")
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("check: %v %s", err, out)
 	}
 }
 

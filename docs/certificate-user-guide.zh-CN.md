@@ -1,6 +1,6 @@
 # Janus 证书与 mTLS 使用说明书
 
-适用范围：`janus cert ca / server / client` 独立证书工具及 Limen 的 mTLS 配置。
+适用范围：独立 `janus-cert` 工具（位于 `cmd/janus-cert/`）及 Limen 的 mTLS 配置。
 本说明以私有 CA、TCP 穿透、公网地址 `https://39.104.66.49:44091/vault/` 为例。
 请按自己的访问地址调整，不要照抄到不同部署。
 
@@ -19,36 +19,30 @@
 
 ## 2. 准备可执行文件
 
-在仓库根目录操作。已经有包含 `cert` 子命令的新二进制时，可跳过构建。
-构建需要仓库规定的 Go 工具链、Node.js 和 npm；生成证书本身不依赖 OpenSSL。
+在仓库根目录操作。该工具独立于网关命令，只需 Go 工具链；生成证书不依赖 OpenSSL。
 
 macOS / Linux：
 
 ```sh
-JANUS_UI_BASE_URL=/janus JANUS_OUTPUT=bin/janus ./scripts/build-app.sh
-./bin/janus cert --help
+go build -o bin/janus-cert ./cmd/janus-cert
+./bin/janus-cert --help
 ```
 
-Windows PowerShell 7：
+Windows PowerShell：
 
 ```powershell
-$env:JANUS_UI_BASE_URL = '/janus'
-$env:JANUS_OUTPUT = 'bin/janus.exe'
-./scripts/build-app.ps1
-.\bin\janus.exe cert --help
+go build -o bin/janus-cert.exe ./cmd/janus-cert
+.\bin\janus-cert.exe --help
 ```
 
-`JANUS_UI_BASE_URL=/janus` 保留现有管理台前缀；它是构建参数，不是运行参数。
-以上构建输出到 `bin/`，不会自动替换根目录的旧 `./janus` 或重启正在运行的服务。
-如果只想从源码调用命令，可把下文的 `./bin/janus` 换成 `go run ./cmd/janus`。
-Windows 下把它换成 `.\bin\janus.exe`，其余参数不变；文件参数可使用正斜杠。
+也可直接使用 `go run ./cmd/janus-cert`，不必先生成二进制。
 
 ## 3. 三步生成证书
 
 ### 第一步：只生成 CA
 
 ```sh
-./bin/janus cert ca --out .local/pki --name "Janus private CA"
+./bin/janus-cert ca --out .local/pki --name "Janus private CA"
 ```
 
 输出：`.local/pki/ca.crt` 和 `.local/pki/ca.key`。本步骤不生成服务端或客户端证书。
@@ -57,7 +51,7 @@ CA 名称是显示名称，可以自行修改。CA 默认有效期为 3650 天�
 ### 第二步：使用 CA 签发服务端证书
 
 ```sh
-./bin/janus cert server --ca .local/pki/ca.crt --ca-key .local/pki/ca.key --hosts "39.104.66.49,localhost,127.0.0.1" --out .local/pki/server
+./bin/janus-cert server --ca .local/pki/ca.crt --ca-key .local/pki/ca.key --hosts "39.104.66.49,localhost,127.0.0.1" --out .local/pki/server
 ```
 
 输出：`.local/pki/server/server.crt` 和 `server.key`。
@@ -79,7 +73,7 @@ CA 名称是显示名称，可以自行修改。CA 默认有效期为 3650 天�
 ### 第三步：使用同一个 CA 签发客户端证书
 
 ```sh
-./bin/janus cert client --ca .local/pki/ca.crt --ca-key .local/pki/ca.key --name jim-mac --out .local/pki/clients/jim-mac
+./bin/janus-cert client --ca .local/pki/ca.crt --ca-key .local/pki/ca.key --name jim-mac --out .local/pki/clients/jim-mac
 ```
 
 输出四个文件：`client.crt`、`client.key`、`client.p12`、`client-password.txt`。
@@ -201,7 +195,7 @@ curl --cacert .local/pki/ca.crt https://39.104.66.49:44091/vault/
 新增设备，继续使用同一个 CA，但选择新的输出目录：
 
 ```sh
-./bin/janus cert client --ca .local/pki/ca.crt --ca-key .local/pki/ca.key --name jim-phone --out .local/pki/clients/jim-phone
+./bin/janus-cert client --ca .local/pki/ca.crt --ca-key .local/pki/ca.key --name jim-phone --out .local/pki/clients/jim-phone
 ```
 
 相同 name 可以重复签发，**name 不是唯一设备数据库键**；区分证书应使用序列号/指纹和独立私钥。

@@ -58,13 +58,13 @@ Windows PowerShell 使用 `.\janus.exe`，路径参数可以使用正斜杠。�
 
 ```sh
 # 1. 只生成 CA，不生成服务端或客户端证书
-./janus cert ca --out .local/pki --name "Janus private CA"
+go run ./cmd/janus-cert ca --out .local/pki --name "Janus private CA"
 
 # 2. 使用这个 CA 签发服务端证书
-./janus cert server --ca .local/pki/ca.crt --ca-key .local/pki/ca.key --hosts "39.104.66.49,127.0.0.1,localhost" --out .local/pki/server
+go run ./cmd/janus-cert server --ca .local/pki/ca.crt --ca-key .local/pki/ca.key --hosts "39.104.66.49,127.0.0.1,localhost" --out .local/pki/server
 
 # 3. 使用同一个 CA 签发客户端证书及带密码的 P12 导入包
-./janus cert client --ca .local/pki/ca.crt --ca-key .local/pki/ca.key --name jim-mac --out .local/pki/clients/jim-mac
+go run ./cmd/janus-cert client --ca .local/pki/ca.crt --ca-key .local/pki/ca.key --name jim-mac --out .local/pki/clients/jim-mac
 ```
 
 ### hosts 与 name 的区别

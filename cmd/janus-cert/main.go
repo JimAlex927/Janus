@@ -1,3 +1,5 @@
+// Command janus-cert creates a private CA and issues server/client
+// certificates. It is intentionally independent from the gateway entrypoint.
 package main
 
 import (
@@ -5,21 +7,29 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"os"
 	"time"
 
 	"janus/internal/certutil"
 )
 
+func main() {
+	if err := runCertCommand(os.Args[1:], os.Stdout); err != nil {
+		fmt.Fprintf(os.Stderr, "janus-cert: %v\n", err)
+		os.Exit(1)
+	}
+}
+
 func runCertCommand(args []string, out io.Writer) error {
 	if len(args) == 0 || args[0] == "-h" || args[0] == "--help" {
-		fmt.Fprintln(out, "Usage: janus cert <ca|server|client> [options]\nNo gateway config is read. Use 'janus cert <command> --help' for options.")
+		fmt.Fprintln(out, "Usage: janus-cert <ca|server|client> [options]\nNo gateway config is read. Use 'janus-cert <command> --help' for options.")
 		return nil
 	}
 	kind := args[0]
 	if kind != "ca" && kind != "server" && kind != "client" {
 		return fmt.Errorf("unknown certificate command %q; expected ca, server or client", kind)
 	}
-	flags := flag.NewFlagSet("janus cert "+kind, flag.ContinueOnError)
+	flags := flag.NewFlagSet("janus-cert "+kind, flag.ContinueOnError)
 	flags.SetOutput(out)
 	dir := flags.String("out", "", "required output directory; existing files are never overwritten")
 	defaultDays := 365
