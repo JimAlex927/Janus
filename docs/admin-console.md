@@ -188,9 +188,8 @@ cp frontend/dist/assets/* internal/admin/ui/assets/
 CI runs the same build and comparison before the Go release gate. The tracked
 `internal/admin/ui` files are used by ordinary `go build` and `go test`; a
 successful frontend build alone does not update them. The release scripts
-instead build fresh assets and copy Go source into a temporary directory,
-assemble the embed there, and remove that temporary tree after building.
-Neither a root nor a prefixed release build modifies the tracked embed.
+build fresh assets, replace the tracked embed with them, and compile the Go
+binary from a temporary copy of the source tree that is removed afterwards.
 The shell and PowerShell launchers share `scripts/build-app.mjs` and emit an
 adjacent JSON manifest recording inputs and hashes.
 

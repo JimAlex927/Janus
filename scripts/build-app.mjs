@@ -1,4 +1,4 @@
-// Shared POSIX/PowerShell build. Never rewrite the reviewed Go embed.
+// Shared POSIX/PowerShell build. Refreshes the tracked Go embed before compiling.
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve, relative } from "node:path";
@@ -35,6 +35,11 @@ try {
   run(process.execPath, [join(frontend, "node_modules/typescript/bin/tsc"), "-b"], { cwd: frontend });
   const ui = join(stage, "ui");
   run(process.execPath, [join(frontend, "node_modules/vite/bin/vite.js"), "build", "--outDir", ui], { cwd: frontend });
+  // Refresh the tracked embed so plain `go build` / `go run` serve the same UI.
+  const embed = join(root, "internal", "admin", "ui");
+  rmSync(join(embed, "assets"), { recursive: true, force: true });
+  mkdirSync(join(embed, "assets"), { recursive: true });
+  cpSync(ui, embed, { recursive: true });
   const source = join(stage, "source");
   mkdirSync(source);
   for (const entry of ["go.mod", "go.sum", "cmd", "internal", "pkg"]) {

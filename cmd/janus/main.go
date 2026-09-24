@@ -28,8 +28,20 @@ import (
 )
 
 func main() {
+	defaultConfigFie := "configs/janus-admin.example.json"
+	switch runtime.GOOS {
+	case "windows":
+		defaultConfigFie = "configs/janus-admin.example-windows.json"
+		fmt.Println("Windows")
+	case "linux":
+		fmt.Println("Linux")
+	case "darwin":
+		fmt.Println("macOS")
+	default:
+		fmt.Println("Other OS:", runtime.GOOS)
+	}
 	//1、parse the argument in the exe command-----------
-	path := flag.String("config", "configs/janus-admin.example.json", "configuration file")
+	path := flag.String("config", defaultConfigFie, "configuration file")
 	check := flag.Bool("check", false, "validate configuration and exit")
 	printEffective := flag.Bool("print-effective-config", false, "print normalized configuration without TLS asset paths and exit")
 	initTLS := flag.Bool("init-tls", false, "create a private CA and CA-signed server certificate for a TLS limen, then exit")

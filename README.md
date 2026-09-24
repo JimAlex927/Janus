@@ -89,8 +89,8 @@ go vet ./...
 go build -o bin/janus ./cmd/janus
 ```
 
-To build the Admin Console and compile a small static Janus executable in an
-isolated temporary source tree (without rewriting tracked `go:embed` assets):
+To build the Admin Console, refresh the tracked `go:embed` assets under
+`internal/admin/ui/`, and compile a small static Janus executable:
 
 ```sh
 ./scripts/build-app.sh
