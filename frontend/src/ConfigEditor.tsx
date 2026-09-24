@@ -543,11 +543,27 @@ function ConfigEditor({ store, id, onBack, onStatusChange }: { store: ConfigStor
     setNodes((old) => old.filter((n) => n.id !== nid));
   }
 
+  // 新建的 Limen 尚未被任何 Route 引用；取消创建时直接撤掉，跳过删除守卫。
+  function discardNewLimen(name: string) {
+    mutate((prev) => {
+      const next = { ...(prev.limens || {}) };
+      delete next[name];
+      return { ...prev, limens: next };
+    });
+    setNodes((old) => old.filter((n) => n.id !== nodeId("limen", name)));
+  }
+
   function addFlowNode(kind: NodeKind, position?: { x: number; y: number }) {
     const draft = draftRef.current;
     if (!draft) return;
     if (kind === "limen") {
-      store.setMessage("Limen 是启动级入口；双击已有 Limen 编辑，确认后发布会写入配置文件，重启 Janus 后生效。");
+      const name = uniqueName("limen", Object.keys(draft.limens || {}));
+      const value: Limen = { address: "127.0.0.1:8080", protocols: ["http1"] };
+      mutate((prev) => ({ ...prev, limens: { ...(prev.limens || {}), [name]: value } }));
+      const nid = nodeId("limen", name);
+      const desc = describe({ ...draft, limens: { ...(draft.limens || {}), [name]: value } }, "limen", name);
+      setNodes((old) => [...old, { id: nid, type: "janus", position: position || autoPosition("limen", old.length), data: { kind, name, ...desc, onOpen: () => openEditor(nid) } }]);
+      setEditing({ kind: "limen", name, originalName: name, value, isNew: true });
       return;
     }
     if (kind === "route") {
@@ -1153,7 +1169,7 @@ function routeCoreLabel(route: Route): string {
       {viewMode === "canvas" && <div className="editor-body">
         <aside className="palette">
           <div className="palette-head"><h3>节点</h3><span>拖入画布或点击添加</span></div>
-          {(["route", "service"] as const).map((kind) => (
+          {(["limen", "route", "service"] as const).map((kind) => (
             <div
               key={kind}
               className="palette-item"
@@ -1170,7 +1186,7 @@ function routeCoreLabel(route: Route): string {
           ))}
           <div className="palette-note">
             <strong>连线规则</strong>
-            <span>Limen 展示并编辑当前启动入口</span>
+            <span>Limen 可点击或拖入画布新增</span>
             <span>Limen → Route 指定入口</span>
             <span>Route → Service 设置转发</span>
             <small>中间件在 Route / Service 的编辑器中新建、改参、排序。</small>
@@ -1307,9 +1323,9 @@ function routeCoreLabel(route: Route): string {
           onName={(name) => setEditing((old) => old && old.kind === "limen" ? { ...old, name } : old)}
           onChange={(value) => setEditing((old) => old && old.kind === "limen" ? { ...old, value } : old)}
           onConfirm={confirmEditing}
-          onCancel={() => setEditing(null)}
-          onClose={() => setEditing(null)}
-          onDelete={editing.isNew ? deleteEditing : undefined}
+          onCancel={() => { if (editing.isNew) discardNewLimen(editing.originalName); setEditing(null); }}
+          onClose={() => { if (editing.isNew) discardNewLimen(editing.originalName); setEditing(null); }}
+          onDelete={editing.isNew ? () => { discardNewLimen(editing.originalName); setEditing(null); } : undefined}
         />
       )}
       {mwManager && editing && (editing.kind === "route" || editing.kind === "service") && (
