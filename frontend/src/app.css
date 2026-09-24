@@ -786,8 +786,13 @@ input:focus, select:focus, textarea:focus { outline: 2px solid #c7d0ff; border-c
 .config-tab.active .config-tab-count { background: #4c9b8c; color: #fff; }
 
 .config-table { border: 1px solid #e0e8e3; border-radius: 10px; background: #fff; overflow: hidden; }
-.config-table-head { display: grid; grid-template-columns: minmax(0, 2.2fr) minmax(0, 2fr) minmax(0, 2.6fr); gap: 14px; padding: 10px 18px; background: #f2f5f0; color: #6b8a83; font-size: 11px; font-weight: 750; letter-spacing: .08em; text-transform: uppercase; }
-.config-row { display: grid; grid-template-columns: minmax(0, 2.2fr) minmax(0, 2fr) minmax(0, 2.6fr); gap: 14px; align-items: center; padding: 13px 18px; border-top: 1px solid #eef0f5; transition: background .12s; }
+.config-bulk-actions { display: flex; align-items: center; gap: 12px; min-height: 42px; padding: 6px 12px; border: 1px solid #dce5df; border-radius: 8px; background: #f8fbf7; color: #6b8a83; font-size: 11px; }
+.config-bulk-actions label { display: inline-flex; align-items: center; gap: 7px; cursor: pointer; }
+.config-bulk-actions > span { flex: 1; }
+.config-row-select { display: flex; align-items: center; justify-content: center; }
+.config-row-select input, .config-bulk-actions input { width: 15px; height: 15px; margin: 0; accent-color: #4c9b8c; cursor: pointer; }
+.config-table-head { display: grid; grid-template-columns: 28px minmax(0, 2.2fr) minmax(0, 2fr) minmax(0, 2.6fr); gap: 14px; padding: 10px 18px; background: #f2f5f0; color: #6b8a83; font-size: 11px; font-weight: 750; letter-spacing: .08em; text-transform: uppercase; }
+.config-row { display: grid; grid-template-columns: 28px minmax(0, 2.2fr) minmax(0, 2fr) minmax(0, 2.6fr); gap: 14px; align-items: center; padding: 13px 18px; border-top: 1px solid #eef0f5; transition: background .12s; }
 .config-row:hover { background: #f8fbf7; }
 .config-row.active { background: #f4faf7; box-shadow: inset 3px 0 0 #d18c4e; }
 .config-row-main { display: flex; align-items: center; gap: 10px; min-width: 0; }
@@ -803,7 +808,9 @@ input:focus, select:focus, textarea:focus { outline: 2px solid #c7d0ff; border-c
 
 @media (max-width: 760px) {
   .config-table-head { display: none; }
-  .config-row { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+  .config-row { grid-template-columns: 24px minmax(0, 1fr); gap: 8px; }
+  .config-row-select { grid-column: 1; grid-row: 1 / span 3; align-self: start; padding-top: 3px; }
+  .config-row-main, .config-row-time, .config-row-actions { grid-column: 2; }
   .config-row-actions { justify-content: flex-start; }
   .config-tabs { display: grid; grid-template-columns: 1fr; }
   .config-tab { flex: none; }

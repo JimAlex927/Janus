@@ -26,10 +26,12 @@ export function ConfigsPage({ store, onEdit }: { store: ConfigStore; onEdit: (id
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [selectedIds, setSelectedIds] = useState<number[]>([]);
   const dialogs = useDialogController();
   const loadSequence = useRef(0);
 
   useEffect(() => {
+    setSelectedIds([]);
     loadConfigs().catch(() => undefined);
     // Reload when tab, page, or filters change. Tab switching always starts at page 1.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -228,11 +230,62 @@ export function ConfigsPage({ store, onEdit }: { store: ConfigStore; onEdit: (id
     try {
       const res = await fetch(apiPath(`/api/v1/configs/${id}`), { method: "DELETE" });
       if (!res.ok) throw new Error(await res.text());
+      setSelectedIds((selected) => selected.filter((selectedId) => selectedId !== id));
       if (records.length === 1 && pageNum > 1) setPageNum((page) => page - 1);
       else await loadConfigs();
       store.setMessage(isArchived ? "历史版本已删除" : "草稿已删除");
     } catch (e) {
       store.setMessage(e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  function toggleSelected(id: number, checked: boolean) {
+    setSelectedIds((selected) => checked
+      ? selected.includes(id) ? selected : [...selected, id]
+      : selected.filter((selectedId) => selectedId !== id));
+  }
+
+  function toggleCurrentPage(checked: boolean) {
+    const pageIds = records.filter((record) => record.status !== "active").map((record) => record.id);
+    const pageIdSet = new Set(pageIds);
+    setSelectedIds((selected) => checked
+      ? Array.from(new Set([...selected, ...pageIds]))
+      : selected.filter((id) => !pageIdSet.has(id)));
+  }
+
+  async function deleteSelected() {
+    const selected = records.filter((record) => record.status !== "active" && selectedIds.includes(record.id));
+    if (selected.length === 0) return;
+    const archivedCount = selected.filter((record) => record.status === "archived").length;
+    const draftCount = selected.length - archivedCount;
+    const kinds = [archivedCount ? `${archivedCount} 个历史版本` : "", draftCount ? `${draftCount} 个草稿` : ""].filter(Boolean).join("和");
+    if (!(await dialogs.confirm({
+      title: "批量删除配置",
+      message: `确定永久删除已勾选的 ${kinds} 吗？历史版本删除后将无法回滚。`,
+      confirmLabel: `删除 ${selected.length} 项`,
+      tone: "danger",
+      icon: "trash",
+      context: "DELETE",
+    }))) return;
+
+    let deleted = 0;
+    const failures: string[] = [];
+    for (const record of selected) {
+      try {
+        const response = await fetch(apiPath(`/api/v1/configs/${record.id}`), { method: "DELETE" });
+        if (!response.ok) throw new Error(await response.text());
+        deleted++;
+      } catch {
+        failures.push(record.name);
+      }
+    }
+    setSelectedIds([]);
+    if (records.length === deleted && pageNum > 1) setPageNum((page) => page - 1);
+    await loadConfigs();
+    if (failures.length > 0) {
+      store.setMessage(`已删除 ${deleted} 项；${failures.length} 项删除失败：${failures.join("、")}`);
+    } else {
+      store.setMessage(`已批量删除 ${deleted} 项配置`);
     }
   }
 
@@ -274,7 +327,17 @@ export function ConfigsPage({ store, onEdit }: { store: ConfigStore; onEdit: (id
 
   function renderConfigRow(cfg: ConfigRecord) {
     return (
-      <div key={cfg.id} className={`config-row ${cfg.status}`}>
+      <div key={cfg.id} className={`config-row ${cfg.status}${cfg.status !== "active" ? " selectable" : ""}`}>
+        <span className="config-row-select">
+          {cfg.status !== "active" && (
+            <input
+              type="checkbox"
+              aria-label={`选择配置 ${cfg.name}`}
+              checked={selectedIds.includes(cfg.id)}
+              onChange={(event) => toggleSelected(cfg.id, event.target.checked)}
+            />
+          )}
+        </span>
         <div className="config-row-main">
           <strong className="config-row-name" title={cfg.name}>{cfg.name}</strong>
           <Badge text={cfg.status} variant={cfg.status === "active" ? "success" : cfg.status === "draft" ? "warn" : "default"} />
@@ -358,14 +421,34 @@ export function ConfigsPage({ store, onEdit }: { store: ConfigStore; onEdit: (id
           action={tab === "draft" ? <button className="btn primary" onClick={createConfig}>创建第一个配置</button> : undefined}
         />
       ) : (
-        <div className="config-table">
-          <div className="config-table-head">
-            <span>名称</span>
-            <span>时间</span>
-            <span>操作</span>
+        <>
+          {tab !== "active" && records.length > 0 && (
+            <div className="config-bulk-actions">
+              <label>
+                <input
+                  type="checkbox"
+                  aria-label="选择本页所有可删除配置"
+                  checked={records.some((record) => record.status !== "active") && records.filter((record) => record.status !== "active").every((record) => selectedIds.includes(record.id))}
+                  onChange={(event) => toggleCurrentPage(event.target.checked)}
+                />
+                选择本页
+              </label>
+              <span>{selectedIds.length ? `已选择 ${selectedIds.length} 项` : ""}</span>
+              <button type="button" className="btn small danger" disabled={selectedIds.length === 0} onClick={deleteSelected}>
+                删除所选
+              </button>
+            </div>
+          )}
+          <div className="config-table">
+            <div className="config-table-head">
+              <span></span>
+              <span>名称</span>
+              <span>时间</span>
+              <span>操作</span>
+            </div>
+            {records.map(renderConfigRow)}
           </div>
-          {records.map(renderConfigRow)}
-        </div>
+        </>
       )}
 
       {currentTotal > 0 && (
