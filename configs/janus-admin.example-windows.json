@@ -3,7 +3,7 @@
   "listen": "",
   "limens": {
     "private": {
-      "address": "127.0.0.1:8081",
+      "address": "0.0.0.0:8081",
       "protocols": [
         "http1"
       ]
@@ -72,6 +72,24 @@
         "prefix": "/files"
       }
     },
+    "strip_prefix-2": {
+      "scope": "route",
+      "strip_prefix": {
+        "prefix": "/serviceA"
+      }
+    },
+    "strip_prefix-3": {
+      "scope": "route",
+      "strip_prefix": {
+        "prefix": "/serviceB"
+      }
+    },
+    "strip_prefix-4": {
+      "scope": "route",
+      "strip_prefix": {
+        "prefix": "/serviceC"
+      }
+    },
     "strip_prefix-janus": {
       "scope": "route",
       "strip_prefix": {
@@ -109,6 +127,24 @@
         "http://127.0.0.1:9090"
       ],
       "middlewares": []
+    },
+    "服务A": {
+      "upstreams": [
+        "http://192.168.20.69:18002"
+      ],
+      "middlewares": []
+    },
+    "服务B": {
+      "upstreams": [
+        "http://192.168.20.69:16006"
+      ],
+      "middlewares": []
+    },
+    "服务C": {
+      "upstreams": [
+        "http://192.168.20.69:16008"
+      ],
+      "middlewares": []
     }
   },
   "routes": [
@@ -131,9 +167,49 @@
       ],
       "action": {
         "static": {
-          "root": "C:\\Users\\1\\Downloads",
+          "root": "C:\\Users\\1\\Desktop\\问题容器\\ZF图纸识别\\测试用例",
           "index": "index.html",
-          "spa_fallback": true
+          "spa_fallback": true,
+          "directory_listing": true
+        }
+      }
+    },
+    {
+      "name": "服务A",
+      "limen": "private",
+      "match": "PathPrefix(`/serviceA`)",
+      "middlewares": [
+        "strip_prefix-2"
+      ],
+      "action": {
+        "forward": {
+          "service": "服务A"
+        }
+      }
+    },
+    {
+      "name": "服务B",
+      "limen": "private",
+      "match": "PathPrefix(`/serviceB`)",
+      "middlewares": [
+        "strip_prefix-3"
+      ],
+      "action": {
+        "forward": {
+          "service": "服务B"
+        }
+      }
+    },
+    {
+      "name": "服务C",
+      "limen": "private",
+      "match": "PathPrefix(`/serviceC`)",
+      "middlewares": [
+        "strip_prefix-4"
+      ],
+      "action": {
+        "forward": {
+          "service": "服务C"
         }
       }
     }
