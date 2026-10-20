@@ -12,6 +12,8 @@
 *.tsbuildinfo
 /.playwright-cli/
 /.local/
+/.env
+/deploy/docker/data/
 /output/playwright/
 /output/qualification/
 # Runtime SQLite configuration library (created next to the active config).

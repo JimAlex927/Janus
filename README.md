@@ -121,6 +121,8 @@ It produces `bin\janus.exe` by default and accepts the same
 `JANUS_OUTPUT`, `GOOS`, `GOARCH`, `JANUS_INSTALL_DEPS`, and `JANUS_UPX`
 environment variables.
 
+For a Docker Desktop deployment, see [deploy/docker/README.md](deploy/docker/README.md).
+
 Set `JANUS_UI_BASE_URL=/janus` before either build command to mount the Admin
 Console below `/janus/`. The Go handler supplies the mount in the HTML base;
 the same portable frontend assets resolve API requests and events at that

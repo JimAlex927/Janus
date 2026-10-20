@@ -1,0 +1,39 @@
+services:
+  janus:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: janus:local
+    container_name: janus
+    restart: unless-stopped
+    init: true
+    command: ["-config", "/etc/janus/janus.json"]
+    stop_grace_period: 45s
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m
+    ports:
+      - "8081:8081"
+      - "127.0.0.1:9090:9090"
+    volumes:
+      - type: bind
+        source: ./deploy/docker/data
+        target: /etc/janus
+      - type: bind
+        source: ${JANUS_FILES_DIR:-./files}
+        target: /srv/janus/files
+        read_only: true
+        bind:
+          create_host_path: true
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      janus-net:
+        ipv4_address: 172.31.240.2
+
+networks:
+  janus-net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.31.240.0/24
