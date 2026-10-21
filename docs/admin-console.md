@@ -6,13 +6,15 @@ binary embeds the resulting static files under `internal/admin/ui/`.
 
 ## Configuration
 
-Set `settings.admin.address` to enable the listener. The address must be a
-loopback or private-network address. Set `username` and a bcrypt
-`password_hash` to enable login protection and configuration publishing:
+Set `settings.admin.address` to enable the listener. It may be a loopback,
+private-network, or wildcard bind address (`0.0.0.0:9090` / `[::]:9090`). A
+wildcard bind requires both `username` and a bcrypt `password_hash`; keep the
+published port restricted to trusted clients. For example, Docker can bind on
+all interfaces inside the container while publishing only on host loopback:
 
 ```json
 "admin": {
-  "address": "192.168.10.20:9090",
+  "address": "0.0.0.0:9090",
   "username": "admin",
   "password_hash": "$2a$..."
 }

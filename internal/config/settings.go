@@ -268,6 +268,9 @@ func (s Settings) Validate() error {
 		if (s.Admin.Username == "") != (s.Admin.PasswordHash == "") {
 			return fmt.Errorf("admin.username and admin.password_hash must be configured together")
 		}
+		if isWildcardAdminAddress(s.Admin.Address) && s.Admin.Username == "" {
+			return fmt.Errorf("admin.username and admin.password_hash are required for wildcard admin.address")
+		}
 		if s.Admin.PasswordHash != "" {
 			if !strings.HasPrefix(s.Admin.PasswordHash, "$2") {
 				return fmt.Errorf("admin.password_hash must be a bcrypt hash")
@@ -328,14 +331,20 @@ func validateAdminAddress(address string) error {
 	if err != nil || portNumber < 1 || portNumber > 65535 {
 		return fmt.Errorf("port must be between 1 and 65535")
 	}
-	if host == "" {
-		return fmt.Errorf("wildcard addresses are not allowed")
-	}
 	ip := net.ParseIP(host)
-	if ip == nil || (!ip.IsLoopback() && !ip.IsPrivate()) {
+	if ip == nil || (!ip.IsUnspecified() && !ip.IsLoopback() && !ip.IsPrivate()) {
 		return fmt.Errorf("must be a loopback or private address")
 	}
 	return nil
+}
+
+func isWildcardAdminAddress(address string) bool {
+	host, _, err := net.SplitHostPort(address)
+	if err != nil {
+		return false
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsUnspecified()
 }
 
 func validateLoopbackAddress(address string) error {

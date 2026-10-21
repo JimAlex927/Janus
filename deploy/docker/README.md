@@ -42,12 +42,12 @@ container.
 
 ## Network settings
 
-Compose assigns Janus `172.31.240.2` because the Admin Console only permits a
-loopback or private bind address. The matching config address is
-`172.31.240.2:9090`; Compose forwards the host's loopback port 9090 to it. If
-that subnet overlaps an existing Docker or LAN network, choose another unused
-private subnet in `compose.yaml` and update the Admin address in
-`deploy/docker/data/janus.json` to the new Janus container IP.
+The Admin Console may bind `0.0.0.0:9090` inside the container, but a wildcard
+bind requires a configured username and bcrypt password hash. Compose publishes
+the Admin port only on host loopback (`127.0.0.1:9090:9090`), so access it from
+the Docker host at `http://127.0.0.1:9090`. If you change the port mapping to
+publish on other host interfaces, restrict access with your firewall or a
+trusted TLS reverse proxy.
 
 The current config enables HTTP/1 on port 8081. If you enable HTTP/3 later,
 publish the configured UDP port in `compose.yaml` as well.

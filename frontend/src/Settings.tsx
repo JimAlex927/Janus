@@ -135,7 +135,7 @@ export function SettingsPage({ store }: { store: ConfigStore }) {
         </div>
         <div className="card">
           <h3>管理 admin</h3>
-          <Field label="address" hint="回环或私网地址，修改后需重启"><input {...text("admin", "address")} placeholder="127.0.0.1:9090" /></Field>
+          <Field label="address" hint="支持回环、私网或 0.0.0.0；通配监听必须配置账号和密码，修改后需重启"><input {...text("admin", "address")} placeholder="127.0.0.1:9090" /></Field>
           <Field label="username"><input {...text("admin", "username")} placeholder="admin" /></Field>
           <Field label="cookie_secure" hint="管理台经 HTTPS 访问（包括可信反向代理终止 TLS）时启用；不信任客户端转发头"><select {...text("admin", "cookie_secure", "bool")}><option value="">默认：仅直接 TLS</option><option value="true">始终 Secure</option><option value="false">仅直接 TLS</option></select></Field>
           <p className="muted">password_hash 不在此显示；改密码请用 janus-hash 生成后写入配置文件并重启。</p>

@@ -689,7 +689,7 @@ func TestSettingsRejectInvalidBounds(t *testing.T) {
 	}
 }
 
-func TestAdminAddressMustBeLoopbackOrPrivate(t *testing.T) {
+func TestAdminAddressMustBeLoopbackPrivateOrAuthenticatedWildcard(t *testing.T) {
 	base := `{"listen":"127.0.0.1:8080","settings":{"admin":{"address":"127.0.0.1:9090"}},"services":{"s":{"upstreams":["http://localhost:9000"]}},"routes":[{"name":"r","path_prefix":"/api","service":"s"}]}`
 	if _, err := Load(strings.NewReader(base)); err != nil {
 		t.Fatal(err)
@@ -702,6 +702,17 @@ func TestAdminAddressMustBeLoopbackOrPrivate(t *testing.T) {
 				t.Fatal("expected invalid admin address")
 			}
 		})
+	}
+}
+
+func TestAdminWildcardAddressRequiresCredentials(t *testing.T) {
+	base := `{"listen":"127.0.0.1:8080","settings":{"admin":{"address":"0.0.0.0:9090"}},"services":{"s":{"upstreams":["http://localhost:9000"]}},"routes":[{"name":"r","path_prefix":"/api","service":"s"}]}`
+	if _, err := Load(strings.NewReader(base)); err == nil || !strings.Contains(err.Error(), "required for wildcard") {
+		t.Fatalf("expected wildcard admin credentials error, got %v", err)
+	}
+	withCredentials := strings.Replace(base, `"address":"0.0.0.0:9090"`, `"address":"0.0.0.0:9090","username":"admin","password_hash":"$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy"`, 1)
+	if _, err := Load(strings.NewReader(withCredentials)); err != nil {
+		t.Fatalf("expected wildcard admin address with credentials to be valid, got %v", err)
 	}
 }
 
