@@ -38,7 +38,7 @@
       "disable_compression": true
     },
     "admin": {
-      "address": "172.31.240.2:9090",
+      "address": "0.0.0.0:9090",
       "username": "admin",
       "password_hash": "$2a$10$CnflajovpvVzgJ64FhyWRekUxAwDK6cemVBok7FE9qgoE7PM1yIvO"
     },

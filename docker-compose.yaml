@@ -28,12 +28,12 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     networks:
-      janus-net:
-        ipv4_address: 172.31.240.2
+      - janus-net
+#        ipv4_address: 172.31.240.2
 
 networks:
   janus-net:
     driver: bridge
-    ipam:
-      config:
-        - subnet: 172.31.240.0/24
+#    ipam:
+#      config:
+#        - subnet: 172.31.240.0/24
